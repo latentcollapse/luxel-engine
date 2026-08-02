@@ -132,19 +132,10 @@ replaces the bordering mountains hugging the outer lanes, freeing that space for
 jungle and camps. That rework is not done and is worth doing before the map is
 balanced.
 
-Raise a perimeter landform so the playable region is closed. The design decision
-is already made (a straight rectangular wall at the map rect, not mountains
-hugging the lanes) and **the gate already exists**: `boundary_plan` reports
-`NOT ENCLOSED — 756 m of world edge across 7 spans` today.
-
-This is the cheapest visible win on the board: the measurement is written, the
-generator is not. Generate, re-measure, iterate until `enclosed: true`, then turn
-on `--require-enclosed`.
-
-**Authored:** wall character (cliff, ridge, escarpment), height range, whether
-the border is diegetic terrain or a hard edge.
-**Derived:** everything else — profile, footprint, where it must thicken to close
-a leak span.
+**Authored:** wall character (escarpment or ridge), height, crest and face
+depth, how much clearance a landmark is owed.
+**Derived:** the per-cell depth field, where the rampart must pinch to avoid
+burying something, the face profile, and the protected-relief footprint.
 
 ---
 
@@ -431,7 +422,7 @@ Ordered by dependency and by payoff, not by size:
 
 | Order | System | Tier | Why here |
 |---|---|---|---|
-| 1 | [S4](#s4-border-enclosure) Border enclosure | Green | Gate already written; immediate visible payoff; no dependencies |
+| 1 | ~~[S4](#s4-border-enclosure--done-2026-08-02) Border enclosure~~ **DONE 2026-08-02** | Green | Gate already written; immediate visible payoff; no dependencies |
 | 2 | [S1](#s1-site-conditions-field) Site conditions | Blue | The spine — everything after this reads it |
 | 3 | [S2](#s2-hydrology) Hydrology | Red | Largest single win; fixes D20; unblocks ecology |
 | 4 | [S7](#s7-surface-materials) Surfacing + [S5](#s5-snow-and-ice-line) Snow | Yellow/Grey | Cheap once S1+S2 exist; large visual return |
