@@ -293,8 +293,39 @@ basin, which water is gameplay-relevant.
 
 ## Ecology and surfacing
 
-### S6. Forestry and vegetation ecology
+### S6. Forestry and vegetation ecology — **v1 DONE 2026-08-02**
 **Tier: Orange · Who: O · Depends on: S1, S2**
+
+`forestry.py` + `vegetation_plan.json`. Five niches — montane conifer,
+subalpine krummholz, riparian broadleaf, bog sedge, heath scrub — each declaring
+an elevation band, slope limit, wetness range, light preference and exposure
+tolerance, scored against S1's field and resolved by competition.
+
+Three choices worth keeping:
+
+- **Terms multiply, they do not average.** A plant that cannot stand the wet
+  does not partly grow in a bog because the elevation suited it. Any single
+  intolerable condition is fatal, which is what a product expresses.
+- **Bands are soft.** A treeline is a hundred metres of thinning and stunting,
+  not a line where forest stops. Hard thresholds are what make procedural
+  vegetation look stamped.
+- **Bare ground is a feature.** Below a suitability floor nothing takes the
+  cell, rather than it going to whichever family scored least badly. A map with
+  no clearings reads as a carpet.
+
+Niches are declared in *fractions of relief*, not metres, so they transfer
+between a 60 m map and a 600 m one without re-authoring.
+
+**Calibration is open, and the current numbers say so.** On the alpine arena
+heath scrub takes 69.5% of the map and canopy only 7%, because the world is now
+mostly cliff and the conifer's 34 degree slope limit excludes it. That may be
+honest for this map or it may mean the niches are tuned for gentler ground —
+it wants checking against a second world before the bands are trusted.
+
+**Still open:** placement does not read this yet. `render_plan.rs::compile_foliage`
+still scatters into authored polygons at a declared spacing, so the plan is
+measured and emitted but not yet obeyed. Wiring the suitability field into the
+scatter is the remaining half and is where it becomes visible.
 
 Today foliage is scattered into authored polygons at a declared spacing. That is
 placement, not ecology, and it cannot produce a treeline, a riparian fringe, or

@@ -26,6 +26,7 @@ from boundary_plan import write as write_boundary_plan
 from collision_plan import build as build_collision_plan
 from navigation_plan import write as write_navigation_plan
 from silhouette import from_batch as measure_silhouette
+from forestry import build as build_vegetation
 from hydrology import build as build_hydrology
 from site_conditions import write as write_site_conditions
 from collision_acceptance import evaluate as evaluate_collision
@@ -999,6 +1000,24 @@ def build(
             hydrology["water_area_m2"],
             hydrology["channel_area_m2"],
             (hydrology["outlet"] or {}).get("edge", "none"),
+        )
+    )
+
+    # Systems S6. Reads the site conditions field and the water S2 found, so a
+    # bog gets sedge and a shaded flank gets more forest than the baked one
+    # beside it -- none of which is authored anywhere.
+    vegetation = build_vegetation(batch_dir)
+    _write(batch_dir / "vegetation_plan.json", vegetation)
+    dominant = max(vegetation["families"], key=lambda f: f["area_m2"])
+    print(
+        "  vegetation: %d families, canopy %.0f m2, bare %.0f%%, treeline %s m "
+        "(dominant %s)"
+        % (
+            len(vegetation["families"]),
+            vegetation["canopy_area_m2"],
+            vegetation["bare_fraction"] * 100.0,
+            vegetation["measured_treeline_m"],
+            dominant["key"],
         )
     )
 
