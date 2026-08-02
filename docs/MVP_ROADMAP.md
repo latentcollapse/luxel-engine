@@ -246,6 +246,20 @@ leak spans, and a straight border either closes all four edges or it does not.
 
 ---
 
+## The algorithmic layer
+
+Phases 1–2 make a map playable. **[SYSTEMS_ROADMAP.md](SYSTEMS_ROADMAP.md)** is
+the inventory of what makes it *good*, and it subsumes several items here:
+border enclosure (2.5) is S4, and most of Phase 2's gameplay derivation (2.1–2.4)
+is S12 and blocked on route and siting solvers.
+
+Its organising claim is the one this project keeps rediscovering the hard way:
+anything with a correct answer belongs in a solver, not in an author's hands.
+The model owns intent and taste; algorithms own everything derivable; tooling
+owns the boundary and phrases disagreements as repairs.
+
+---
+
 ## Phase 3 — Prove it generalises
 
 | # | Task | Who | Tier |
