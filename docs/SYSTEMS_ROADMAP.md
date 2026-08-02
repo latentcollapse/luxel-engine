@@ -98,8 +98,39 @@ the same heightfield.
 
 ---
 
-### S4. Border enclosure
-**Tier: Green · Who: S · Depends on: nothing · Roadmap 2.5**
+### S4. Border enclosure — **DONE 2026-08-02**
+**Tier: Green · Who: O · Depends on: nothing · Roadmap 2.5**
+
+`zone_rasterizer._border_rampart`, authored through `border_policy`
+(`enabled`, `profile`, `height_m`, `crest_m`, `inner_face_m`,
+`landmark_clearance_m`). `boundary_plan` now reports `enclosed: true`, zero leak
+spans, `edge_reach_fraction 0.0` — from 756 m across seven spans — and
+`build_zone` **fails** rather than warns if that regresses.
+
+Three things it taught, all recorded in the tests:
+
+- **Depth is a field, not a number.** A single global depth is set by whichever
+  landmark sits nearest the edge; one watchpost 28 m from the west edge thinned
+  the border on all four edges. Per-cell, the rampart runs full depth where
+  there is room and pinches only around that landmark's exclusion disc — and
+  pinching is safe, because the same height over a shorter face is steeper.
+- **The rampart is `protected_relief`, not `background`.** Left untagged, the
+  terrain accessibility gate measured its face as walkable ground that happens
+  to be a cliff, and the build failed *for closing the world* (p99 grade
+  1.69 → 7.15).
+- **A linear face fails at its own toe.** The face is unwalkable by design, but
+  the cells where it meets flat ground are walkable, and a grade discontinuity
+  there is a measured defect (1.69 → 2.65). Smoothstep arrives tangentially.
+
+Height turned out to be a purely visual parameter — the face angle is what stops
+a body — and 42 m shadowed the apron badly enough to fail the black-pixel gate
+at 13.1% against an 8% limit. 26 m passes at 7.5% and reads as a rim.
+
+**Cost:** playable area fell from 44,993 m² to 34,860 m² (68% → 53% of the
+world). The rampart is currently *additive*; roadmap 2.5's intent was that it
+replaces the bordering mountains hugging the outer lanes, freeing that space for
+jungle and camps. That rework is not done and is worth doing before the map is
+balanced.
 
 Raise a perimeter landform so the playable region is closed. The design decision
 is already made (a straight rectangular wall at the map rect, not mountains

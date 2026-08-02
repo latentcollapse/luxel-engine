@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -607,6 +608,132 @@ def _carve_hydrology(
             lowered = result * (1.0 - influence) + conformed * influence
             result = np.minimum(result, lowered)
     return result.astype(np.float32, copy=False)
+
+
+def _border_rampart(
+    height: np.ndarray,
+    x: np.ndarray,
+    z: np.ndarray,
+    features: list[dict[str, Any]],
+    width: float,
+    length: float,
+    policy: dict[str, Any],
+) -> tuple[np.ndarray, dict[str, Any], np.ndarray]:
+    """Close the world at its own edge (roadmap 2.5 / systems S4).
+
+    A world whose terrain stops at the data edge does not contain its players:
+    `boundary_plan` reports the walkable spans that leak, and the alpine arena
+    leaks its entire north and south edges. This raises the landform that closes
+    them.
+
+    **Geometry is the boundary, deliberately.** An invisible wall would be a
+    per-backend hack re-authored for Godot, Unity and Unreal separately, and it
+    would make the leak untestable -- `boundary_plan` measures terrain, so a
+    barrier it cannot see is a barrier that does not exist as far as the
+    compiler is concerned.
+
+    The rampart is a crest at the map edge falling to playable ground over
+    `inner_face_m`. That face is what does the work: a body cannot stand on
+    ground steeper than the agent's slope limit, so height/face must exceed it.
+    Thinner is steeper, and therefore safer -- which is why encroachment is the
+    thing that gets clamped when a landmark sits near the edge, not the height.
+    """
+    report: dict[str, Any] = {
+        "enabled": bool(policy.get("enabled", True)),
+        "profile": str(policy.get("profile", "escarpment")),
+    }
+    if not report["enabled"]:
+        report["reason"] = "border_policy.enabled is false"
+        return height, report, np.zeros(height.shape, dtype=bool)
+
+    crest = float(policy.get("crest_m", 9.0))
+    face = float(policy.get("inner_face_m", 16.0))
+    peak = float(policy.get("height_m", 42.0))
+    clearance = float(policy.get("landmark_clearance_m", 10.0))
+    minimum_face = 3.0
+
+    half_width, half_length = width * 0.5, length * 0.5
+    inward = np.minimum(half_width - np.abs(x), half_length - np.abs(z))
+
+    # **How far the rampart may reach is a field, not a number.** A single global
+    # depth is set by whichever landmark sits closest to the edge, which on this
+    # map is one watchpost -- and it would thin the entire border, on all four
+    # edges, to satisfy one corner. Solving it per-cell lets the rampart run
+    # full depth everywhere there is room and pinch only where it must.
+    #
+    # Pinching is safe in the direction that matters: the same height over a
+    # shorter face is a *steeper* face, and steeper is what stops a body. The
+    # thing that must never happen is burying a landmark, so that is what the
+    # field protects.
+    allowed = np.full(inward.shape, crest + face, dtype=np.float64)
+    limiting: str | None = None
+    tightest = math.inf
+    for feature in features:
+        if feature.get("category") != "landmark":
+            continue
+        points = (feature.get("geometry") or {}).get("points") or []
+        if not points:
+            continue
+        radius = float(
+            (feature.get("properties") or {}).get("scatter_exclusion_radius_m", 0.0)
+        )
+        for point in points:
+            keep_out = radius + clearance
+            reach = np.hypot(x - float(point[0]), z - float(point[1])) - keep_out
+            allowed = np.minimum(allowed, reach)
+            edge_distance = min(
+                half_width - abs(float(point[0])), half_length - abs(float(point[1]))
+            )
+            if edge_distance - keep_out < tightest:
+                tightest, limiting = edge_distance - keep_out, str(feature.get("id"))
+    allowed = np.clip(allowed, minimum_face, crest + face)
+    if tightest < crest + face:
+        report["encroachment_limited_by"] = limiting
+        report["tightest_landmark_room_m"] = round(float(tightest), 3)
+
+    # Ramp completes inside whatever depth this cell was allowed.
+    ramp = np.minimum(face, allowed)
+    fraction = np.clip((allowed - inward) / np.maximum(ramp, 1e-6), 0.0, 1.0)
+    if report["profile"] == "ridge":
+        shape = 0.5 - 0.5 * np.cos(np.pi * fraction)
+    else:
+        # Smoothstep, not a linear ramp. A linear face meets flat ground at a
+        # grade discontinuity, and the terrain accessibility gate measures the
+        # steepness of *walkable* ground -- the toe cells are walkable, so a
+        # hard corner there fails the gate (measured: p99 grade 1.69 -> 2.65).
+        # A smoothstep toe leaves the face just as unwalkable while arriving at
+        # the valley floor tangentially, which is also what an escarpment
+        # actually looks like.
+        shape = fraction * fraction * (3.0 - 2.0 * fraction)
+    rampart = peak * shape
+
+    report.update(
+        {
+            "crest_m": round(crest, 3),
+            "inner_face_m": round(face, 3),
+            "height_m": round(peak, 3),
+            "maximum_depth_m": round(float(allowed.max()), 3),
+            "minimum_depth_m": round(float(allowed.min()), 3),
+            # Steepest the face gets: smoothstep peaks at 1.5x its mean slope.
+            "peak_face_degrees": round(
+                math.degrees(math.atan2(peak * 1.5, max(float(allowed.min()), 1e-6))), 2
+            ),
+        }
+    )
+    # The rampart is deliberately unwalkable terrain, so it is tagged as
+    # protected relief exactly like the massif. Without that it lands in
+    # `background`, the accessibility gate measures its face as walkable ground
+    # that happens to be a cliff, and closing the world fails the gate that
+    # exists to keep the world walkable -- measured: p99 grade 1.69 -> 7.15.
+    #
+    # The threshold leaves the shallow toe unprotected on purpose. That part is
+    # gentle, genuinely walkable, and should be held to the same standard as
+    # any other ground; exempting it would be the gate excusing itself.
+    footprint = rampart > 0.5
+    report["protected_area_m2"] = round(
+        float(footprint.sum()) * (width / (rampart.shape[1] - 1)) * (length / (rampart.shape[0] - 1)), 1
+    )
+    return height + rampart.astype(height.dtype), report, footprint
 
 
 def _flatten_landmark_pads(
@@ -1579,6 +1706,12 @@ def rasterize_zone_spec(
     # be a gameplay grade, not merely a different colour painted over crags.
     # Broadly smoothing the authored terrain preserves large-scale elevation
     # while removing obstacle-scale spikes from the full lane width.
+    # The world closes itself before roads and water are reconciled, so a route
+    # or a channel authored to reach the edge still cuts its own notch through
+    # the rampart rather than being buried by it.
+    height, border_report, border_footprint = _border_rampart(
+        height, x, z, features, width, length, zone_spec.get("border_policy") or {}
+    )
     height = _flatten_landmark_pads(height, x, z, features)
     height = _grade_corridors(height, x, z, features, width, length)
     height = _carve_hydrology(height, x, z, features, width, length)
@@ -1658,6 +1791,9 @@ def rasterize_zone_spec(
 
     protected_relief_mask = np.zeros(height.shape, dtype=np.uint8)
     semantic_region_mask = np.zeros(height.shape, dtype=np.uint8)
+    if border_footprint.any():
+        protected_relief_mask[border_footprint] = 255
+        semantic_region_mask[border_footprint] |= REGION_PROTECTED_RELIEF
     for feature, mask in landform_masks:
         if bool(feature.get("properties", {}).get("traversable", False)):
             semantic_region_mask[mask] |= REGION_TRAVERSABLE_LANDFORM
@@ -1703,6 +1839,11 @@ def rasterize_zone_spec(
         "zone_id": zone["id"],
         "resolution": resolution,
         "world_bounds_m": {"width": width, "length": length},
+        # What the border solver actually built, including whether a landmark
+        # forced it to give ground. `boundary_plan` says whether it worked;
+        # this says what was attempted, so a still-leaking world is diagnosable
+        # without re-deriving the rampart by hand.
+        "border": border_report,
         "height_range_m": {"min": round(float(height.min()), 3), "max": round(float(height.max()), 3)},
         "artifacts": {
             "heightmap_16": "heightmap_16.png",

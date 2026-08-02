@@ -954,19 +954,32 @@ def build(
             % len(collision_acceptance["failures"])
         )
     # Measures where the spec's own agent can actually get, and reports the
-    # spans of world edge it can walk off. Deliberately does not fail the build
-    # yet: the leak is real and open (roadmap 2.5 closes it with landform), and
-    # a build that refuses to produce the artifact naming the defect is worse
-    # than one that produces it loudly.
+    # spans of world edge it can walk off.
+    #
+    # **Hard as of 2026-08-02 (roadmap 2.5 / systems S4).** It was soft while the
+    # leak was real and open, because a build that refuses to emit the artifact
+    # naming a known defect is worse than one that emits it loudly. Now that
+    # `_border_rampart` closes the world, leaving it soft would mean a
+    # regression could silently reopen the edge -- which is the failure this
+    # whole gate exists to catch.
     boundary = write_boundary_plan(batch_dir)
     _write(batch_dir / "boundary_plan.json", boundary)
-    if not boundary["containment"]["enclosed"]:
-        print(
-            "  boundary: NOT ENCLOSED -- %.0f m of world edge across %d spans is "
-            "walkable off into void (see boundary_plan.json, roadmap 2.5)"
+    containment = boundary["containment"]
+    if not containment["enclosed"]:
+        edges = ", ".join(
+            "%s %.0f..%.0f m" % (span["edge"], span["from_m"], span["to_m"])
+            for span in containment["leak_spans"][:4]
+        )
+        raise ZoneCompileError(
+            "World is not enclosed: %.0f m of edge across %d span(s) is walkable "
+            "off into void (%s). The border rampart either did not run or could "
+            "not reach: check `border` in terrain_manifest.json for whether a "
+            "landmark near the edge limited its encroachment, and raise "
+            "border_policy.height_m or move that landmark inward."
             % (
-                boundary["containment"]["leak_length_m"],
-                len(boundary["containment"]["leak_spans"]),
+                containment["leak_length_m"],
+                len(containment["leak_spans"]),
+                edges,
             )
         )
     # Reads the collision plan, so it runs after it. This is where the world

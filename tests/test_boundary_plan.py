@@ -343,13 +343,19 @@ class CompiledBatchTests(unittest.TestCase):
             self.skipTest("boundary plan not built")
         self.plan = json.loads(path.read_text(encoding="utf-8"))
 
-    def test_the_alpine_arena_does_not_contain_its_players(self) -> None:
-        # Measured 2026-07-31: the bordering mountain chain is mostly absent,
-        # and the shelf outside it is flat walkable ground ending in a cliff.
-        # Roadmap 2.5 closes this; until then the artifact must keep saying so.
+    def test_the_alpine_arena_contains_its_players(self) -> None:
+        # Measured 2026-07-31 and asserted the other way round until
+        # 2026-08-02: the bordering mountain chain was mostly absent and the
+        # shelf outside it was flat walkable ground ending in a cliff -- 756 m
+        # of leak across seven spans, with north and south open end to end.
+        # The border rampart (roadmap 2.5 / systems S4) closes it, and
+        # `build_zone` now fails rather than warns, so this asserts the
+        # property rather than the defect.
         containment = self.plan["containment"]
-        self.assertFalse(containment["enclosed"])
-        self.assertGreater(containment["leak_length_m"], 100.0)
+        self.assertTrue(containment["enclosed"])
+        self.assertEqual(0.0, containment["leak_length_m"])
+        self.assertEqual([], containment["leak_spans"])
+        self.assertEqual(0.0, containment["edge_reach_fraction"])
 
     def test_the_playable_region_is_smaller_than_the_world(self) -> None:
         fraction = self.plan["playable"]["world_fraction"]

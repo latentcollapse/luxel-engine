@@ -66,6 +66,42 @@ DEFAULT_TRAVERSAL_POLICY = {
     "maximum_objective_lane_distance_m": 280.0,
 }
 
+# How the world closes itself off at its own edge (roadmap 2.5 / systems S4).
+#
+# A world whose terrain simply stops does not contain its players: the alpine
+# arena leaks 756 m of walkable edge across 7 spans, and its north and south
+# edges are open end to end. `boundary_plan` has measured that for a while; this
+# is the half that does something about it.
+#
+# **Authored: character and scale. Derived: everything else.** The author says
+# how the world ends -- a sheer escarpment, a rolling ridge -- and how big it is.
+# Where the rampart has to sit, how steep its inner face must be to actually
+# stop a body, and how far it may encroach before it buries a keep are the
+# solver's problem, because those have correct answers and the author would only
+# be guessing at them.
+#
+# `inner_face_m` is the load-bearing number. A body cannot stand on ground
+# steeper than `agent_max_slope_degrees`, so the face has to exceed that or the
+# rampart is scenery a player walks over. Thin is therefore *safe* here: the
+# thinner the face for a given height, the steeper it is.
+# `height_m` is a *visual* choice, not a functional one. What stops a body is
+# the face angle, so a short rampart with a steep face closes the world exactly
+# as well as a tall one. Height only decides how much the wall shadows -- and at
+# 42 m it threw the apron outside the map into shade and put 13.1% of the frame
+# in near-black against an 8% limit. 26 m is roughly half the world's own relief
+# here, which reads as a rim rather than a canyon.
+DEFAULT_BORDER_POLICY = {
+    "enabled": True,
+    "profile": "escarpment",  # escarpment | ridge
+    "height_m": 26.0,
+    "crest_m": 7.0,
+    "inner_face_m": 11.0,
+    # Never encroach closer than this to a landmark's own footprint. Closing the
+    # world is not worth burying a keep to do it.
+    "landmark_clearance_m": 10.0,
+}
+BORDER_PROFILES = {"escarpment", "ridge"}
+
 
 def _segment_intersection(
     a: list[float],
@@ -794,6 +830,39 @@ def _validate_acceptance_policy(value: Any) -> dict[str, Any]:
     }
 
 
+def _validate_border_policy(value: Any) -> dict[str, Any]:
+    if value is None:
+        return dict(DEFAULT_BORDER_POLICY)
+    if not isinstance(value, dict):
+        raise ZoneCompileError("border_policy must be an object")
+    unknown = set(value) - set(DEFAULT_BORDER_POLICY)
+    if unknown:
+        raise ZoneCompileError(
+            "border_policy has unsupported fields: %s" % ", ".join(sorted(unknown))
+        )
+    policy = dict(DEFAULT_BORDER_POLICY)
+    policy.update(value)
+    if not isinstance(policy["enabled"], bool):
+        raise ZoneCompileError("border_policy.enabled must be true or false")
+    if policy["profile"] not in BORDER_PROFILES:
+        raise ZoneCompileError(
+            "border_policy.profile must be one of %s" % sorted(BORDER_PROFILES)
+        )
+    for field in ("height_m", "crest_m", "inner_face_m", "landmark_clearance_m"):
+        number = policy[field]
+        if not isinstance(number, (int, float)) or isinstance(number, bool):
+            raise ZoneCompileError("border_policy.%s must be numeric" % field)
+        if float(number) < 0.0:
+            raise ZoneCompileError("border_policy.%s must not be negative" % field)
+        policy[field] = float(number)
+    if policy["enabled"] and policy["inner_face_m"] <= 0.0:
+        raise ZoneCompileError(
+            "border_policy.inner_face_m must be positive; a rampart with no "
+            "inner face has no slope for the boundary flood to stop against"
+        )
+    return policy
+
+
 def _validate_traversal_policy(value: Any) -> dict[str, float]:
     if value is None:
         return dict(DEFAULT_TRAVERSAL_POLICY)
@@ -1168,6 +1237,7 @@ def compile_annotations(
         "terrain_material_scale_m": terrain_material_scale_m,
         "acceptance_policy": acceptance_policy,
         "traversal_policy": traversal_policy,
+        "border_policy": _validate_border_policy(annotations.get("border_policy")),
         "features": compiled,
     }
     if derivation:
