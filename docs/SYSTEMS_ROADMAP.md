@@ -203,8 +203,33 @@ the terrain contract is frozen, never after.
 
 ## Water
 
-### S2. Hydrology
+### S2. Hydrology — **v1 DONE 2026-08-02**
 **Tier: Red · Who: O · Depends on: S1 (and better after S3)**
+
+`hydrology.py` + `hydrology_plan.json`. Outlet selection and carving, drainage
+network, and sink classification into fed ponds and stagnant bogs. On the alpine
+arena: standing water fell from **46,157 m² to 19,828 m²** once the world was
+given somewhere to drain, leaving 14 genuine bodies — 2 fed ponds, 12 bogs.
+
+**The outlet is measured, not authored.** Every rim cell is scored on the
+drainage arriving behind it per metre of rock in the way. Lowest-point alone
+would notch wherever the rim happens to dip even if nothing flows there;
+wettest-alone would drive a gorge through a summit. The ratio is what makes it
+a saddle with a river behind it.
+
+**A disc at the rim is a dimple, not an outlet.** The first carve was a 9 m
+radius bowl centred on the rim cell against a ~28 m deep wall: it lowered the
+*outside* of the wall and left the basin intact, still holding 46,157 m². The
+notch has to run inward far enough to reach the ground it drains, with the bed
+falling toward the edge — water level with the ground it drains does not flow.
+
+**Still open for v2:** channel carving along derived reaches (the network is
+measured but only the outlet is cut), Strahler ordering, waterfall detection at
+gradient breaks, reconciliation against authored water, and depth-aware
+classification — a 15 m-deep closed hole currently reads as "bog" on catchment
+alone, when it is really a tarn.
+
+
 
 The system this roadmap was commissioned for. Current state: eight authored
 centrelines, all declared `wetland_rill`, all width 2.0, carving essentially

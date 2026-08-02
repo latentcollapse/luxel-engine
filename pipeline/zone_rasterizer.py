@@ -20,6 +20,14 @@ from typing import Any, Iterable
 import numpy as np
 from PIL import Image, ImageFilter
 
+from collections import namedtuple as _namedtuple
+
+from hydrology import carve_outlet, choose_outlet, fill_depressions, flow_accumulation
+
+# The outlet is chosen on the coarse grid and cut on the fine one, so the carve
+# takes a position rather than the coarse Outlet record it came from.
+Outlet_ = _namedtuple("Outlet_", "row column")
+_OutletAt = _namedtuple("_OutletAt", "row column")
 from massif_character import shape_relief
 
 from worldbuilder_dsl import _PATTERN_SCALARS
@@ -1846,6 +1854,49 @@ def rasterize_zone_spec(
     # true incised channels retain explicit bridge/off-mesh semantics in the
     # render and navigation plans rather than relying on a terrain trench to
     # make the crossing impassable.
+    # Systems S2: cut the world an outlet.
+    #
+    # Closing the border (S4) made the map a closed basin -- the interior floor
+    # sits below the lowest point of the rim, so nothing drains and every drop
+    # that lands stays. Physically honest, and directly against an art
+    # direction that asks for water running off the edge.
+    #
+    # Where it goes is measured, not authored: the rim cell with the most
+    # drainage arriving behind it per metre of rock in the way. Lowest-point
+    # alone would notch wherever the rim dips even if nothing flows there;
+    # wettest-alone would drive a gorge through a summit.
+    #
+    # Runs on the coarse grid for the same reason S1 does -- a pure-Python
+    # priority flood over a million cells is not a trade worth making -- then
+    # the notch is carved at full resolution.
+    outlet_report: dict[str, Any] = {"enabled": False}
+    if bool((zone_spec.get("border_policy") or {}).get("enabled", True)):
+        coarse_side = min(257, resolution)
+        step = max(1, (resolution - 1) // (coarse_side - 1))
+        coarse = height[::step, ::step]
+        coarse_filled = fill_depressions(coarse.astype(np.float64))
+        coarse_flow = flow_accumulation(coarse_filled)
+        outlet = choose_outlet(coarse.astype(np.float64), coarse_flow)
+        scale = (resolution - 1) / (coarse.shape[0] - 1)
+        full = Outlet_(
+            row=int(round(outlet.row * scale)),
+            column=int(round(outlet.column * scale)),
+        )
+        height = carve_outlet(
+            height, full.row, full.column, cell_m=width / (resolution - 1)
+        )
+        outlet_report = {
+            "enabled": True,
+            "edge": outlet.edge,
+            "world_m": [
+                round(float(x[full.row, full.column]), 3),
+                round(float(z[full.row, full.column]), 3),
+            ],
+            "spill_height_m": round(outlet.spill_height_m, 3),
+            "catchment_cells": round(outlet.catchment_cells, 1),
+            "derivation": "max_drainage_per_metre_of_rim",
+        }
+
     height = _flatten_landmark_pads(height, x, z, features)
     height = _grade_corridors(height, x, z, features, width, length)
     wetland_radius = max(2, int(np.ceil(float(resolution) / 72.0)))
@@ -1956,6 +2007,7 @@ def rasterize_zone_spec(
         # this says what was attempted, so a still-leaking world is diagnosable
         # without re-deriving the rampart by hand.
         "border": border_report,
+        "outlet": outlet_report,
         "height_range_m": {"min": round(float(height.min()), 3), "max": round(float(height.max()), 3)},
         "artifacts": {
             "heightmap_16": "heightmap_16.png",

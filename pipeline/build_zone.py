@@ -26,6 +26,7 @@ from boundary_plan import write as write_boundary_plan
 from collision_plan import build as build_collision_plan
 from navigation_plan import write as write_navigation_plan
 from silhouette import from_batch as measure_silhouette
+from hydrology import build as build_hydrology
 from site_conditions import write as write_site_conditions
 from collision_acceptance import evaluate as evaluate_collision
 from navmesh_acceptance import evaluate as evaluate_navmesh
@@ -979,6 +980,25 @@ def build(
             site["flow"]["working_resolution"],
             site["flow"]["sink_area_m2"],
             site["flow"]["deepest_sink_m"],
+        )
+    )
+
+    # Systems S2. Reads the finished terrain, so it runs after the outlet has
+    # been cut rather than predicting it: what survives the fill *is* the map's
+    # standing water, and whether each body is fed decides whether it is a
+    # stagnant bog or a cold pond.
+    hydrology = build_hydrology(batch_dir)
+    _write(batch_dir / "hydrology_plan.json", hydrology)
+    print(
+        "  hydrology: %d bodies (%d fed pond, %d bog), %.0f m2 water, "
+        "%.0f m2 channel, outlet %s"
+        % (
+            hydrology["body_count"],
+            hydrology["pond_count"],
+            hydrology["bog_count"],
+            hydrology["water_area_m2"],
+            hydrology["channel_area_m2"],
+            (hydrology["outlet"] or {}).get("edge", "none"),
         )
     )
 
