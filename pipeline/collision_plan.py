@@ -50,6 +50,10 @@ SCHEMA_VERSION = "codeweald.collision-plan/v1"
 ROLE_COLLISION: dict[str, str] = {
     "faction_fortification": "box",
     "settlement_landmark": "box",
+    # A lane guardian is a structure a player fights past, not scenery. Its own
+    # role because it is sited by gameplay spacing rather than by plausibility
+    # -- the two were fused into one village asset until 2026-08-02 (S14).
+    "lane_guardian": "box",
     "objective_landmark": "box",
     # A bridge sits *on* the lane centreline by design, so a solid box makes it
     # a wall across the route it exists to carry -- measured: all 20 of them

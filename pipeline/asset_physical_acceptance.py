@@ -43,6 +43,13 @@ ROLE_LIMITS_M = {
         "maximum_footprint": 42.0,
     },
     "objective_landmark": {"maximum_height": 9.0, "maximum_footprint": 22.0},
+    # Tall enough to read down a lane from a distance, small enough not to be a
+    # keep. It is a landmark you fight past, so its silhouette is load-bearing.
+    "lane_guardian": {
+        "minimum_height": 8.0,
+        "maximum_height": 22.0,
+        "maximum_footprint": 14.0,
+    },
     "settlement_landmark": {
         "minimum_height": 5.0,
         "maximum_height": 10.0,

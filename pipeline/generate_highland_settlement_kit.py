@@ -259,7 +259,16 @@ def _cluster(
     ]
     for index, (x, z, rotation, scale) in enumerate(layouts[variant]):
         _house(root, index, (x, z), rotation, scale, materials)
-    _watchtower(root, (0.0, 0.0) if variant != 1 else (3.0, -1.0), materials)
+    # **No watchtower.** Every village used to carry one at its centre, which
+    # fused two things that are sited by completely different rules: background
+    # dressing that wants to look plausible, and a lane guardian that wants to
+    # be spaced for gameplay. Reviewed 2026-08-02 -- the towers were reading as
+    # the reason villages sat on the lanes, because a guardian belongs on a lane
+    # and a village does not.
+    #
+    # `generate_highland_building_kit.py` emits `highland_watchtower` as its own
+    # asset. Guardians are placed from that, by rule, as their own role; this
+    # kit is now purely the village.
     _cylinder(
         "Village_well",
         2.8,

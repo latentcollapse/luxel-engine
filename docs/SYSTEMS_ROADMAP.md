@@ -483,8 +483,28 @@ that loop, not its destination.
 
 ---
 
-### S14. Kit decomposition and variation
+### S14. Kit decomposition and variation — **v1 DONE 2026-08-02**
 **Tier: Yellow · Who: S · Depends on: S13**
+
+The village and the lane guardian were one asset. `_cluster` baked a watchtower
+into the centre of every settlement, which fused two things sited by completely
+different rules: **background dressing that wants to look plausible, and a
+guardian that wants to be spaced for gameplay.** Matt's diagnosis (2026-08-02)
+was that this is why villages sit on the lanes at all — a guardian belongs on a
+lane and a village does not, and while they are one asset the placement solver
+cannot honour both.
+
+Now: the settlement kit emits villages only (houses, terrace, well);
+`generate_highland_building_kit.py` already emitted `highland_watchtower` as its
+own asset, and `lane_guardian` exists as a first-class role with its own
+collision policy and physical envelope (8–22 m tall, ≤14 m footprint — tall
+enough to read down a lane, small enough not to be a keep).
+
+**Still open:** the alpine arena's asset profiles still select the baked cluster,
+and nothing places guardians yet. Both are [S10](#s10-settlement-and-structure-siting)
+— guardians want lane-spacing rules and villages want the corridor exclusion
+that closes [D13](DEBT_LEDGER.md). The decomposition is what unblocks that;
+it does not do it.
 
 Composite assets separate into individually placeable parts, and families vary
 procedurally rather than repeating.
