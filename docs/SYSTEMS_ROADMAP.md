@@ -7,7 +7,9 @@ with a correct answer was left to a person, a habit, or a name.**
 
 This roadmap is the inventory of things with correct answers.
 
-Companion documents: [MVP_ROADMAP.md](MVP_ROADMAP.md) (phases 0–4, the path to a
+Companion documents: **[OPEN_DECISIONS.md](OPEN_DECISIONS.md) (calls made
+without review — read this first if you are picking the work back up)**,
+[MVP_ROADMAP.md](MVP_ROADMAP.md) (phases 0–4, the path to a
 playable map), [DEBT_LEDGER.md](DEBT_LEDGER.md) (what exists and is wrong),
 [MISSING_INVENTORY.md](MISSING_INVENTORY.md) (what does not exist yet),
 [TOOLING_UPGRADES.md](TOOLING_UPGRADES.md) (the instrument).
