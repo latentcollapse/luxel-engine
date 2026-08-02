@@ -655,6 +655,62 @@ this is precisely the defect class that survives an overview gate.
 
 ---
 
+## D23. WGE's tests read Codeweald's content
+
+**Evidence.** Ten test modules assert against a real compiled batch (the alpine
+arena, caledonia) and real generated kits. When the engine moved out of the game
+(D8) they broke: 60 errors, 47 skips, because `parents[1]` had silently been
+both "the engine" and "the art".
+
+`tests/reference_content.py` names the coupling in one place and makes it
+redirectable via `WGE_REFERENCE_CONTENT`, which restored the suite. That is a
+signpost, not a fix.
+
+**Why it matters.** Asserting against a real world is *good* testing -- it is
+what caught the sealed keeps and the bridges over nothing, and synthetic
+fixtures would not have. But WGE is supposed to compile any game's world, and a
+test suite that cannot run without one specific game's concept batches is a
+suite that cannot certify the engine on its own. It also blocks the Gemini
+sandbox plan: a throwaway WGE checkout has no Codeweald beside it.
+
+**Fix direction.** WGE needs a small reference batch of its own -- a deliberately
+minimal world with one keep, one lane, one water feature -- committed as engine
+fixture data. Not a copy of Codeweald's: something small enough to version and
+boring enough that nobody is tempted to make it pretty. The Codeweald-facing
+tests then become integration tests that skip loudly when the content is absent.
+
+---
+
+## D24. `road_fraction` is frame-relative, and the framing is not stable
+
+**Evidence.** Measured across four border configurations while building S4:
+
+| Config | `road_fraction` | `foreground_fraction` | ratio |
+|---|---|---|---|
+| 42 m flat crest | 0.01459 | 0.633 | 0.023 |
+| 26 m ragged crest | 0.00761 | 0.340 | 0.022 |
+| 38 m ragged crest | 0.00761 | 0.316 | 0.024 |
+
+The roads never changed. The *world* got smaller in frame, so the absolute road
+pixel count halved and the gate went red with "Compiled roads are not visually
+readable" -- about roads that are exactly as readable as they were.
+
+**Why it matters.** `bevy_visual_acceptance` measures several metrics as a
+fraction of the whole frame while the camera auto-frames the world, so any
+terrain change that moves the camera moves every absolute metric with it. That
+makes a red gate unattributable: it is not distinguishable from a real
+regression without manually recomputing the ratio, which is what had to be done
+here. This compounds [D6](#d6-camera-framing-is-nondeterministic-enough-to-fail-its-own-gate).
+
+**Fix direction.** Normalise the coverage metrics by `foreground_fraction` so
+they measure "how much of the *world* is road" rather than "how much of the
+*image* is road". `dark_foreground_fraction` is already named for the right
+denominator; `road_fraction`, `foliage_fraction` and `water_fraction` are not.
+Re-baseline the thresholds once, in one commit, with the old and new values
+recorded side by side.
+
+---
+
 ## Deliberately not listed
 
 **`spine_count` moving no rendered metric** is a *finding*, not debt — see the

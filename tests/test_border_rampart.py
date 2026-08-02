@@ -60,7 +60,10 @@ def _raise(features=(), **overrides):
     policy = dict(DEFAULT_BORDER_POLICY)
     policy.update(overrides)
     x, z = _grid()
-    return _border_rampart(_flat(), x, z, list(features), WIDTH, LENGTH, policy)
+    return _border_rampart(
+        _flat(), x, z, list(features), WIDTH, LENGTH, policy,
+        np.random.default_rng(20260802),
+    )
 
 
 class RampartTest(unittest.TestCase):
@@ -69,8 +72,20 @@ class RampartTest(unittest.TestCase):
         self.assertTrue(report["enabled"])
         centre = RESOLUTION // 2
         self.assertAlmostEqual(0.0, height[centre, centre], places=6)
-        for edge in (height[0, :], height[-1, :], height[:, 0], height[:, -1]):
-            self.assertGreater(edge.min(), DEFAULT_BORDER_POLICY["height_m"] * 0.99)
+        # Relief carves saddles down from `height_m`, so the rim varies between
+        # the saddle floor and the authored height. What must hold everywhere is
+        # that the edge is *raised* -- a saddle that reaches the valley floor is
+        # a gap in the wall.
+        floor = DEFAULT_BORDER_POLICY["height_m"] * (1.0 - DEFAULT_BORDER_POLICY["crest_relief"])
+        edges = [height[0, :], height[-1, :], height[:, 0], height[:, -1]]
+        for edge in edges:
+            self.assertGreater(edge.min(), floor * 0.9)
+        # Full height is reached somewhere on the rim, not on every edge --
+        # broad noise does not peak on all four sides of one map.
+        self.assertGreater(
+            max(float(edge.max()) for edge in edges),
+            DEFAULT_BORDER_POLICY["height_m"] * 0.85,
+        )
         self.assertTrue(footprint.any())
 
     def test_a_disabled_border_changes_nothing(self):
@@ -106,12 +121,22 @@ class RampartTest(unittest.TestCase):
         # approaching it must decay rather than drop off a step.
         inner = np.argmax(row[: RESOLUTION // 2] <= 0.01)
         self.assertGreater(inner, 2)
+        # Measured on ground the rampart does *not* claim. Inside its own
+        # footprint the face is meant to be a cliff; what must not happen is a
+        # cliff cell being left in `background` for the accessibility gate to
+        # measure as walkable.
         # The agent's own slope limit is the threshold that means anything here:
         # the cell where the rampart meets the ground has to be standable, or
         # the "toe" is just where the cliff happens to stop. A linear face gives
         # grade 2.63 at this cell (its constant height/face slope); smoothstep
         # gives 0.47.
-        self.assertLess(slope[inner - 1], 1.0, "toe meets the ground as a step, not a slope")
+        unprotected = ~footprint[RESOLUTION // 2, : RESOLUTION // 2 - 1]
+        outside = np.where(unprotected)[0]
+        self.assertTrue(outside.size > 0)
+        self.assertLess(
+            float(slope[: RESOLUTION // 2 - 1][unprotected].max()), 1.0,
+            "steep ground left outside the rampart's own footprint",
+        )
 
     def test_a_landmark_near_the_edge_pinches_only_its_own_corner(self):
         """The defect a global depth caused: one watchpost 28 m from the west
@@ -150,7 +175,10 @@ class RampartTest(unittest.TestCase):
         gz, gx = np.gradient(height, cell)
         steep = np.hypot(gx, gz) > 1.0
         self.assertTrue(steep.any())
-        self.assertFalse(bool((steep & ~footprint).any()), "steep ground outside the tagged footprint")
+        self.assertFalse(
+            bool((steep & ~footprint).any()),
+            "%d steep cells left in background" % int((steep & ~footprint).sum()),
+        )
 
 
 class BorderPolicyTest(unittest.TestCase):

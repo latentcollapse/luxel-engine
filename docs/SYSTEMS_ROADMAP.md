@@ -139,6 +139,51 @@ burying something, the face profile, and the protected-relief footprint.
 
 ---
 
+### S18. Massif character — what *kind* of mountains
+**Tier: Orange · Who: O · Depends on: S1 (and pairs with S3)**
+
+**The same argument as the ponds, applied to rock.** Today a landform is a
+`profile` string and a handful of jitter scalars, and every world it builds is
+the same mountain in a different arrangement. Reviewed 2026-08-02 against a real
+target — Lauterbrunnen — the border read as "a square bowl with a flat rim", and
+the honest diagnosis was not that the rampart was tuned wrong but that **the
+shaping system has no concept of mountain type.**
+
+An author should say *which orogeny*, and the solver should produce it:
+
+| Character | Signature the solver must produce |
+|---|---|
+| **Alps** | glacial U-valleys with flat floors, near-vertical walls, hanging valleys and waterfalls off the rim, horns and arêtes above |
+| **Scottish Highlands** | lower, rounded, glacially scoured; broad corries, heather benches, wide straths |
+| **Patagonian Andes** | granite spires and towers, very steep, ice-carved, high relief over short distance |
+
+Matt's own scoping (2026-08-02): Appalachians are worn enough to be "really
+giant hills", which the Highlands profile covers with a lower relief budget, and
+the Rockies read close enough to the Alps not to need their own model. Chinese
+needle karst is a genuine fourth case and is deliberately deferred — the three
+above span most of what the map types need, and the point is to get those
+dialled in before widening.
+
+**What this is really about:** each character is a different *erosion history*,
+not a different noise seed. Glacial carving produces U-profiles and truncated
+spurs; fluvial produces V-profiles and dendritic ridges; the Highlands are the
+same glacial process run longer on softer rock. So this is the same machinery as
+[S3](#s3-erosion-and-geomorphology) with different parameters and different
+stopping points, which is why they pair.
+
+**Authored:** the character, the relief budget, whether the map floor is a
+valley or a plateau.
+**Derived:** valley cross-section, ridge sharpness, cirque and corrie placement,
+where walls go vertical, where waterfalls enter ([S2](#s2-hydrology)).
+
+**Absorbs S4.** The border rampart is currently its own bump function with its
+own crest and face parameters. Once mountains have character, the border should
+be *the same system applied at the perimeter* — an Alpine map's edge is an
+Alpine wall — rather than a separate shape that has to be tuned to look like the
+mountains beside it.
+
+---
+
 ### S3. Erosion and geomorphology
 **Tier: Orange · Who: O · Depends on: S1**
 
@@ -187,6 +232,21 @@ graph*, not a property anyone authors:
 | runs off the edge | outlet reaching the map rect |
 | waterfall | channel crossing a steep gradient break |
 | walkable ford vs swimmable | reach depth vs the agent — feeds navigation |
+
+**Blocking finding from S1 (2026-08-02): the world is now a closed basin.**
+Once [S4](#s4-border-enclosure--done-2026-08-02) rings the map, the interior
+floor sits 14.1 m below the lowest point of the rim, and the depression-filling
+pass reports **52,446 m² of sink in a 65,536 m² world** — 80% of it. Physically
+correct and gameplay-correct (that is what "enclosed" means), but it means every
+drop of water that lands in the map stays in it: nothing flows, nothing leaves,
+and the whole surface reads as one lake bed.
+
+The art direction explicitly asks otherwise — water should "run and drop off the
+edge or pool into a small pond". So **the border needs a declared outlet**: one
+or two notches in the rim, cut to the valley floor, where the drainage network
+terminates in a waterfall off the map. That is a border concern and a hydrology
+concern at the same time, and it is the first thing S2 has to settle. Until it
+does, sink classification cannot distinguish a bog from the entire map.
 
 **Emits** `hydrology_plan.json`: the network graph, per-body classification
 (flow, depth, trophic class), channel carving deltas for the heightfield, and

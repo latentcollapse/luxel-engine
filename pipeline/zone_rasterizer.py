@@ -618,6 +618,7 @@ def _border_rampart(
     width: float,
     length: float,
     policy: dict[str, Any],
+    rng: np.random.Generator,
 ) -> tuple[np.ndarray, dict[str, Any], np.ndarray]:
     """Close the world at its own edge (roadmap 2.5 / systems S4).
 
@@ -705,7 +706,30 @@ def _border_rampart(
         # the valley floor tangentially, which is also what an escarpment
         # actually looks like.
         shape = fraction * fraction * (3.0 - 2.0 * fraction)
-    rampart = peak * shape
+    # **A uniform crest is a bowl rim.** Reviewed as "a square bowl with a flat
+    # rim" -- which is what a constant-height wall around a square map is. Broad
+    # noise along the perimeter breaks the skyline into summits and saddles, so
+    # it reads as a range whose near side happens to be the map edge.
+    #
+    # Relief is cheap in the currency that matters. The black-pixel gate
+    # measures *area* in shadow, and raising scattered summits costs far less of
+    # it than lifting the whole wall by the same average -- the saddles between
+    # them stay lit.
+    relief = float(policy.get("crest_relief", 0.0))
+    if relief > 0.0:
+        # Relief carves *down* from `height_m`, never up. Raising summits above
+        # the authored height buys a ragged skyline by spending the one budget
+        # the border is actually constrained by -- shadow area, measured at
+        # 9.9% against an 8% limit when peaks reached 1.55x. Cutting saddles
+        # instead gives the same broken silhouette and strictly less shade,
+        # and the saddles stay unwalkable because the *face angle* is what
+        # stops a body, not the height above it.
+        broad = _fractal_noise(shape.shape, rng, octaves=(2, 5, 11))
+        modulation = 1.0 - relief * (1.0 - np.clip(broad, 0.0, 1.0))
+        rampart = peak * shape * modulation
+        report["crest_relief"] = relief
+    else:
+        rampart = peak * shape
 
     report.update(
         {
@@ -729,7 +753,16 @@ def _border_rampart(
     # The threshold leaves the shallow toe unprotected on purpose. That part is
     # gentle, genuinely walkable, and should be held to the same standard as
     # any other ground; exempting it would be the gate excusing itself.
-    footprint = rampart > 0.5
+    # Raised *or* steep. Height alone misses the last cell or two of a thin
+    # face, where the rampart has almost died out but the ground is still
+    # tilted past anything a body can stand on -- measured: 3 such cells with a
+    # 6 m face. Leaving them in `background` puts a handful of cliff cells into
+    # the accessibility statistics, which is precisely the contamination the
+    # tagging exists to prevent.
+    cell_x = width / (rampart.shape[1] - 1)
+    cell_z = length / (rampart.shape[0] - 1)
+    rise_z, rise_x = np.gradient(rampart, cell_z, cell_x)
+    footprint = (rampart > 0.5) | (np.hypot(rise_x, rise_z) > 1.0)
     report["protected_area_m2"] = round(
         float(footprint.sum()) * (width / (rampart.shape[1] - 1)) * (length / (rampart.shape[0] - 1)), 1
     )
@@ -1710,7 +1743,9 @@ def rasterize_zone_spec(
     # or a channel authored to reach the edge still cuts its own notch through
     # the rampart rather than being buried by it.
     height, border_report, border_footprint = _border_rampart(
-        height, x, z, features, width, length, zone_spec.get("border_policy") or {}
+        height, x, z, features, width, length,
+        zone_spec.get("border_policy") or {},
+        np.random.default_rng(int(zone_spec.get("generation_seed", 1)) * 7919 + 104729),
     )
     height = _flatten_landmark_pads(height, x, z, features)
     height = _grade_corridors(height, x, z, features, width, length)

@@ -86,16 +86,29 @@ DEFAULT_TRAVERSAL_POLICY = {
 # thinner the face for a given height, the steeper it is.
 # `height_m` is a *visual* choice, not a functional one. What stops a body is
 # the face angle, so a short rampart with a steep face closes the world exactly
-# as well as a tall one. Height only decides how much the wall shadows -- and at
-# 42 m it threw the apron outside the map into shade and put 13.1% of the frame
-# in near-black against an 8% limit. 26 m is roughly half the world's own relief
-# here, which reads as a rim rather than a canyon.
+# as well as a tall one. Height only decides how much the wall shadows -- at
+# 42 m it threw the apron into shade and put 13.1% of the frame in near-black
+# against an 8% limit.
+#
+# **`crest_m` is what makes it read as a bowl.** A wide flat top is a rim, and a
+# rim around a square map is a basin -- reviewed 2026-08-02 as "a square bowl
+# with a flat rim", which is exactly what a plateau crest looks like from
+# above. A near-zero crest with `crest_relief_m` breaking the skyline reads as
+# a valley wall instead: sheer face, no shelf, ragged tops. The reference is
+# Lauterbrunnen -- flat floor, walls that go straight up, peaks above them.
+#
+# Footprint is the other half. Crest 7 + face 11 ate 18 m of every edge; 2 + 6
+# is a 56% reduction and hands the playable area back.
 DEFAULT_BORDER_POLICY = {
     "enabled": True,
     "profile": "escarpment",  # escarpment | ridge
     "height_m": 26.0,
-    "crest_m": 7.0,
-    "inner_face_m": 11.0,
+    "crest_m": 2.0,
+    "inner_face_m": 6.0,
+    # Amplitude of the ragged skyline along the rim, as a fraction of height.
+    # 0 gives the flat rim; the peaks it raises are local, so they cost far
+    # less shadow than the same average height applied uniformly.
+    "crest_relief": 0.5,
     # Never encroach closer than this to a landmark's own footprint. Closing the
     # world is not worth burying a keep to do it.
     "landmark_clearance_m": 10.0,
@@ -848,7 +861,7 @@ def _validate_border_policy(value: Any) -> dict[str, Any]:
         raise ZoneCompileError(
             "border_policy.profile must be one of %s" % sorted(BORDER_PROFILES)
         )
-    for field in ("height_m", "crest_m", "inner_face_m", "landmark_clearance_m"):
+    for field in ("height_m", "crest_m", "inner_face_m", "landmark_clearance_m", "crest_relief"):
         number = policy[field]
         if not isinstance(number, (int, float)) or isinstance(number, bool):
             raise ZoneCompileError("border_policy.%s must be numeric" % field)

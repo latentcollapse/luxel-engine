@@ -26,6 +26,7 @@ from boundary_plan import write as write_boundary_plan
 from collision_plan import build as build_collision_plan
 from navigation_plan import write as write_navigation_plan
 from silhouette import from_batch as measure_silhouette
+from site_conditions import write as write_site_conditions
 from collision_acceptance import evaluate as evaluate_collision
 from navmesh_acceptance import evaluate as evaluate_navmesh
 from asset_visual_preflight import preflight as preflight_assets
@@ -962,6 +963,25 @@ def build(
     # `_border_rampart` closes the world, leaving it soft would mean a
     # regression could silently reopen the edge -- which is the failure this
     # whole gate exists to catch.
+    # Systems S1. Derived from the heightfield alone, so it runs as soon as the
+    # terrain is certified and before anything that wants to read it. Forestry,
+    # surfacing, siting and scree all consume this one field rather than each
+    # re-deriving slope and wetness and quietly disagreeing about where the wet
+    # hollow is.
+    site = write_site_conditions(batch_dir)
+    _write(batch_dir / "site_conditions.json", site)
+    print(
+        "  site conditions: %d fields at %d^2, flow at %d^2, %.0f m2 of sink, "
+        "deepest %.1f m"
+        % (
+            len(site["fields"]),
+            site["resolution"],
+            site["flow"]["working_resolution"],
+            site["flow"]["sink_area_m2"],
+            site["flow"]["deepest_sink_m"],
+        )
+    )
+
     boundary = write_boundary_plan(batch_dir)
     _write(batch_dir / "boundary_plan.json", boundary)
     containment = boundary["containment"]
