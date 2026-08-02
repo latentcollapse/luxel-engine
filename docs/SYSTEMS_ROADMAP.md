@@ -330,10 +330,28 @@ mostly cliff and the conifer's 34 degree slope limit excludes it. That may be
 honest for this map or it may mean the niches are tuned for gentler ground —
 it wants checking against a second world before the bands are trusted.
 
-**Still open:** placement does not read this yet. `render_plan.rs::compile_foliage`
-still scatters into authored polygons at a declared spacing, so the plan is
-measured and emitted but not yet obeyed. Wiring the suitability field into the
-scatter is the remaining half and is where it becomes visible.
+**The field is emitted and waiting.** `terrain/canopy_suitability_u8.bin` —
+one byte per cell, row-major, same resolution and orientation as the
+heightfield, so the Rust side samples it with the coordinate maths it already
+has and no new convention is introduced for it to disagree with.
+
+**Still open: the scatter does not read it.** `render_plan.rs::compile_foliage`
+accepts a candidate on slope and a keep-out radius alone. The change is small
+but it is not local, and that is worth stating precisely rather than
+discovering:
+
+1. `compile_render_plan_value` takes the suitability bytes alongside
+   `heightfield_bytes`.
+2. **`validate_render_plan_value` takes them too, and must apply the identical
+   rule.** The validator re-derives the scatter and compares; a compile that
+   filters and a validator that does not will reject every plan it just built.
+3. The `worldspec` binary grows the argument, and `build_zone` passes the path.
+4. Acceptance becomes probabilistic in suitability rather than a hard cut, so
+   the treeline thins instead of stopping — a hard threshold reintroduces
+   exactly the stamped edge the soft niche bands exist to avoid.
+
+Until then the ecology is measured, checkable, and unobeyed: the trees in the
+viewer are still wherever the polygon scatter put them.
 
 Today foliage is scattered into authored polygons at a declared spacing. That is
 placement, not ecology, and it cannot produce a treeline, a riparian fringe, or

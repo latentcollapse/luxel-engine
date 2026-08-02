@@ -275,7 +275,30 @@ def build(batch_dir) -> dict:
 
     bare = best == -1
     line = treeline_m(HIGHLAND_NICHES, height, canopy_mask)
+
+    # Emitted for the scatter to consume, not just for a human to read.
+    # `render_plan.rs::compile_foliage` accepts a candidate on slope and a
+    # keep-out radius alone; this is the field that would let it accept on
+    # *suitability* instead, so trees thin toward the treeline and stop at the
+    # scree rather than filling a polygon uniformly.
+    #
+    # One byte per cell of canopy suitability, row-major, same resolution and
+    # orientation as the heightfield -- so the Rust side samples it with the
+    # coordinate maths it already has for terrain, and no new convention is
+    # introduced for it to disagree with.
+    canopy_suitability = np.zeros(best.shape, dtype=np.float64)
+    for index, niche in enumerate(HIGHLAND_NICHES):
+        if niche.canopy:
+            canopy_suitability = np.maximum(
+                canopy_suitability, np.where(best == index, scores[niche.key], 0.0)
+            )
+    field_path = batch_dir / "terrain/canopy_suitability_u8.bin"
+    field_path.parent.mkdir(parents=True, exist_ok=True)
+    (np.clip(canopy_suitability, 0.0, 1.0) * 255.0).astype(np.uint8).tofile(field_path)
+
     return {
+        "canopy_suitability_field": "terrain/canopy_suitability_u8.bin",
+        "canopy_suitability_encoding": "uint8_row_major_255_is_ideal",
         "schema_version": "codeweald.vegetation-plan/v1",
         "zone_id": manifest.get("zone_id"),
         "heightfield_sha256": manifest.get("heightfield_sha256"),
