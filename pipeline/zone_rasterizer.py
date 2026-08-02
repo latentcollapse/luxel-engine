@@ -1921,13 +1921,53 @@ def rasterize_zone_spec(
     # a 24-degree face. True waterfalls require an explicit vertical-water
     # semantic and mesh rather than blue terrain paint.
     water_weight *= 1.0 - _smoothstep(0.18, 0.45, slope)
-    rock_weight = np.maximum(rock_weight, _smoothstep(0.55, 1.35, slope))
+    # Systems S7/S5: surfacing derived from site conditions rather than from
+    # height and slope alone.
+    #
+    # **Scree collects where soil cannot.** Slope alone puts bare rock on every
+    # steep face including the hollows, where in reality debris and soil gather.
+    # Convex ground -- ridges, shoulders, spurs -- is scoured; concave ground
+    # collects. Curvature is what separates them, and it is the same field S1
+    # emits so the surfacing and the vegetation will agree about which is which.
+    curvature = np.gradient(gradient_z, spacing_z, axis=0) + np.gradient(
+        gradient_x, spacing_x, axis=1
+    )
+    exposure_boost = _smoothstep(0.0, 0.9, curvature)
+    rock_weight = np.maximum(
+        rock_weight,
+        _smoothstep(0.55, 1.35, slope) * (0.72 + 0.28 * exposure_boost),
+    )
+
+    # **Snow keeps to the shade, and that is most of what makes a range read as
+    # alpine.** The old rule put the snowline at 93% of the tallest point *and*
+    # required the ground to already be rock and steep, so a world whose peak
+    # was one massif had effectively no snow anywhere -- and now that every
+    # flank carries Alpine relief (S18) that is the difference between a range
+    # and a grey lump.
+    #
+    # Insolation is the same calculation S1 emits: the cosine of the angle
+    # between the surface and the sun. South faces bake and clear; north faces
+    # hold snow hundreds of metres lower. Aspect asymmetry is the signature.
+    sun_altitude = math.radians(42.0)
+    sun_azimuth = math.radians(180.0)
+    slope_radians = np.arctan(slope)
+    aspect_radians = np.arctan2(-gradient_x, gradient_z)
+    insolation = np.clip(
+        np.cos(slope_radians) * math.sin(sun_altitude)
+        + np.sin(slope_radians) * math.cos(sun_altitude) * np.cos(sun_azimuth - aspect_radians),
+        0.0,
+        1.0,
+    )
+    relief = max(float(height.max()) - float(height.min()), 1e-6)
+    # Shaded ground holds snow from 58% of the relief; sunlit ground not until
+    # 88%. The band between them is where the asymmetry shows.
+    snowline = float(height.min()) + relief * (0.58 + 0.30 * insolation)
     snow_weight = np.maximum(
         snow_weight,
-        _smoothstep(float(height.max()) * 0.93, float(height.max()) * 0.995, height) ** 2.2
-        * _smoothstep(0.90, 2.20, slope)
-        * rock_weight,
+        _smoothstep(snowline, snowline + relief * 0.16, height) ** 1.4,
     )
+    # Snow does not cling to a vertical face; it slides off and lands below.
+    snow_weight *= 1.0 - _smoothstep(1.6, 3.0, slope)
     grass_weight = np.clip(1.0 - road_weight - rock_weight * 0.9 - snow_weight, 0.0, 1.0)
     total = np.maximum(grass_weight + road_weight + rock_weight + snow_weight, 1e-6)
     splat = np.stack([grass_weight / total, road_weight / total, rock_weight / total, snow_weight / total], axis=-1)

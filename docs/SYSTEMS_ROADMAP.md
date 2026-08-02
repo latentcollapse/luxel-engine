@@ -316,8 +316,19 @@ growth").
 
 ---
 
-### S7. Surface materials
+### S7. Surface materials — **partial 2026-08-02**
 **Tier: Yellow · Who: S · Depends on: S1, S2**
+
+Scree now derives from slope *and curvature* rather than slope alone: convex
+ground (ridges, shoulders, spurs) is scoured bare, concave ground collects soil
+and debris. Slope alone put rock on every steep face including the hollows,
+where in reality material gathers.
+
+**Not yet done:** peat and alluvium want their own splat channel, and the
+splatmap is a fixed RGBA of grass/road/rock/snow. Adding a fifth surface ripples
+into the material contracts and every backend's shader, so it is a deliberate
+follow-up rather than a fold-in. The wet hollows [S2](#s2-hydrology--v1-done-2026-08-02)
+now identifies are exactly what would drive it.
 
 Splatmap layers derived from the same field rather than painted: scree on steep
 slopes, peat in wet hollows, exposed rock on high curvature, alluvium in basins,
@@ -338,11 +349,19 @@ sitting on a slope they could not rest on" tell.
 
 ---
 
-### S5. Snow and ice line
+### S5. Snow and ice line — **DONE 2026-08-02**
 **Tier: Grey · Who: S · Depends on: S1**
 
-Elevation threshold modulated by aspect and shelter. Small, and it makes the
-alpine massif read as alpine.
+The old rule put the snowline at 93% of the tallest point in the world *and*
+required the ground to already be rock *and* steep — so a world whose single
+peak was one massif had effectively no snow at all. Once every flank carries
+Alpine relief (S18) that is the difference between a range and a grey lump.
+
+Now: a snowline at 58% of relief on shaded ground rising to 88% on sunlit,
+using the same insolation calculation S1 emits, and cleared off faces too steep
+to hold it. **Aspect asymmetry is the signature** — north faces holding snow
+hundreds of metres below the south faces beside them is what reads as alpine,
+and it is free once insolation exists.
 
 ---
 
