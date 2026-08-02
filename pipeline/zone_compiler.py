@@ -102,13 +102,15 @@ DEFAULT_TRAVERSAL_POLICY = {
 DEFAULT_BORDER_POLICY = {
     "enabled": True,
     "profile": "escarpment",  # escarpment | ridge
-    "height_m": 26.0,
+    "height_m": 62.0,
     "crest_m": 2.0,
-    "inner_face_m": 6.0,
+    "inner_face_m": 26.0,
     # Amplitude of the ragged skyline along the rim, as a fraction of height.
     # 0 gives the flat rim; the peaks it raises are local, so they cost far
     # less shadow than the same average height applied uniformly.
-    "crest_relief": 0.5,
+    "crest_relief": 0.72,
+    # Which range this world's mountains belong to (systems S18).
+    "massif_character": "alps",
     # Open ground outside the lanes that jungling still uses. The wall starts
     # beyond it, not at the lane edge.
     "wilderness_margin_m": 26.0,
@@ -860,6 +862,12 @@ def _validate_border_policy(value: Any) -> dict[str, Any]:
     policy.update(value)
     if not isinstance(policy["enabled"], bool):
         raise ZoneCompileError("border_policy.enabled must be true or false")
+    from massif_character import CHARACTERS as _MASSIF_CHARACTERS
+    if policy["massif_character"] not in _MASSIF_CHARACTERS:
+        raise ZoneCompileError(
+            "border_policy.massif_character must be one of %s"
+            % sorted(_MASSIF_CHARACTERS)
+        )
     if policy["profile"] not in BORDER_PROFILES:
         raise ZoneCompileError(
             "border_policy.profile must be one of %s" % sorted(BORDER_PROFILES)

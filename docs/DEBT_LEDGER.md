@@ -711,6 +711,40 @@ recorded side by side.
 
 ---
 
+## D25. The black-pixel threshold was set for a world with no mountains in it
+
+**Evidence.** `bevy_visual_acceptance` fails a world whose
+`dark_foreground_fraction` exceeds 0.08. Measured on the alpine arena as the
+border gained real relief:
+
+| Border | `dark_foreground_fraction` |
+|---|---|
+| none | (world open; not comparable) |
+| 26 m smooth rampart | 0.0751 |
+| 62 m ridged Alpine massif | 0.0940 |
+
+The world did not get worse. It got mountains, and mountains cast shadows —
+which is the whole reason the art direction asks for them.
+
+**Why it matters.** The threshold is doing real work: it catches clipped
+framing and genuinely unreadable renders, and it caught a 42 m wall that threw
+the apron into shade at 13.1%. But it was calibrated against a world whose
+tallest feature was a 51 m massif on one flank, and the declared direction
+(2026-08-02) is Alpine relief on every flank. A gate tuned for the old world
+now argues against the new one, and the cheapest way to satisfy it is to build
+flatter mountains — which is the same standing-incentive defect as
+[D16](#d16-the-critic-has-a-standing-incentive-to-degrade-the-renderer).
+
+**Fix direction.** Do not tune the mountains down to pass it. Separate the two
+things it currently conflates: *unreadable* (crushed blacks with no recoverable
+detail, which is a render defect) from *shadowed* (dark but structured, which is
+a mountain). Measuring local contrast inside the dark region distinguishes them
+— a shadowed cliff still has gradient, a crushed region does not. Re-baseline
+once, with the old and new values recorded side by side, against a world built
+to the current art direction rather than the previous one.
+
+---
+
 ## Deliberately not listed
 
 **`spine_count` moving no rendered metric** is a *finding*, not debt — see the

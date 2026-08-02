@@ -20,6 +20,8 @@ from typing import Any, Iterable
 import numpy as np
 from PIL import Image, ImageFilter
 
+from massif_character import shape_relief
+
 from worldbuilder_dsl import _PATTERN_SCALARS
 from zone_compiler import ZONE_SPEC_VERSION, ZoneCompileError
 
@@ -748,14 +750,40 @@ def _border_rampart(
         report["tightest_landmark_room_m"] = round(float(tightest), 3)
 
     # Ramp completes inside whatever depth this cell was allowed.
-    ramp = np.minimum(face, allowed)
-    fraction = np.clip((allowed - inward) / np.maximum(ramp, 1e-6), 0.0, 1.0)
+    # **Ridged massif relief, not a smooth wall times noise** (systems S18).
+    # Fractal noise has rounded maxima, so multiplying a rampart by it gives a
+    # lumpy rampart. Folding the noise about its midpoint turns maxima into
+    # creases that connect into ridgelines, and the character decides how sharp
+    # that fold is and how hard the valleys are flattened afterwards -- which is
+    # the difference between an Alpine trough and a Highland whaleback.
+    character = str(policy.get("massif_character", "alps"))
+    massif = shape_relief(x.shape, rng, character)
+    report["massif_character"] = character
+
+    # Relief carves *down* from `height_m`, never up. Raising summits above the
+    # authored height buys a ragged skyline by spending the one budget the
+    # border is constrained by -- shadow area, measured at 9.9% against an 8%
+    # limit when peaks reached 1.55x.
+    relief = float(policy.get("crest_relief", 0.0))
+    modulation = 1.0 - relief * (1.0 - massif) if relief > 0.0 else np.ones_like(massif)
+    if relief > 0.0:
+        report["crest_relief"] = relief
+
+    # **The face scales with the local height, so the wall's *angle* is constant.**
+    # It did not, and that let the world leak: where the massif dips to a saddle
+    # the wall stood 17 m over a 26 m face -- a 34 degree ramp a body walks
+    # straight over -- while the summits beside it were sheer. Measured: 330 m
+    # of edge reopened across four spans the moment the face was widened for a
+    # taller wall. Scaling the ramp by the same modulation that sets the height
+    # keeps height/face fixed everywhere, so saddles are lower but no gentler.
+    ramp = np.maximum(np.minimum(face, allowed) * modulation, 1.0)
+    fraction = np.clip((allowed - inward) / ramp, 0.0, 1.0)
     if play_distance is not None:
         # Wilderness first, then wall. The margin is the belt of open ground
         # outside the lanes that jungling still uses -- it is play space even
         # though no lane runs through it, so the wall starts beyond it.
         margin = float(policy.get("wilderness_margin_m", 26.0))
-        valley = np.clip((play_distance - margin) / max(face, 1e-6), 0.0, 1.0)
+        valley = np.clip((play_distance - margin) / ramp, 0.0, 1.0)
         fraction = np.maximum(fraction, valley)
         report["wilderness_margin_m"] = margin
     if report["profile"] == "ridge":
@@ -778,21 +806,7 @@ def _border_rampart(
     # measures *area* in shadow, and raising scattered summits costs far less of
     # it than lifting the whole wall by the same average -- the saddles between
     # them stay lit.
-    relief = float(policy.get("crest_relief", 0.0))
-    if relief > 0.0:
-        # Relief carves *down* from `height_m`, never up. Raising summits above
-        # the authored height buys a ragged skyline by spending the one budget
-        # the border is actually constrained by -- shadow area, measured at
-        # 9.9% against an 8% limit when peaks reached 1.55x. Cutting saddles
-        # instead gives the same broken silhouette and strictly less shade,
-        # and the saddles stay unwalkable because the *face angle* is what
-        # stops a body, not the height above it.
-        broad = _fractal_noise(shape.shape, rng, octaves=(2, 5, 11))
-        modulation = 1.0 - relief * (1.0 - np.clip(broad, 0.0, 1.0))
-        rampart = peak * shape * modulation
-        report["crest_relief"] = relief
-    else:
-        rampart = peak * shape
+    rampart = peak * shape * modulation
 
     report.update(
         {
