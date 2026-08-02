@@ -1,0 +1,17 @@
+{
+  "FileVersion": 3,
+  "Version": 2,
+  "VersionName": "0.2.0",
+  "FriendlyName": "Codeweald Zone Importer",
+  "Description": "Native Unreal Editor entry point for validating Codeweald zone payloads before Landscape and PCG import.",
+  "Category": "Codeweald",
+  "CanContainContent": true,
+  "EnabledByDefault": false,
+  "Modules": [
+    {
+      "Name": "CodewealdZoneImporter",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

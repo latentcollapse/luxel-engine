@@ -1,0 +1,8 @@
+{
+  "name": "com.codeweald.zone-importer",
+  "version": "0.1.0",
+  "displayName": "Codeweald Zone Importer",
+  "description": "Imports Codeweald ZoneSpec manifests into TerrainData, semantic layers, verified prefab placement, and portable runtime effects.",
+  "unity": "2022.3",
+  "author": {"name": "Codeweald"}
+}

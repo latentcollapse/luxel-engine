@@ -1,3 +1,28 @@
-# Docs only — no build artifacts belong here.
+# WGE — the engine. Source only.
+#
+# WGE compiles worlds; it does not own the art it places or the batches it
+# compiles. Those belong to whichever game is using it (Codeweald today), which
+# is why nothing asset-shaped is expected in this tree at all.
+
+# Rust build output (12 GB)
+world_core/target/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Julia
+terrain_lab/Manifest.toml
+
+# Generated kit output. The generators in pipeline/ are the source; the meshes
+# they emit are not, and they land wherever the caller points them.
+*.glb
+*.gltf
+*.fbx
+*.blend
+*.blend1
+
 .DS_Store
 *.log
