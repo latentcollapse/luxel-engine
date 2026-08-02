@@ -656,6 +656,61 @@ def _border_rampart(
     half_width, half_length = width * 0.5, length * 0.5
     inward = np.minimum(half_width - np.abs(x), half_length - np.abs(z))
 
+    # **Distance from the play space, not from the map rectangle.**
+    #
+    # Driving the rampart off the rect edge builds a square basin, because that
+    # is what "everywhere N metres from a rectangle" is. Reviewed 2026-08-02:
+    # "the actual playable map is a rhomboid; anything that is not playable map
+    # should be Alps and valley walls." The lanes and the woodlands they run
+    # through are that rhomboid, so the wall is built outward from *them* and
+    # everything the game does not use becomes mountain.
+    #
+    # The rect-edge term stays, unioned in below, because enclosure is not
+    # negotiable: however the play space is shaped, the world still has to be
+    # shut at its own boundary.
+    play_distance = np.full(x.shape, np.inf, dtype=np.float64)
+    envelope_sources = 0
+    for feature in features:
+        geometry = feature.get("geometry") or {}
+        points = geometry.get("points") or []
+        category = feature.get("category")
+        if category == "corridor" and len(points) >= 2:
+            width_m = float((feature.get("properties") or {}).get("minimum_width_m", 10.0))
+            play_distance = np.minimum(
+                play_distance, _polyline_distance(x, z, points) - width_m * 0.5
+            )
+            envelope_sources += 1
+        elif category == "biome" and len(points) >= 3:
+            # The background woodland spans nearly the whole map by design and
+            # would swallow the envelope whole, taking the wall with it.
+            span = max(
+                max(p[0] for p in points) - min(p[0] for p in points),
+                max(p[1] for p in points) - min(p[1] for p in points),
+            )
+            if span > min(width, length) * 0.8:
+                continue
+            inside, boundary = _polygon_mask(x, z, points)
+            play_distance = np.minimum(play_distance, np.where(inside, 0.0, boundary))
+            envelope_sources += 1
+        elif category == "landmark" and points:
+            radius = float(
+                (feature.get("properties") or {}).get("scatter_exclusion_radius_m", 0.0)
+            )
+            for point in points:
+                play_distance = np.minimum(
+                    play_distance,
+                    np.hypot(x - float(point[0]), z - float(point[1])) - radius,
+                )
+            envelope_sources += 1
+    if envelope_sources:
+        play_distance = np.maximum(play_distance, 0.0)
+        report["envelope_sources"] = envelope_sources
+    else:
+        # Nothing declares a play space, so the rectangle is the only shape
+        # available. Better a square basin than no border at all.
+        play_distance = None
+        report["envelope_sources"] = 0
+
     # **How far the rampart may reach is a field, not a number.** A single global
     # depth is set by whichever landmark sits closest to the edge, which on this
     # map is one watchpost -- and it would thin the entire border, on all four
@@ -695,6 +750,14 @@ def _border_rampart(
     # Ramp completes inside whatever depth this cell was allowed.
     ramp = np.minimum(face, allowed)
     fraction = np.clip((allowed - inward) / np.maximum(ramp, 1e-6), 0.0, 1.0)
+    if play_distance is not None:
+        # Wilderness first, then wall. The margin is the belt of open ground
+        # outside the lanes that jungling still uses -- it is play space even
+        # though no lane runs through it, so the wall starts beyond it.
+        margin = float(policy.get("wilderness_margin_m", 26.0))
+        valley = np.clip((play_distance - margin) / max(face, 1e-6), 0.0, 1.0)
+        fraction = np.maximum(fraction, valley)
+        report["wilderness_margin_m"] = margin
     if report["profile"] == "ridge":
         shape = 0.5 - 0.5 * np.cos(np.pi * fraction)
     else:
