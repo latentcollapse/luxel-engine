@@ -416,8 +416,30 @@ ridges, gameplay width.
 
 ---
 
-### S10. Settlement and structure siting
+### S10. Settlement and structure siting — **v1 DONE 2026-08-02**
 **Tier: Yellow · Who: O · Depends on: S1, S2, S9**
+
+`siting.py` + `siting_plan.json`. Two scores because there are two rules:
+settlements want flat, drained, sheltered ground *near* a route and off it;
+guardians want to be *on* the lane, spaced apart, on commanding ground.
+
+**The lane term is two-sided, and that is the whole fix for [D13](DEBT_LEDGER.md).**
+The existing scatter effectively has a one-sided "near a road is good" term,
+which is why villages ended up in the carriageway. Near is good, on is
+disqualifying, far is pointless — measured as a peak at ~30 m rather than a
+threshold.
+
+**D13 is now named rather than inferred.** It used to surface as "no lane runs
+end to end", which is the symptom. The audit reports 12 obstructing placements
+on the alpine arena with the structure, the lane, the metres of overlap, and the
+repair — `southwest_hamlet` over `central_lane` by 19.5 m, `eastcentral_hamlet`
+by 18.6 m, `westcentral_hamlet` over `north_lane` by 14.4 m.
+
+**Still open:** the plan proposes and audits; it does not yet move anything. The
+positions are authored in `annotations.json` and re-siting them means either
+adopting the proposals into the batch or teaching the Rust anchor compiler to
+read this plan. Until then D13 stays open — but it is now open with coordinates
+attached instead of a symptom.
 
 Sites scored on buildable flatness, water proximity, defensibility, route
 access, and exclusion from gameplay corridors.

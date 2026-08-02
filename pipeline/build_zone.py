@@ -29,6 +29,7 @@ from silhouette import from_batch as measure_silhouette
 from forestry import build as build_vegetation
 from hydrology import build as build_hydrology
 from site_conditions import write as write_site_conditions
+from siting import build as build_siting
 from collision_acceptance import evaluate as evaluate_collision
 from navmesh_acceptance import evaluate as evaluate_navmesh
 from asset_visual_preflight import preflight as preflight_assets
@@ -1020,6 +1021,25 @@ def build(
             dominant["key"],
         )
     )
+
+    # Systems S10. Scores the world for structure siting and audits what is
+    # already placed. D13 is reported today as "no lane runs end to end", which
+    # names the symptom; this names the structure, the lane, and the metres.
+    siting = build_siting(batch_dir)
+    _write(batch_dir / "siting_plan.json", siting)
+    if siting["obstruction_count"]:
+        print(
+            "  siting: %d placement(s) obstructing a lane -- %s"
+            % (
+                siting["obstruction_count"],
+                "; ".join(
+                    "%s over %s by %.1f m" % (c["feature_id"], c["lane_id"], c["overlap_m"])
+                    for c in siting["obstructing_placements"][:3]
+                ),
+            )
+        )
+    else:
+        print("  siting: no placement obstructs a lane")
 
     boundary = write_boundary_plan(batch_dir)
     _write(batch_dir / "boundary_plan.json", boundary)
