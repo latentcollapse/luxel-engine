@@ -22,7 +22,14 @@ from PIL import Image, ImageFilter
 
 from collections import namedtuple as _namedtuple
 
-from hydrology import carve_outlet, choose_outlet, fill_depressions, flow_accumulation
+from hydrology import (
+    carve_channels,
+    carve_outlet,
+    channel_depth_field,
+    choose_outlet,
+    fill_depressions,
+    flow_accumulation,
+)
 
 # The outlet is chosen on the coarse grid and cut on the fine one, so the carve
 # takes a position rather than the coarse Outlet record it came from.
@@ -1885,8 +1892,41 @@ def rasterize_zone_spec(
         height = carve_outlet(
             height, full.row, full.column, cell_m=width / (resolution - 1)
         )
+        # Systems S2: cut the derived network, not just its outlet.
+        #
+        # The drainage graph knew where every reach ran and how much drained
+        # through it, and none of that was in the terrain -- so the map had a
+        # gorge at one edge and blue paint everywhere else. Depth scales with
+        # log upslope area and is capped well inside the agent's climb, because
+        # the declared direction is rivers shallow enough to walk with bridges
+        # as an aesthetic choice.
+        #
+        # Re-accumulated on the *carved* surface: the outlet changed where water
+        # goes, and routing the network over the pre-notch terrain would cut
+        # beds toward a basin that no longer exists.
+        drained_filled = fill_depressions(height[::step, ::step].astype(np.float64))
+        drained_flow = flow_accumulation(drained_filled)
+        coarse_depth = channel_depth_field(
+            drained_flow, cell_m=width / (drained_flow.shape[0] - 1)
+        )
+        channel_depth = np.asarray(
+            Image.fromarray(coarse_depth.astype(np.float32), mode="F").resize(
+                (resolution, resolution), Image.Resampling.BILINEAR
+            ),
+            dtype=np.float64,
+        )
+        height = carve_channels(height, channel_depth)
+        channel_report = {
+            "carved_area_m2": round(
+                float((channel_depth > 0.05).sum())
+                * (width / (resolution - 1)) ** 2,
+                1,
+            ),
+            "maximum_depth_m": round(float(channel_depth.max()), 3),
+        }
         outlet_report = {
             "enabled": True,
+            "channels": channel_report,
             "edge": outlet.edge,
             "world_m": [
                 round(float(x[full.row, full.column]), 3),

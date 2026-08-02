@@ -223,8 +223,16 @@ radius bowl centred on the rim cell against a ~28 m deep wall: it lowered the
 notch has to run inward far enough to reach the ground it drains, with the bed
 falling toward the edge — water level with the ground it drains does not flow.
 
-**Still open for v2:** channel carving along derived reaches (the network is
-measured but only the outlet is cut), Strahler ordering, waterfall detection at
+**v2 landed 2026-08-02: channels are carved.** Depth scales with the log of
+upslope area -- a reach draining ten times the ground is about twice as deep,
+not ten times, and a linear rule gives a scratch everywhere and one canyon at
+the outlet. Capped at 1.15 m so the beds stay walkable, per the declared
+direction that bridges are aesthetic rather than required. Banks are smoothed
+with a *triangular* kernel: one box pass produced a flat-bottomed trench with
+vertical sides, which is the defect the smoothing exists to avoid. 3,121 m2
+carved on the alpine arena.
+
+**Still open for v3:** Strahler ordering, waterfall detection at
 gradient breaks, reconciliation against authored water, and depth-aware
 classification — a 15 m-deep closed hole currently reads as "bog" on catchment
 alone, when it is really a tarn.

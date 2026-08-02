@@ -25,6 +25,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))
 
 from hydrology import (  # noqa: E402
     BOG_CATCHMENT,
+    carve_channels,
+    channel_depth_field,
     carve_outlet,
     choose_outlet,
     classify,
@@ -119,6 +121,52 @@ class OutletTest(unittest.TestCase):
             [drained[0, :], drained[-1, :], drained[:, 0], drained[:, -1]]
         )
         self.assertGreater(float(np.median(rim)), 10.0)
+
+
+class ChannelTest(unittest.TestCase):
+    def _accumulated(self):
+        rows = np.linspace(40.0, 10.0, SIDE)[:, None]
+        columns = np.abs(np.arange(SIDE) - SIDE // 2)[None, :] * 0.55
+        height = rows + columns
+        return height, flow_accumulation(fill_depressions(height))
+
+    def test_depth_scales_with_the_logarithm_of_catchment(self):
+        """A reach draining ten times the ground is about twice as deep, not
+        ten times. A linear rule gives a scratch everywhere and one canyon."""
+        _, accumulation = self._accumulated()
+        depth = channel_depth_field(accumulation, cell_m=CELL_M)
+        deep = float(depth.max())
+        self.assertGreater(deep, 0.0)
+        # The deepest reach drains far more than ten times the shallowest cut,
+        # yet is nothing like ten times deeper.
+        cut = depth[depth > 0.01]
+        self.assertLess(deep / float(cut.min()), 10.0)
+
+    def test_nothing_is_carved_below_the_channel_threshold(self):
+        """Every hillside has flow; only some of it is a stream."""
+        flat = np.ones((SIDE, SIDE))
+        depth = channel_depth_field(flat * 2.0, cell_m=CELL_M)
+        self.assertEqual(0.0, float(depth.max()))
+
+    def test_the_bed_stays_within_the_agents_climb(self):
+        """The declared direction is rivers shallow enough to walk, with
+        bridges an aesthetic choice. A channel needing a bridge broke the map."""
+        _, accumulation = self._accumulated()
+        depth = channel_depth_field(accumulation, cell_m=CELL_M)
+        self.assertLess(float(depth.max()), 4.0)
+
+    def test_banks_are_smoothed_rather_than_trenched(self):
+        """A one-cell trench is invisible at distance and a grade discontinuity
+        the accessibility gate correctly objects to."""
+        height = np.zeros((SIDE, SIDE))
+        depth = np.zeros((SIDE, SIDE))
+        depth[:, SIDE // 2] = 1.0
+        carved = carve_channels(height, depth)
+        centre = abs(float(carved[SIDE // 2, SIDE // 2]))
+        shoulder = abs(float(carved[SIDE // 2, SIDE // 2 + 1]))
+        self.assertGreater(centre, 0.0)
+        self.assertGreater(shoulder, 0.0, "the bank is a vertical wall")
+        self.assertLess(shoulder, centre)
 
 
 class ClassificationTest(unittest.TestCase):

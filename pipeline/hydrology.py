@@ -332,3 +332,65 @@ def build(batch_dir) -> dict:
         }
     )
     return report
+
+
+def channel_depth_field(
+    accumulation: np.ndarray,
+    *,
+    cell_m: float,
+    threshold: float = CHANNEL_ACCUMULATION,
+    maximum_depth_m: float = 1.15,
+) -> np.ndarray:
+    """How deep the bed is at every cell, in metres.
+
+    Depth scales with the *logarithm* of upslope area, not with area itself. A
+    reach draining ten times the ground is not ten times deeper -- it is roughly
+    twice -- which is why a linear rule produces a shallow scratch everywhere
+    and one canyon at the outlet.
+
+    Capped deliberately low. The declared art direction is rivers shallow enough
+    to walk, with bridges as an aesthetic choice rather than a traversal
+    requirement, so the bed must stay well inside the agent's climb height. A
+    channel that needs a bridge is a channel that broke the map.
+    """
+    above = np.maximum(accumulation - threshold, 0.0)
+    if not np.any(above > 0.0):
+        return np.zeros_like(accumulation)
+    strength = np.log1p(above) / math.log1p(float(above.max()) or 1.0)
+    return np.clip(strength, 0.0, 1.0) * maximum_depth_m
+
+
+def carve_channels(
+    height: np.ndarray,
+    depth: np.ndarray,
+    *,
+    smoothing: int = 2,
+) -> np.ndarray:
+    """Cut the derived network into the terrain.
+
+    Banks are smoothed before subtraction so the bed has shoulders rather than
+    vertical sides. A one-cell-wide trench is both invisible from any distance
+    and a grade discontinuity the accessibility gate correctly objects to -- the
+    same defect the rampart toe and the outlet notch each had in turn.
+    """
+    if smoothing < 1 or not np.any(depth > 0.0):
+        return height - depth
+
+    def box(values: np.ndarray) -> np.ndarray:
+        padded = np.pad(values, smoothing, mode="edge")
+        window = 2 * smoothing + 1
+        total = np.zeros_like(values)
+        for row_offset in range(window):
+            for column_offset in range(window):
+                total += padded[
+                    row_offset : row_offset + values.shape[0],
+                    column_offset : column_offset + values.shape[1],
+                ]
+        return total / float(window * window)
+
+    # **Twice.** One box pass spreads a channel into a flat-bottomed trench with
+    # vertical sides -- measured: the bed and both cells beside it identical at
+    # 0.20 m, then a step to zero. That is the trench this smoothing exists to
+    # avoid, just wider. Convolving two boxes gives a triangular kernel, which
+    # actually tapers, so the bed has shoulders that meet the ground.
+    return height - box(box(depth))
