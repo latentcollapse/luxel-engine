@@ -1,0 +1,3 @@
+# Docs only — no build artifacts belong here.
+.DS_Store
+*.log
