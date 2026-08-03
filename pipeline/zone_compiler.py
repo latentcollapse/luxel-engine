@@ -111,6 +111,14 @@ DEFAULT_BORDER_POLICY = {
     "crest_relief": 0.72,
     # Which range this world's mountains belong to (systems S18).
     "massif_character": "alps",
+    # Systems S3. **Off by default, deliberately.** The erosion solver is
+    # correct in isolation -- it turns a V into a U, the three characters
+    # differ, thermal settling is stable -- but integrating it after the border
+    # planes the border away, because the rampart is the tallest thing on the
+    # map and the ice goes for the tallest thing. Reviewed 2026-08-02: the
+    # border had largely vanished. Enabling it needs the border excluded from
+    # erosion and the result re-reviewed, not a parameter nudge.
+    "erosion": False,
     # Open ground outside the lanes that jungling still uses. The wall starts
     # beyond it, not at the lane edge.
     "wilderness_margin_m": 22.0,
@@ -863,7 +871,10 @@ def _validate_border_policy(value: Any) -> dict[str, Any]:
         )
     policy = dict(DEFAULT_BORDER_POLICY)
     policy.update(value)
-    if not isinstance(policy["enabled"], bool):
+    for flag in ("enabled", "erosion"):
+        if not isinstance(policy[flag], bool):
+            raise ZoneCompileError("border_policy.%s must be true or false" % flag)
+    if False:
         raise ZoneCompileError("border_policy.enabled must be true or false")
     from massif_character import CHARACTERS as _MASSIF_CHARACTERS
     if policy["massif_character"] not in _MASSIF_CHARACTERS:

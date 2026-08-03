@@ -186,8 +186,49 @@ mountains beside it.
 
 ---
 
-### S3. Erosion and geomorphology
+### S3. Erosion and geomorphology — **built, OFF by default**
 **Tier: Orange · Who: O · Depends on: S1**
+
+`erosion.py` + `test_erosion.py` (17 tests). Three processes: fluvial stream
+power, glacial planation, thermal repose. The glacial claim is demonstrated —
+a V-valley becomes a U (form ratio 0.34 → 0.45 alps, 0.64 highlands), fluvial
+alone leaves it sharp (0.33), and Andes stays a V (0.31) because its corridor is
+narrow.
+
+**`border_policy.erosion` defaults to `false`, deliberately.** Enabled, it
+planes the border away: the rampart is the tallest thing on the map and ice goes
+for the tallest thing. Reviewed 2026-08-02 with the border largely vanished.
+
+Four things learned the hard way, each pinned by a test:
+
+- **Relaxed flux propagates one cell per iteration.** Twelve iterations moved
+  water twelve cells, so on a 257-grid the downstream half of every valley
+  accumulated nothing and ice flux read 0.00 across whole cross-sections — both
+  erosion terms were multiplying by zero while appearing to run. Now a single
+  sorted pass down the topology, exact at any size.
+- **A sign error sent flux uphill.** `_shift(h, dr, dc)[r,c]` is `h[r-dr,c-dc]`,
+  so weights computed for `(dr,dc)` describe flow toward `(row-dr,col-dc)`. The
+  flux maximum sat at the *top* of a valley that drained downward.
+- **Erosion proportional to ice flux makes a sharper V, not a U.** Flux peaks on
+  the axis. A glacier instead occupies a corridor and planes its bed, so what it
+  removes is the wedge standing above the valley floor *within that corridor*.
+- **Thermal erosion must move a fraction of the largest excess, not their sum.**
+  Summing across eight neighbours let a cell shed more than any height
+  difference justified; a cliff run to rest reached 1e11 m.
+
+**Known limitations, not yet fixed:**
+
+1. **Corridor width derives from grid size, not from the valley.** A glacier
+   fills its valley; this one is `lateral_widening x side / 20`. Narrow enough
+   to be safe leaves no wedge to remove; wide enough to carve eats the map.
+2. **The equilibrium line controls where ice bites, not how hard.** Flux is
+   normalised by its own maximum before thresholding, so a lower snowline
+   dilutes the trunk signal rather than strengthening it — an ELA at the 95th
+   percentile removed *more* than one at the 15th. Needs an absolute ice-volume
+   threshold, which is a model change.
+3. **Integration order is unsolved.** Before the border, the border stays
+   un-eroded and artificial; after it, the border is destroyed. Excluding the
+   border footprint from erosion is the obvious next attempt.
 
 Hydraulic and thermal erosion so terrain reads as weathered rather than
 procedural. Carves valleys where water actually flows, rounds ridges, deposits

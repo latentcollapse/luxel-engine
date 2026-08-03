@@ -35,6 +35,7 @@ from hydrology import (
 # takes a position rather than the coarse Outlet record it came from.
 Outlet_ = _namedtuple("Outlet_", "row column")
 _OutletAt = _namedtuple("_OutletAt", "row column")
+from erosion import PROFILES as EROSION_PROFILES, erode
 from massif_character import shape_relief
 
 from worldbuilder_dsl import _PATTERN_SCALARS
@@ -1926,6 +1927,61 @@ def rasterize_zone_spec(
     # true incised channels retain explicit bridge/off-mesh semantics in the
     # render and navigation plans rather than relying on a terrain trench to
     # make the crossing impassable.
+    # Systems S3: erosion.
+    #
+    # Runs after the border so the rim is carved too -- an Alpine map's edge
+    # should be an Alpine wall -- and before roads, water and landmark pads, all
+    # of which are graded surfaces a stream-power term would happily cut a gully
+    # through.
+    #
+    # On a coarse grid with the delta resampled up: the flux pass is a sorted
+    # loop over every cell and it runs once per iteration, so full resolution
+    # would be minutes per build for detail that erosion does not operate at.
+    erosion_report: dict[str, Any] = {"enabled": False}
+    erosion_cliffs: np.ndarray | None = None
+    if bool((zone_spec.get("border_policy") or {}).get("erosion", False)):
+        character = str(
+            (zone_spec.get("border_policy") or {}).get("massif_character", "alps")
+        )
+        if character in EROSION_PROFILES:
+            coarse_side = min(129, resolution)
+            erosion_step = max(1, (resolution - 1) // (coarse_side - 1))
+            before = height[::erosion_step, ::erosion_step].astype(np.float64)
+            eroded, erosion_report = erode(
+                before,
+                EROSION_PROFILES[character],
+                cell_m=width / (before.shape[0] - 1),
+            )
+            delta = np.asarray(
+                Image.fromarray((eroded - before).astype(np.float32), mode="F").resize(
+                    (resolution, resolution), Image.Resampling.BILINEAR
+                ),
+                dtype=np.float64,
+            )
+            # The rim may be carved but not breached: enclosure is not a thing
+            # erosion gets to have an opinion about.
+            # How far erosion may lower any single cell. Generous enough for
+            # real carving, tight enough that it cannot quietly open the rim.
+            floor_guard = height - float(border_report.get("height_m", 26.0)) * 0.55
+            height = np.maximum(height + delta, floor_guard)
+            erosion_report["enabled"] = True
+
+            # A glacial trough wall is intentional, unwalkable terrain -- the
+            # same claim the border rampart makes, and it needs the same tag.
+            # Left in `background` the accessibility gate measures the wall the
+            # ice just cut as walkable ground that happens to be a cliff, and
+            # the build fails for having carved a valley (p99 grade 1.87 ->
+            # 2.19 while the *maximum* stayed inside tolerance, which is the
+            # signature of a few percent of genuinely vertical rock rather than
+            # of a broken surface).
+            cell_x = width / (resolution - 1)
+            cell_z = length / (resolution - 1)
+            carved_z, carved_x = np.gradient(height, cell_z, cell_x)
+            erosion_cliffs = (np.hypot(carved_x, carved_z) > 1.0) & (delta < -0.5)
+            erosion_report["protected_cliff_area_m2"] = round(
+                float(erosion_cliffs.sum()) * cell_x * cell_z, 1
+            )
+
     # Systems S2: cut the world an outlet.
     #
     # Closing the border (S4) made the map a closed basin -- the interior floor
@@ -2102,6 +2158,9 @@ def rasterize_zone_spec(
     if border_footprint.any():
         protected_relief_mask[border_footprint] = 255
         semantic_region_mask[border_footprint] |= REGION_PROTECTED_RELIEF
+    if erosion_cliffs is not None and erosion_cliffs.any():
+        protected_relief_mask[erosion_cliffs] = 255
+        semantic_region_mask[erosion_cliffs] |= REGION_PROTECTED_RELIEF
     for feature, mask in landform_masks:
         if bool(feature.get("properties", {}).get("traversable", False)):
             semantic_region_mask[mask] |= REGION_TRAVERSABLE_LANDFORM
@@ -2153,6 +2212,7 @@ def rasterize_zone_spec(
         # without re-deriving the rampart by hand.
         "border": border_report,
         "outlet": outlet_report,
+        "erosion": erosion_report,
         "height_range_m": {"min": round(float(height.min()), 3), "max": round(float(height.max()), 3)},
         "artifacts": {
             "heightmap_16": "heightmap_16.png",
