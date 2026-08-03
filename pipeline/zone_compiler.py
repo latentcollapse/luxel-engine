@@ -113,7 +113,10 @@ DEFAULT_BORDER_POLICY = {
     "massif_character": "alps",
     # Open ground outside the lanes that jungling still uses. The wall starts
     # beyond it, not at the lane edge.
-    "wilderness_margin_m": 26.0,
+    "wilderness_margin_m": 22.0,
+    # How far the mountain front advances and retreats, making spurs and
+    # re-entrants instead of a flat face with a ragged top.
+    "spur_amplitude_m": 24.0,
     # Never encroach closer than this to a landmark's own footprint. Closing the
     # world is not worth burying a keep to do it.
     "landmark_clearance_m": 10.0,
@@ -872,7 +875,7 @@ def _validate_border_policy(value: Any) -> dict[str, Any]:
         raise ZoneCompileError(
             "border_policy.profile must be one of %s" % sorted(BORDER_PROFILES)
         )
-    for field in ("height_m", "crest_m", "inner_face_m", "landmark_clearance_m", "crest_relief", "wilderness_margin_m"):
+    for field in ("height_m", "crest_m", "inner_face_m", "landmark_clearance_m", "crest_relief", "wilderness_margin_m", "spur_amplitude_m"):
         number = policy[field]
         if not isinstance(number, (int, float)) or isinstance(number, bool):
             raise ZoneCompileError("border_policy.%s must be numeric" % field)

@@ -798,9 +798,29 @@ def _border_rampart(
         # outside the lanes that jungling still uses -- it is play space even
         # though no lane runs through it, so the wall starts beyond it.
         margin = float(policy.get("wilderness_margin_m", 26.0))
-        valley = np.clip((play_distance - margin) / ramp, 0.0, 1.0)
+
+        # **The massif has to move the wall, not just raise it.**
+        #
+        # Height alone gives `peak * profile(distance) * massif(x, z)`: the
+        # ragged part is the *top edge* and the cross-section is identical
+        # everywhere, so from inside the valley it reads as a 2D silhouette on
+        # a solid vertical back -- reviewed 2026-08-02 in exactly those words.
+        #
+        # Pushing the distance field in and out with the same field makes the
+        # toe of the wall advance and retreat. That is what a spur and a
+        # re-entrant *are*: the mountain coming forward here and drawing back
+        # there. It costs nothing extra and it is the difference between a
+        # range and a backdrop.
+        #
+        # Only the play-space term is perturbed. The rect-edge term below is
+        # what guarantees enclosure, and a spur that retreated past the map
+        # boundary would reopen the world.
+        spur = float(policy.get("spur_amplitude_m", 24.0))
+        wandering = play_distance + spur * (massif - 0.5) * 2.0
+        valley = np.clip((wandering - margin) / ramp, 0.0, 1.0)
         fraction = np.maximum(fraction, valley)
         report["wilderness_margin_m"] = margin
+        report["spur_amplitude_m"] = spur
     if report["profile"] == "ridge":
         shape = 0.5 - 0.5 * np.cos(np.pi * fraction)
     else:
@@ -1536,6 +1556,51 @@ def rasterize_zone_spec(
                     foothill
                     + (peak - floor) * ridge_network * ridged_detail
                     + summit_lift
+                )
+
+                # **Systems S18 reaches the interior, not only the border.**
+                #
+                # `shape_relief` was wired into the border rampart alone, so
+                # every crag inside the map still came from the old
+                # jittered-cone family -- reviewed 2026-08-02 as "the mountains
+                # are still the same odd shapes", which was exactly right. The
+                # local variable here is also called `massif`, which is how the
+                # gap survived a reading.
+                #
+                # Blended rather than substituted: the existing construction
+                # carries the authored spine topology and the polygon's
+                # footprint, and throwing that away would lose the composition
+                # the DSL controls. The character supplies the *shape* of the
+                # rock; the spine network still decides where it runs.
+                character_key = str(
+                    (zone_spec.get("border_policy") or {}).get(
+                        "massif_character", "alps"
+                    )
+                )
+                character_relief = shape_relief(
+                    x.shape,
+                    np.random.default_rng(
+                        int(zone_spec.get("generation_seed", 1))
+                        + feature_index * 104729
+                    ),
+                    character_key,
+                )
+                # Renormalised inside the landform's own footprint. The field
+                # is normalised over the whole grid, so a polygon covering a
+                # tenth of the map samples only a low slice of its range and
+                # the blend flattens the crags instead of sharpening them --
+                # measured on the first attempt, which turned the interior
+                # peaks into mounds. Within the mask it gets its full range
+                # back and the character actually reads.
+                inside = character_relief[mask] if mask.any() else character_relief
+                low, high = float(inside.min()), float(inside.max())
+                if high - low > 1e-6:
+                    character_relief = np.clip(
+                        (character_relief - low) / (high - low), 0.0, 1.0
+                    )
+                orogeny = float(generation.get("orogeny_blend", 0.45))
+                massif = massif * (1.0 - orogeny) + (
+                    (peak - floor) * character_relief * orogeny
                 )
                 if continuous_wall:
                     # Give the broad heightfield face named geological masses.
