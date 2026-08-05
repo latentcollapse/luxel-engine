@@ -174,9 +174,39 @@ should be made before G4 and G6 harden.
 removed with Godot on 2026-07-31. Bevy is the reference renderer and
 [explicitly not a backend](TOOLING_UPGRADES.md).
 
-**Needed:** a decision about what actually ships the game. Every item G1-G7 has
-a different shape depending on it — GAS is nearly free in Unreal and a
-from-scratch build elsewhere.
+**DECIDED 2026-08-05: Unity for the arena and the toolkit; UE5 reserved for
+Sidhe.**
+
+The decision splits rather than resolving to one engine, which the artifact
+layer exists to permit: WGE emits engine-neutral certified artifacts, so the
+compiler and the asset pipeline do not care what renders them.
+
+**Why Unity here.** The MOBA arena is an *LLM arena* -- a test ground where
+agents are given the rules and compete -- not a netcoded product. That removes
+the only strong argument for Unreal, since GAS and replication were the case for
+it and neither is needed.
+
+What remains favours Unity decisively:
+
+- **AI operability, measured rather than assumed.** `unrealMCP` is configured in
+  this workspace and exposes **zero tools**. `UnityMCP` exposes scene, GameObject,
+  prefab, material, shader, texture, physics, animation, UI, VFX, build and test
+  control, plus `execute_code` for arbitrary C# inside the editor. `godotMCP` is
+  modest. On the axis this project is *about*, it is not close.
+- **Commercial.** The Asset Store is the strongest marketplace for tools and
+  editor extensions, which is the high-margin piece. Since Fab went cross-engine,
+  generated *content* is not locked to the runtime choice -- only the importer
+  plugin is.
+- **Adapter maturity.** `engine_adapters/unity` is the further along of the two.
+
+**Why UE5 stays reserved.** GAS has no real equivalent in Unity or Godot, and its
+replication integration is most of its value. Sidhe wants it. Nothing about
+choosing Unity here forecloses that -- both adapters are scaffolded.
+
+**Caveat that shapes the workflow.** UnityMCP requires the editor *running and
+connected*; it is a live-session dependency, not headless CI. WGE's own pipeline
+therefore stays headless, and Unity is the presentation and sale target rather
+than the place work happens.
 
 ---
 
@@ -184,8 +214,7 @@ from-scratch build elsewhere.
 
 Ordered by what unblocks the most:
 
-1. **G8** (pick a backend) — it is a decision, costs nothing to make, and
-   changes the shape of everything below.
+1. ~~**G8** (pick a backend)~~ — **DONE 2026-08-05: Unity here, UE5 for Sidhe.**
 2. **G7** (authority model) — same: a decision that constrains G4/G6.
 3. **G1 + G2** (collision + navmesh) — the pipeline already has the inputs;
    this converts a rendered world into a traversable one and is squarely WGE's

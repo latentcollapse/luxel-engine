@@ -283,15 +283,21 @@ to hit the same walls.
 
 | # | Task | Who | Tier |
 |---|---|---|---|
-| 4.1 | **[M] Pick the target backend** ([G8](MISSING_INVENTORY.md)) | M | — |
+| 4.1 | ~~**[M] Pick the target backend**~~ **DONE 2026-08-05 — Unity** ([G8](MISSING_INVENTORY.md)) | M | — |
 | 4.2 | Backend adapter emits terrain + collision + navmesh + spawns as native assets | O | Red |
 | 4.3 | Character controller walks the map end to end in the target engine | S | Yellow |
 | 4.4 | Import-side acceptance: the imported map matches the certified artifact digests | S | Blue |
 
-**4.1 blocks 4.2-4.4 entirely and costs nothing but a decision.** Unreal gives
-GAS nearly free; Unity and Godot mean building it. Worth deciding before Phase 2
-finishes, since it shapes what "spawn transform" and "region volume" should
-serialise as.
+**4.1 is answered: Unity for the arena and the sellable toolkit, UE5 reserved for
+Sidhe** (see [G8](MISSING_INVENTORY.md) for the reasoning and the measurements
+behind it). 4.2-4.4 are unblocked.
+
+The decision splits by product rather than resolving to one engine, and the
+artifact layer is what makes that legitimate — WGE emits engine-neutral certified
+artifacts, so `spawn transform` and `region volume` serialise once and each
+adapter reads them. Do **not** let Unity-shaped assumptions leak back into the
+compiler; the moment they do, the Sidhe path costs a rewrite rather than an
+adapter.
 
 ---
 
