@@ -1010,6 +1010,62 @@ camera.
 is the world he wants. That is taste, and no measurement settles it. But it is
 no longer entangled with the gate — the gate is independently broken.
 
+### Resolved 2026-08-06 — the denominator is a count of trees now
+
+`foliage_fraction` no longer gates. It is still computed and reported, the same
+way `dark_foreground_fraction` was kept after D25, so the replacement can be
+checked against it rather than taken on trust.
+
+**Replacement:** `pipeline/foliage_projection_acceptance.py`, fed by a new
+capture-time artifact `<capture>_foliage_projection.json` that the viewer writes
+from the same settled frame the screenshot comes from.
+
+**Why the viewer and not Python.** The camera auto-frames the world and was
+recorded nowhere — no serialized position, rotation, or FOV existed to project
+against. Rather than start serializing a camera, the projection happens in the
+process that owns the real one, via `Camera::world_to_viewport`, and Python
+consumes the result. That is the shape `overview_projection_acceptance.py`
+already uses for Godot (`Camera3D.unproject_position` in-engine, thin gate
+outside), so this follows established precedent rather than inventing a second
+pattern.
+
+**Why the spawned entity and not `render_plan.json`'s coordinates.** Replaying
+the plan's positions would report a tree as present whether or not the viewer
+managed to spawn it. The projection queries live `FoliageInstance` entities, so
+an instance that never made it into the world is absent from the artifact too.
+
+**What was actually fixed.** The denominator is the instance count. Adding a
+tree can now only raise the numerator or leave it alone; no reframing can lower
+it. `tests/test_foliage_projection_acceptance.py` pins exactly the transition
+that exposed the defect — 275 → 301 instances — and asserts the fraction does
+not fall, which is the regression the old metric could not have been given at
+any threshold.
+
+**Normalising by `foreground_fraction` would not have been enough**, and D24's
+recorded fix direction should be read with this caveat. It removes the *sky's*
+share of the composition effect and leaves the *rock's*: a taller massif puts
+proportionally more rock among the world's own foreground pixels, so
+green-share-of-world still falls with no tree removed. An area denominator is
+the defect; changing which area does not fix it.
+
+**What this deliberately does not claim.**
+
+- **Frustum containment is not occlusion.** An instance standing behind a ridge
+  is reported in frame. A pixel probe (`probe_hit_fraction`) distinguishes drawn
+  from merely-framed by sampling the canopy column above each projected base —
+  the base, because `position_m` has the grounding offset already subtracted, so
+  the projected point is the foot of the trunk and sampling it reads ground.
+- **The probe is reported, not gated.** It has never been measured on a real
+  build, and setting a floor from a number nobody has observed is the mistake
+  this entry and D25 both exist to record. It needs a real capture to calibrate.
+- **Only two failures gate, and both are zero-tests rather than thresholds:**
+  no foliage instances at all, and no instance in frame. Those are undeniable
+  without calibration. Everything between them is reported.
+
+**Still open:** the probe's threshold, pending a real build; and whether ~90%
+heath is the intended world, which remains Matt's call and is unaffected by any
+of this.
+
 ---
 
 ## D29. Moving the obstructing placements cannot clear the navmesh gate

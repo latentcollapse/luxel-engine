@@ -648,6 +648,22 @@ impl WorldPicker {
 struct Placement {
     asset_path: String,
     transform: Transform,
+    /// Carried so the capture can project the foliage the plan actually
+    /// placed. See `FoliageInstance` and D28.
+    id: String,
+    role: String,
+}
+
+/// Marks a spawned foliage instance so the capture can find it again.
+///
+/// **Why the spawned entity and not the plan's coordinates** (D28): replaying
+/// `render_plan.json` positions would report a tree as present whether or not
+/// the viewer managed to spawn it. Querying the entity means an instance that
+/// never made it into the world is absent from the projection too, which is
+/// the failure this gate exists to catch.
+#[derive(Component)]
+struct FoliageInstance {
+    id: String,
 }
 
 /// The flat corridor ribbon: where the compiler *thinks* a road runs.
@@ -981,11 +997,107 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+/// Project every spawned foliage instance into the capture frame.
+///
+/// **Why this exists (D28).** The image gate used to judge foliage by counting
+/// green pixels as a share of the whole frame. That share moves when the
+/// *composition* moves: two builds of the same world went 275 -> 301 instances
+/// while the metric fell 0.006820 -> 0.005207, because taller terrain put more
+/// rock and shadow in frame. Whatever threshold such a metric is given, it does
+/// not measure the quantity of foliage.
+///
+/// Normalising by the foreground would only remove the sky's share of that
+/// effect, not the rock's, so the fix is the one D28 asks for: project the
+/// instances the plan actually placed and let the denominator be *the number of
+/// trees*, which no framing change can move.
+///
+/// This writes where each instance landed on screen. It deliberately does not
+/// decide whether the instance is *rendered* — that needs the pixels, which
+/// live on the Python side of the gate.
+fn write_foliage_projection(
+    path: &Path,
+    camera: &Camera,
+    camera_transform: &GlobalTransform,
+    instances: &Query<(&FoliageInstance, &GlobalTransform)>,
+) -> Result<()> {
+    let viewport = camera
+        .logical_viewport_size()
+        .context("camera has no logical viewport")?;
+    let mut records = Vec::new();
+    let mut in_frame = 0usize;
+    for (instance, transform) in instances.iter() {
+        let world = transform.translation();
+        // `Err` here is a point behind the camera, which is a legitimate
+        // "not in frame" rather than a failure to record.
+        let projected = camera.world_to_viewport(camera_transform, world).ok();
+        let inside = projected.is_some_and(|point| {
+            point.x >= 0.0 && point.y >= 0.0 && point.x < viewport.x && point.y < viewport.y
+        });
+        if inside {
+            in_frame += 1;
+        }
+        // `position_m` has the grounding offset already subtracted, so this
+        // point is the *base* of the trunk, not the canopy. A consumer that
+        // sampled the pixel here would read ground. Projecting a second point
+        // one metre above it yields the screen-space size of a world metre at
+        // this instance's depth, which is what lets that consumer size a probe
+        // window in world terms instead of guessing at pixels.
+        let above = camera
+            .world_to_viewport(camera_transform, world + Vec3::Y)
+            .ok();
+        let pixels_per_metre = match (projected, above) {
+            (Some(base), Some(top)) => Some((base.y - top.y) as f64),
+            _ => None,
+        };
+        let mut record = serde_json::Map::new();
+        record.insert("id".into(), json!(instance.id));
+        record.insert(
+            "world_m".into(),
+            json!([world.x as f64, world.y as f64, world.z as f64]),
+        );
+        record.insert("in_frame".into(), json!(inside));
+        record.insert(
+            "viewport_px".into(),
+            match projected {
+                Some(point) => json!([point.x as f64, point.y as f64]),
+                None => Value::Null,
+            },
+        );
+        record.insert(
+            "pixels_per_metre".into(),
+            match pixels_per_metre {
+                Some(value) => json!(value),
+                None => Value::Null,
+            },
+        );
+        records.push(Value::Object(record));
+    }
+    // Sorted by id so the artifact is byte-stable across runs; ECS iteration
+    // order is not guaranteed and an unstable artifact cannot be digested.
+    records.sort_by(|left, right| {
+        left.get("id")
+            .and_then(Value::as_str)
+            .cmp(&right.get("id").and_then(Value::as_str))
+    });
+    let document = json!({
+        "schema_version": "codeweald.bevy-foliage-projection/v1",
+        "viewport_px": [viewport.x as f64, viewport.y as f64],
+        "instance_count": records.len(),
+        "in_frame_count": in_frame,
+        "instances": records,
+    });
+    fs::write(path, serde_json::to_vec_pretty(&document)?)
+        .with_context(|| format!("cannot write foliage projection to {}", path.display()))?;
+    Ok(())
+}
+
 fn capture_certified_world(
     mut commands: Commands,
     config: Res<ViewerConfig>,
     mut capture: ResMut<CaptureState>,
     generated: Query<(), With<GeneratedWorld>>,
+    cameras: Query<(&Camera, &GlobalTransform)>,
+    foliage: Query<(&FoliageInstance, &GlobalTransform)>,
 ) {
     let Some(path) = config.capture_path.as_ref() else {
         return;
@@ -1002,6 +1114,24 @@ fn capture_certified_world(
     }
     capture.requested = true;
     let path = path.clone();
+    // Written from the same settled frame the screenshot is taken from, so the
+    // projection describes the image the gate will read rather than a camera
+    // the world has since moved under.
+    if let Some((camera, camera_transform)) = cameras.iter().next() {
+        let projection_path = path.with_file_name(format!(
+            "{}_foliage_projection.json",
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("capture")
+        ));
+        if let Err(error) =
+            write_foliage_projection(&projection_path, camera, camera_transform, &foliage)
+        {
+            // A capture that silently lost its projection would leave the gate
+            // measuring nothing while reporting success.
+            eprintln!("foliage projection failed: {error:#}");
+        }
+    }
     commands.spawn(Screenshot::primary_window()).observe(
         move |captured: On<ScreenshotCaptured>, mut app_exit: MessageWriter<AppExit>| {
             save_to_disk(&path)(captured);
@@ -1585,7 +1715,11 @@ fn monitor_compiled_world(
                 for placement in world.placements {
                     let scene = asset_server
                         .load(GltfAssetLabel::Scene(0).from_asset(placement.asset_path));
-                    parent.spawn((WorldAssetRoot(scene), placement.transform));
+                    let mut entity =
+                        parent.spawn((WorldAssetRoot(scene), placement.transform));
+                    if placement.role == "foliage" {
+                        entity.insert(FoliageInstance { id: placement.id });
+                    }
                 }
             });
             *overlay = world.overlay;
@@ -1945,6 +2079,16 @@ fn load_compiled_world(config: &ViewerConfig, signature: u64) -> Result<Compiled
             .get("scale")
             .and_then(Value::as_f64)
             .context("placement scale is missing")? as f32;
+        let id = record
+            .get("id")
+            .and_then(Value::as_str)
+            .context("placement id is missing")?
+            .to_owned();
+        let role = record
+            .get("role")
+            .and_then(Value::as_str)
+            .context("placement role is missing")?
+            .to_owned();
         placements.push(Placement {
             asset_path,
             transform: Transform {
@@ -1952,6 +2096,8 @@ fn load_compiled_world(config: &ViewerConfig, signature: u64) -> Result<Compiled
                 rotation: Quat::from_rotation_y(yaw.to_radians()),
                 scale: Vec3::splat(scale),
             },
+            id,
+            role,
         });
     }
     let corridors = render_plan

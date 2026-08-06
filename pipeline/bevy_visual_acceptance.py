@@ -300,8 +300,27 @@ def evaluate(zone_spec: dict[str, Any], capture_path: Path) -> dict[str, Any]:
     # count remains diagnostic rather than pretending to prove road topology.
     # Topology is certified from the renderer-independent corridor meshes; this
     # image gate only proves that a warm road surface is actually visible.
-    if foliage_fraction < 0.008:
-        failures.append("Compiled foliage is not visually readable")
+    #
+    # **D28: `foliage_fraction` no longer gates, for the same reason
+    # `dark_foreground_fraction` stopped gating under D25 — it was measuring the
+    # wrong quantity.**
+    #
+    # It is a green-pixel share of the whole frame, and the frame's composition
+    # is a function of terrain height. Two builds of the same world went 275 ->
+    # 301 render-plan instances while this fell 0.006820 -> 0.005207: more
+    # foliage, lower metric. No threshold fixes an instrument that moves the
+    # wrong way.
+    #
+    # Normalising by `foreground_fraction` (D24's recorded fix direction) is not
+    # enough here. It removes the sky's share of the effect and leaves the
+    # rock's: a taller massif means proportionally more rock among the world's
+    # own pixels, so green-share-of-world still falls with no tree removed.
+    #
+    # The replacement is `foliage_projection_acceptance`, whose denominator is
+    # the instance count rather than an area. This number is kept and reported
+    # because it is still the right thing to watch when judging legibility, and
+    # keeping it visible is what lets the replacement be checked against it
+    # rather than taken on trust.
     if water_fraction < 0.001:
         failures.append("Compiled wetland/water hierarchy is not visually readable")
 

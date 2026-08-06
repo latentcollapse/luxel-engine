@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Iterable
 
 from bevy_visual_acceptance import evaluate
+from foliage_projection_acceptance import evaluate as evaluate_foliage_projection
 from tool_provenance import source_tree_digest
 
 
@@ -104,6 +105,38 @@ def _capture(
     )
 
 
+def _foliage_projection(capture: Path) -> dict:
+    """Score the projection the viewer wrote beside this capture (D28).
+
+    An absent artifact is reported, not raised. A viewer binary built before
+    this step existed still captures correctly, and turning that into a hard
+    error would make a stale-binary problem look like a foliage failure --
+    the attribution confusion D24 already cost real time to. The status says
+    plainly that nothing was measured, so silence cannot be read as a pass.
+    """
+    import numpy
+    from PIL import Image
+
+    projection_path = capture.with_name(f"{capture.stem}_foliage_projection.json")
+    if not projection_path.is_file():
+        return {
+            "status": "unmeasured",
+            "reason": (
+                f"{projection_path.name} was not written; the viewer binary "
+                "predates the foliage projection capture step"
+            ),
+        }
+    try:
+        projection = json.loads(projection_path.read_text(encoding="utf-8"))
+        image = Image.open(capture).convert("RGB")
+        analysis = numpy.asarray(image, dtype=numpy.float32) / 255.0
+        report = evaluate_foliage_projection(projection, analysis)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        return {"status": "unmeasured", "reason": str(error)}
+    report["artifact"] = projection_path.name
+    return report
+
+
 def main(argv: Iterable[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Capture and visually gate a compiled Codeweald world"
@@ -190,6 +223,7 @@ def main(argv: Iterable[str] | None = None) -> int:
                 }
             overview = batch / "bevy_overview.png"
             acceptance = evaluate(zone_spec, overview)
+            acceptance["foliage_projection"] = _foliage_projection(overview)
             result = {
                 "schema_version": "codeweald.bevy-inspection-suite/v1",
                 "zone_id": acceptance["zone_id"],
@@ -206,6 +240,7 @@ def main(argv: Iterable[str] | None = None) -> int:
             _capture(viewer, world_core, batch, capture, arguments.view)
             if arguments.view == "overview":
                 result = evaluate(zone_spec, capture)
+                result["foliage_projection"] = _foliage_projection(capture)
             else:
                 result = {
                     "schema_version": "codeweald.bevy-inspection-capture/v1",
@@ -226,6 +261,13 @@ def main(argv: Iterable[str] | None = None) -> int:
     # The report is evidence; make it self-certifying rather than trusting a
     # reader to separately go verify the binary that produced it still
     # matches what's on disk now.
+    # D28 replaced a gate, so its replacement has to be able to fail the run --
+    # otherwise demoting `foliage_fraction` would have been a straight loss of
+    # coverage dressed up as a fix. "unmeasured" deliberately does not fail:
+    # that is a stale viewer binary, not a bad world.
+    foliage = result.get("foliage_projection")
+    if isinstance(foliage, dict) and foliage.get("status") == "failed":
+        result["status"] = "failed"
     result["viewer_source_digest"] = _viewer_source_digest(world_core)
     result["terrain_shader_sha256"] = _terrain_shader_digest(batch)
     report_path.parent.mkdir(parents=True, exist_ok=True)
