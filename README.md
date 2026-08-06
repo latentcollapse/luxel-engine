@@ -2,18 +2,36 @@
 
 **Concept art in. A playable, faithful 3D map out.**
 
-WGE is a world compiler. You give it concept art and annotations describing a place; it produces a
+WGE is a game engine. You give it concept art and annotations describing a place; it produces a
 certified, deterministic world — terrain, hydrology, traversal, roads, settlements, materials,
 placements — and then hands that world to whichever renderer you want to look at it in.
 
-## What WGE is not
+## An AI-native engine, not a human-native one
 
-**WGE is not a game engine, and it is not a Godot project.** It has no runtime, no scene graph, no
-input system, no physics loop. It never draws anything.
+Godot, Unity and Unreal are **human-native** engines. Their primary interface is a GUI built for a
+person with a mouse, their primary verification is a human looking at the viewport, and their
+authoring surface assumes an operator who can see.
 
-Godot, Unreal 5, and Unity are **backends**. They are consumers of WGE output, interchangeable by
-design and individually droppable. If a change to WGE can only be expressed in one of them, that
-change is in the wrong layer.
+**WGE is the same category of thing built for a different operator.** Its interface is a typed
+authoring language, its verification is a gate that measures the world, and its intended author is a
+model. Every design difference follows from that one substitution:
+
+| | Human-native engine | WGE |
+|---|---|---|
+| Authoring surface | GUI, inspector, viewport | Typed language, parsed never executed |
+| Verification | A person looks at it | Gates measure it and can fail the build |
+| Iteration | Drag, undo, re-render | Compile, diff, repair-carrying diagnostics |
+| Correctness | Convention and review | Provenance binding and a stable world hash |
+| Skill floor | A trained artist | A 3B-class model |
+
+What makes something an engine is that it owns the authoritative representation of the world and
+the rules for constructing it — terrain, hydrology, traversal, collision, navigation, placement,
+materials, provenance. WGE owns all of that. Rasterization is one subsystem, and it is the one
+subsystem WGE deliberately does not implement.
+
+That delegation is an architectural choice, not a disqualification. Godot, Unreal 5, and Unity are
+**backends**: consumers of WGE output, interchangeable by design and individually droppable. If a
+change to WGE can only be expressed in one of them, that change is in the wrong layer.
 
 **Bevy is not a backend.** It is WGE's *reference renderer* — the instrument WGE uses to look at its
 own output, plus the surface for lightweight inspection and editing. It ships with WGE and is not
@@ -77,6 +95,10 @@ Four languages, each doing the thing it is actually best at:
 
 ### The authoring DSL
 
+The language-wide design baseline is [docs/DSL docs/WGE_LANGUAGE_SPEC.md](docs/DSL%20docs/WGE_LANGUAGE_SPEC.md). It defines the planned
+typed IR, safety boundary, geometry/asset and policy domains, backend contracts, conformance suite, and unresolved
+decisions without treating unfinished proposals as language features.
+
 Intent files look like Python and are **parsed, never executed** — no filesystem, network, process,
 import, or runtime access. This is not only a security property. Because the file is data rather
 than a program, it can be generated, diffed, repaired, and round-tripped:
@@ -104,18 +126,39 @@ generated from any existing world.
 
 ## Status
 
-The vertical slice — `codeweald_alpine_arena_v1`, a 256×256m alpine arena — compiles end to end and
-passes every gate.
+The vertical slice — `codeweald_alpine_arena_v1`, a 256×256m alpine arena — compiles end to end.
+It does **not** currently pass every gate; see the failing gates below.
 
 | Suite | Result |
 |---|---|
-| Python | 83/83 |
-| Rust | 15/15 |
-| Julia | 8/8 |
+| Python | 501/501, 161 subtests (2026-08-03) |
+| Rust | 23/23 across the workspace (2026-08-03) |
+| Julia | 8/8 (2026-08-03) |
 | Bevy four-view visual acceptance | passed, zero failures |
 
-Current world: 66,049 terrain vertices, 337 render-plan instances, 0 prop placements (intentional —
-every landform is terrain-native), 3 compiled roads, certified traversal.
+Failing gates as of 2026-08-03, all known and tracked rather than surprises:
+
+- **navmesh acceptance:** 3 requirements unmet. None of the three lanes runs end to end; the longest
+  gap is 18 m on `central_lane`. Twelve structure placements obstruct a lane (D13) — but broken down
+  by owner, those twelve block `central_lane` only. `north_lane` and `south_lane` are blocked mostly
+  by keep *gate* components standing in the lane the gate exists to admit, which is a separate and
+  newly logged defect (D29). Moving the villages will not clear this gate on its own.
+- **`bevy_visual_acceptance` foliage floor:** 0.00682 against 0.008 (D28). *New, and not a
+  regression.* The scatter now obeys `canopy_suitability`, the forests thinned to what the ecology
+  supports, and a gate that counts green pixels tripped. Either the ecology is miscalibrated
+  (decisions item 4) or the gate is measuring the wrong thing; the second world settles which.
+- **`bevy_visual_acceptance` road readability:** 0.00686 against 0.008. Pre-existing and previously
+  unrecorded — it was masked while the black-pixel gate was the loud failure.
+
+**No longer failing:** the black-pixel gate reads 0.0645 against 0.08, down from 0.094 (D25). It was
+not fixed directly. The old surfacing darkened the preview by up to 22% wherever wetland was, and
+wetland was wrongly on the cliffs; slope-gating it removed the darkening. A good part of D25 was the
+wetland bug.
+
+Current world: 66,049 terrain vertices, 275 render-plan instances, 0 prop placements (intentional —
+every landform is terrain-native), 3 compiled roads, certified traversal. The instance count fell
+from 337 when the scatter began obeying the ecology; the difference is trees that were standing on
+ground S6 says will not grow them.
 
 Pipeline stages, all green: `compile → worldbuilder_dsl → evidence_overlay → style_reference →
 runtime_effects → terrain → terrain_analysis → terrain_contract → traversal_probe →
@@ -128,6 +171,10 @@ godot_adapter`.
 - Deterministic terrain compilation with a stable world identity hash
 - Rust-certified provenance: analysis is bound to exact raster bytes, stale inputs are rejected
 - Julia terrain analysis, hydrology with uphill-reversal rejection, placement solving
+- Ecology-obeying foliage: the Rust scatter draws in proportion to S6's canopy suitability, and the
+  authored instance count is a ceiling the terrain may refuse rather than a quota it must meet
+- A five-layer terrain surface — grass, road, rock, snow, wetland — so peat and bog reach a material
+  instead of rendering as grass
 - Traversal certification — the walkable claims are verified, not asserted
 - Material/texture gates that reject bad source art instead of certifying it
 - Four-view Bevy audit captures (overview, both wall faces, player height)
@@ -146,27 +193,39 @@ godot_adapter`.
 
 ## Layout
 
-> **Migration in progress.** WGE currently lives inside `Codeweald/godot_renderer/` for historical
-> reasons — that path predates the realisation that this is a general-purpose tool. The name is
-> actively misleading: most of what is in there is engine-agnostic, and the Godot-specific part is a
-> minority of it. See `docs/MIGRATION.md` for the file-level plan.
+The engine and the game are separate git repositories as of 2026-08-02. WGE lives at the **workspace
+root** (`Code Projects/WGE/`), not under `Game Projects/`. It is an engine that games consume, not a
+game.
 
-Today:
-
-WGE lives at the **workspace root** (`Code Projects/WGE/`), not under `Game Projects/`. It is a
-general-purpose tool that games consume, not a game.
-
-Paths below are relative to the workspace root:
+Engine paths, relative to `Code Projects/WGE/`:
 
 | What | Where |
 |---|---|
-| Compiler, DSL, pipeline (45 Python modules) | `Game Projects/Codeweald/godot_renderer/pipeline/` |
-| Rust WorldSpec core | `Game Projects/Codeweald/world_core/` |
-| Bevy reference renderer | `Game Projects/Codeweald/world_core/apps/world_viewer/` |
-| Julia solvers | `Game Projects/Codeweald/terrain_lab/` |
-| Unity / Unreal adapters | `Game Projects/Codeweald/godot_renderer/engine_adapters/` |
-| Godot backend (16 `.gd` scripts, project files) | `Game Projects/Codeweald/godot_renderer/` |
-| Worlds and their evidence | `Game Projects/Codeweald/godot_renderer/concept_batches/` |
+| Compiler, DSL, pipeline | `pipeline/` |
+| Rust WorldSpec core | `world_core/` |
+| Bevy reference renderer | `world_core/apps/world_viewer/` |
+| Julia solvers | `terrain_lab/` |
+| Unity / Unreal adapters | `engine_adapters/` |
+| Specifications and decision records | `docs/` |
+
+Game paths, relative to `Code Projects/Game Projects/Codeweald/`:
+
+| What | Where |
+|---|---|
+| Worlds and their evidence | `godot_renderer/concept_batches/` |
+| Assets and map prep | `godot_renderer/` |
+
+`godot_renderer/` keeps its name although the Godot pipeline was removed on 2026-07-31; the rename
+is outstanding as D8.
+
+A world is built by pointing the engine at a batch in the game repo:
+
+```sh
+python3 pipeline/build_zone.py <game>/concept_batches/<batch>/annotations.json --project-root <game>
+```
+
+A batch can live anywhere; the same batch compiled from two locations produces byte-identical
+artifacts.
 
 ## Usage
 

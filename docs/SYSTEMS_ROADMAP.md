@@ -7,8 +7,16 @@ with a correct answer was left to a person, a habit, or a name.**
 
 This roadmap is the inventory of things with correct answers.
 
-Companion documents: **[OPEN_DECISIONS.md](OPEN_DECISIONS.md) (calls made
-without review — read this first if you are picking the work back up)**,
+Companion documents:
+**[GAEA_PROGRAMME.md](GAEA_PROGRAMME.md) — terrain generation moved to Gaea on
+2026-08-04; read this before touching any terrain code**,
+**[SESSION_HANDOFF_2026-08-04.md](SESSION_HANDOFF_2026-08-04.md) — read this
+first if you are picking the work back up; it is the most recent measured
+state**,
+[SESSION_HANDOFF_2026-08-03.md](SESSION_HANDOFF_2026-08-03.md) (the session
+before it),
+[OPEN_DECISIONS.md](OPEN_DECISIONS.md) (calls made without review, all resolved
+2026-08-03),
 [MVP_ROADMAP.md](MVP_ROADMAP.md) (phases 0–4, the path to a
 playable map), [DEBT_LEDGER.md](DEBT_LEDGER.md) (what exists and is wrong),
 [MISSING_INVENTORY.md](MISSING_INVENTORY.md) (what does not exist yet),
@@ -378,7 +386,33 @@ one byte per cell, row-major, same resolution and orientation as the
 heightfield, so the Rust side samples it with the coordinate maths it already
 has and no new convention is introduced for it to disagree with.
 
-**Still open: the scatter does not read it.** `render_plan.rs::compile_foliage`
+**CROSSED 2026-08-03. The scatter now reads it.** What follows is the plan as it
+was written; three of its four points survived contact, and the exceptions are
+worth keeping because they were the interesting part:
+
+- Point 2 was **wrong in a useful way**. The validator does *not* re-derive the
+  scatter — under proportional sampling there is no single value it could demand
+  without reimplementing the RNG and guaranteeing drift. It checks a **floor**:
+  nothing may stand where its field is zero. Compiler and validator agree exactly
+  at that boundary, which is where agreement is load-bearing, so the feared
+  "rejects every plan it just built" never arose.
+- Point 4 became **sampling the field** rather than probabilistic acceptance
+  against it. Canopy suitability is non-zero on 2.7%-5.2% of each forest polygon
+  against a 50-darts-per-instance budget, so rejection sampling would have failed
+  the `placed N of target` contract intermittently, on terrain rather than on
+  code.
+- One thing the plan did not anticipate: the authored instance count had to
+  become a **ceiling**, not a quota. `central_forest` asks 28 conifers and its
+  ecology holds nine. Shortfalls are recorded in `render_plan.ecology_shortfalls`.
+- And the layer **declares** which field governs it (`asset_plan.ECOLOGY_FIELDS`)
+  rather than Rust inferring ecology from a role name.
+
+See [SESSION_HANDOFF_2026-08-03.md](SESSION_HANDOFF_2026-08-03.md). Obeying the
+ecology cost 62 instances and tripped a visual gate — [D28](DEBT_LEDGER.md).
+
+The original plan, for the record:
+
+**~~Still open: the scatter does not read it.~~** `render_plan.rs::compile_foliage`
 accepts a candidate on slope and a keep-out radius alone. The change is small
 but it is not local, and that is worth stating precisely rather than
 discovering:
@@ -393,7 +427,7 @@ discovering:
    the treeline thins instead of stopping — a hard threshold reintroduces
    exactly the stamped edge the soft niche bands exist to avoid.
 
-Until then the ecology is measured, checkable, and unobeyed: the trees in the
+~~Until then the ecology is measured, checkable, and unobeyed:~~ the trees in the
 viewer are still wherever the polygon scatter put them.
 
 Today foliage is scattered into authored polygons at a declared spacing. That is

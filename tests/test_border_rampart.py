@@ -56,14 +56,69 @@ def _landmark(identifier: str, point, radius: float):
     }
 
 
-def _raise(features=(), **overrides):
+def _raise(features=(), containment_only=False, **overrides):
     policy = dict(DEFAULT_BORDER_POLICY)
     policy.update(overrides)
     x, z = _grid()
     return _border_rampart(
         _flat(), x, z, list(features), WIDTH, LENGTH, policy,
         np.random.default_rng(20260802),
+        containment_only=containment_only,
     )
+
+
+def _corridor(points, width=10.0):
+    return {
+        "id": "lane",
+        "category": "corridor",
+        "geometry": {"points": [list(p) for p in points]},
+        "properties": {"minimum_width_m": width},
+    }
+
+
+class ContainmentFloorTest(unittest.TestCase):
+    """D31: as a floor beneath the massif, this must guard the edge, not the valley.
+
+    Since the massif inversion the rampart is applied as `maximum(massif,
+    rampart)`. It kept following the play space inland, so on the alpine arena
+    it was replacing **87.7% of the protected massif cells** at a mean cost of
+    18.6 m of relief -- most of what the world showed as its new mountains was
+    the old rampart. A floor shaped like the border is the border.
+    """
+
+    def test_containment_mode_stays_at_the_edge_instead_of_following_the_valley(self):
+        lane = _corridor([(-90.0, 0.0), (90.0, 0.0)])
+        border, border_report, _ = _raise([lane])
+        floor, floor_report, _ = _raise([lane], containment_only=True)
+
+        self.assertFalse(border_report["containment_only"])
+        self.assertTrue(floor_report["containment_only"])
+
+        # A band well inside the map, out past the wilderness margin: the
+        # valley's business, not the boundary's.
+        x, z = _grid()
+        inward = np.minimum(WIDTH * 0.5 - np.abs(x), LENGTH * 0.5 - np.abs(z))
+        interior = inward > DEFAULT_BORDER_POLICY["crest_m"] + DEFAULT_BORDER_POLICY["inner_face_m"] + 8.0
+        self.assertTrue(interior.any())
+        self.assertGreater(
+            float(border[interior].max()), 1.0,
+            "precondition: the full border does reach inland, or there is nothing to fix",
+        )
+        np.testing.assert_allclose(floor[interior], 0.0, atol=1e-9)
+
+    def test_containment_mode_still_closes_the_edge(self):
+        """The half that must not regress. Dropping the wrong term would open the world."""
+        lane = _corridor([(-90.0, 0.0), (90.0, 0.0)])
+        floor, _, footprint = _raise([lane], containment_only=True)
+        limit = DEFAULT_BORDER_POLICY["height_m"] * (
+            1.0 - DEFAULT_BORDER_POLICY["crest_relief"]
+        )
+        for edge in (floor[0, :], floor[-1, :], floor[:, 0], floor[:, -1]):
+            self.assertGreater(
+                float(edge.min()), limit * 0.9,
+                "every map-edge cell must still be raised",
+            )
+        self.assertTrue(footprint[0, :].all())
 
 
 class RampartTest(unittest.TestCase):

@@ -13,9 +13,9 @@ fn main() -> ExitCode {
         "compile-render-plan" | "validate-render-plan"
     ) {
         let paths: Vec<String> = arguments.collect();
-        if paths.len() != 7 {
+        if paths.len() != 8 {
             eprintln!(
-                "usage: codeweald-worldspec {command} <zone-spec.json> <asset-plan.json> <asset-preflight.json> <terrain-manifest.json> <heightfield-f32le.bin> <landform-placement-plan.json> <render-plan.json>"
+                "usage: codeweald-worldspec {command} <zone-spec.json> <asset-plan.json> <asset-preflight.json> <terrain-manifest.json> <heightfield-f32le.bin> <canopy-suitability-u8.bin> <landform-placement-plan.json> <render-plan.json>"
             );
             return ExitCode::from(2);
         }
@@ -102,24 +102,39 @@ fn render_plan(command: &str, paths: &[String]) -> ExitCode {
             fs::read_to_string(path).map_err(|error| format!("cannot read {path}: {error}"))?;
         serde_json::from_str(&input).map_err(|error| format!("invalid JSON in {path}: {error}"))
     };
-    let inputs = (
-        read_json(&paths[0]),
-        read_json(&paths[1]),
-        read_json(&paths[2]),
-        read_json(&paths[3]),
-        fs::read(&paths[4]).map_err(|error| format!("cannot read {}: {error}", paths[4])),
-        read_json(&paths[5]),
-    );
-    let (zone, assets, preflight, manifest, heightfield, landforms) = match inputs {
-        (Ok(zone), Ok(assets), Ok(preflight), Ok(manifest), Ok(heightfield), Ok(landforms)) => {
-            (zone, assets, preflight, manifest, heightfield, landforms)
-        }
-        (Err(error), _, _, _, _, _)
-        | (_, Err(error), _, _, _, _)
-        | (_, _, Err(error), _, _, _)
-        | (_, _, _, Err(error), _, _)
-        | (_, _, _, _, Err(error), _)
-        | (_, _, _, _, _, Err(error)) => {
+    let read_bytes = |path: &str| -> Result<Vec<u8>, String> {
+        fs::read(path).map_err(|error| format!("cannot read {path}: {error}"))
+    };
+    // Read in argument order through one fallible closure. The previous form
+    // matched a tuple of Results with one arm per position, which needs a new
+    // arm and a new wildcard row for every input added -- and a mis-typed
+    // wildcard row binds the wrong error while still compiling. `?` cannot
+    // mis-wire an argument.
+    let load = || -> Result<
+        (
+            serde_json::Value,
+            serde_json::Value,
+            serde_json::Value,
+            serde_json::Value,
+            Vec<u8>,
+            Vec<u8>,
+            serde_json::Value,
+        ),
+        String,
+    > {
+        Ok((
+            read_json(&paths[0])?,
+            read_json(&paths[1])?,
+            read_json(&paths[2])?,
+            read_json(&paths[3])?,
+            read_bytes(&paths[4])?,
+            read_bytes(&paths[5])?,
+            read_json(&paths[6])?,
+        ))
+    };
+    let (zone, assets, preflight, manifest, heightfield, suitability, landforms) = match load() {
+        Ok(values) => values,
+        Err(error) => {
             eprintln!("{error}");
             return ExitCode::from(2);
         }
@@ -131,6 +146,7 @@ fn render_plan(command: &str, paths: &[String]) -> ExitCode {
             &preflight,
             &manifest,
             &heightfield,
+            &suitability,
             &landforms,
         ) {
             Ok(plan) => {
@@ -141,8 +157,8 @@ fn render_plan(command: &str, paths: &[String]) -> ExitCode {
                         return ExitCode::from(2);
                     }
                 };
-                if let Err(error) = fs::write(&paths[6], output) {
-                    eprintln!("cannot write {}: {error}", paths[6]);
+                if let Err(error) = fs::write(&paths[7], output) {
+                    eprintln!("cannot write {}: {error}", paths[7]);
                     return ExitCode::from(2);
                 }
                 plan
@@ -153,7 +169,7 @@ fn render_plan(command: &str, paths: &[String]) -> ExitCode {
             }
         }
     } else {
-        match read_json(&paths[6]) {
+        match read_json(&paths[7]) {
             Ok(plan) => plan,
             Err(error) => {
                 eprintln!("{error}");
@@ -167,6 +183,7 @@ fn render_plan(command: &str, paths: &[String]) -> ExitCode {
         &preflight,
         &manifest,
         &heightfield,
+        &suitability,
         &landforms,
         &plan,
     ) {

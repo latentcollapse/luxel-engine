@@ -17,6 +17,12 @@ from PIL import Image
 
 UNREAL_LANDSCAPE_RESOLUTION = 1009
 CHANNELS = {"grass": 0, "road": 1, "rock": 2, "snow": 3}
+# The fifth layer does not live in the RGBA splat -- four channels is all an
+# RGBA image has -- so it is carried by its own single-channel image and lifted
+# to a weightmap here alongside the other four. Unreal composites weightmaps
+# independently, so five layers is not a special case for the Landscape; it was
+# only ever a special case for the file format.
+WETLAND_LAYER = "wetland"
 
 
 def write_unreal_artifacts(terrain_dir: Path) -> dict[str, Any]:
@@ -36,9 +42,21 @@ def write_unreal_artifacts(terrain_dir: Path) -> dict[str, Any]:
         splat = splat_source.convert("RGBA").resize((UNREAL_LANDSCAPE_RESOLUTION, UNREAL_LANDSCAPE_RESOLUTION), Image.Resampling.BILINEAR)
         for name, channel in CHANNELS.items():
             splat.getchannel(channel).save(output / (name + "_weight.png"))
+    wetland_path = terrain_dir / "wetland_mask.png"
+    if not wetland_path.is_file():
+        raise FileNotFoundError(
+            "Canonical wetland_mask.png is required: it carries the fifth splat "
+            "weight, and a Landscape built without it paints bog as grass"
+        )
+    with Image.open(wetland_path) as wetland_source:
+        wetland_source.convert("L").resize(
+            (UNREAL_LANDSCAPE_RESOLUTION, UNREAL_LANDSCAPE_RESOLUTION),
+            Image.Resampling.BILINEAR,
+        ).save(output / (WETLAND_LAYER + "_weight.png"))
+    layers = (*CHANNELS, WETLAND_LAYER)
     return {
         "landscape_resolution": UNREAL_LANDSCAPE_RESOLUTION,
         "heightmap_16": "unreal/landscape_height_16.png",
-        "weightmaps": {name: "unreal/%s_weight.png" % name for name in CHANNELS},
+        "weightmaps": {name: "unreal/%s_weight.png" % name for name in layers},
         "component_layout": {"section_size_quads": 63, "sections_per_component": 1, "components_per_axis": 16},
     }

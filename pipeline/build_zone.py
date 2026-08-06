@@ -135,15 +135,22 @@ def _accessibility_diagnosis(report_path: Path, zone_spec_path: Path) -> str:
         return ""
 
     accessible = report.get("accessible") or {}
-    steep_fraction = accessible.get("steep_edge_fraction")
+    policy = report.get("policy") or {}
+    # The gated quantity is the world-relative fraction. Diagnosing against the
+    # share-of-walkable number would name a value the gate no longer reads, and
+    # would send the author to smooth terrain whenever the mountain/valley split
+    # changed rather than when the terrain actually got steeper.
+    steep_fraction = accessible.get("steep_edge_world_fraction")
+    steep_limit = policy.get("maximum_accessible_steep_world_fraction", 0.009)
     steep_threshold = accessible.get("steep_grade_threshold")
     maximum_grade = accessible.get("maximum_grade")
 
     lines: list[str] = []
-    if isinstance(steep_fraction, (int, float)) and steep_fraction > 0.01:
+    if isinstance(steep_fraction, (int, float)) and steep_fraction > steep_limit:
         lines.append(
-            "  Too much walkable ground is steep: %.3f%% of it exceeds grade %s "
-            "(limit 1.000%%)." % (steep_fraction * 100.0, steep_threshold)
+            "  Too much of the world is walkable-but-steep: %.3f%% of it exceeds "
+            "grade %s (limit %.3f%%)."
+            % (steep_fraction * 100.0, steep_threshold, steep_limit * 100.0)
         )
     if isinstance(maximum_grade, (int, float)) and maximum_grade > 12.0:
         lines.append(
@@ -718,6 +725,10 @@ def _compile_render_plan(
             ),
             str(terrain_dir / "terrain_manifest.json"),
             str(terrain_dir / "heightfield_f32le.bin"),
+            # S6's canopy suitability. The scatter reads it to decide where a
+            # tree may stand, so the plan is bound to these bytes the same way
+            # it is bound to the heightfield.
+            str(terrain_dir / "canopy_suitability_u8.bin"),
             str(batch_dir / "placement_plan.json"),
             str(render_plan_path),
         ],
@@ -896,6 +907,87 @@ def build(
         length_m=float(terrain.manifest["world_bounds_m"]["length"]),
     )
     _write(terrain_dir / "terrain_manifest.json", terrain.manifest)
+
+    # Systems S1. Derived from the heightfield alone, so it runs as soon as the
+    # terrain is certified and before anything that wants to read it. Forestry,
+    # surfacing, siting and scree all consume this one field rather than each
+    # re-deriving slope and wetness and quietly disagreeing about where the wet
+    # hollow is.
+    #
+    # **This block must stay ahead of `_compile_render_plan` (D32).** It did not,
+    # and the defect hid for a whole session because it can only be seen on a
+    # batch that has never been built. S6 writes
+    # `terrain/canopy_suitability_u8.bin`; the Rust render plan reads it to
+    # decide where a tree may stand. With S6 running afterwards, every build
+    # scattered against the *previous* build's ecology, and recorded that stale
+    # file's hash as `canopy_suitability_sha256` -- so the provenance field said
+    # the plan was bound to a field it had never seen. On a fresh batch there is
+    # no previous file at all and the build simply fails, which is how it was
+    # finally found.
+    #
+    # It also means the "rebuilds are byte-identical" check that certified the
+    # S6/S7 crossing was weaker than it looked: the input was constant because
+    # it was stale, not because the pipeline is deterministic. Re-verified after
+    # the move.
+    site = write_site_conditions(batch_dir)
+    _write(batch_dir / "site_conditions.json", site)
+    print(
+        "  site conditions: %d fields at %d^2, flow at %d^2, %.0f m2 of sink, "
+        "deepest %.1f m"
+        % (
+            len(site["fields"]),
+            site["resolution"],
+            site["flow"]["working_resolution"],
+            site["flow"]["sink_area_m2"],
+            site["flow"]["deepest_sink_m"],
+        )
+    )
+
+    # Systems S2. Reads the finished terrain, so it runs after the outlet has
+    # been cut rather than predicting it: what survives the fill *is* the map's
+    # standing water, and whether each body is fed decides whether it is a
+    # stagnant bog or a cold pond.
+    # Depth is meaningless without an actor: whether a stagnant sink is a bog or
+    # a tarn is decided by whether this world's agent can stand up in it.
+    hydrology = build_hydrology(
+        batch_dir,
+        agent_height_m=float(
+            (result.zone_spec.get("traversal_policy") or {}).get("agent_height_m", 8.0)
+        ),
+    )
+    _write(batch_dir / "hydrology_plan.json", hydrology)
+    print(
+        "  hydrology: %d bodies (%d fed pond, %d bog, %d tarn), %.0f m2 water, "
+        "%.0f m2 wetland, %.0f m2 channel, outlet %s"
+        % (
+            hydrology["body_count"],
+            hydrology["pond_count"],
+            hydrology["bog_count"],
+            hydrology["tarn_count"],
+            hydrology["water_area_m2"],
+            hydrology["wetland_area_m2"],
+            hydrology["channel_area_m2"],
+            (hydrology["outlet"] or {}).get("edge", "none"),
+        )
+    )
+
+    # Systems S6. Reads the site conditions field and the water S2 found, so a
+    # bog gets sedge and a shaded flank gets more forest than the baked one
+    # beside it -- none of which is authored anywhere.
+    vegetation = build_vegetation(batch_dir)
+    _write(batch_dir / "vegetation_plan.json", vegetation)
+    dominant = max(vegetation["families"], key=lambda f: f["area_m2"])
+    print(
+        "  vegetation: %d families, canopy %.0f m2, bare %.0f%%, treeline %s m "
+        "(dominant %s)"
+        % (
+            len(vegetation["families"]),
+            vegetation["canopy_area_m2"],
+            vegetation["bare_fraction"] * 100.0,
+            vegetation["measured_treeline_m"],
+            dominant["key"],
+        )
+    )
     godot_executable: str | None = None
     if run_godot:
         # Import readiness is catalog evidence, so Godot must scan newly
@@ -933,6 +1025,20 @@ def build(
         project_root, batch_dir, result.zone_spec, asset_plan
     )
     render_plan = _compile_render_plan(project_root, batch_dir)
+    # The ecology may place fewer than the spec asked for. That is the terrain
+    # answering rather than a failure, but it must be said out loud: a forest
+    # that quietly becomes nine trees is how a world ends up looking broken with
+    # every gate green.
+    for shortfall in render_plan.get("ecology_shortfalls") or []:
+        print(
+            "  ecology: %s:%s placed %d of %d requested -- the field permits no more"
+            % (
+                shortfall["feature_id"],
+                shortfall["layer_id"],
+                shortfall["placed"],
+                shortfall["requested"],
+            )
+        )
     # Derived from the render plan and the certified heightfield, so it runs
     # after both and is hash-bound to each. Without this the compiler emits a
     # world that renders and nothing can move through.
@@ -966,61 +1072,6 @@ def build(
     # `_border_rampart` closes the world, leaving it soft would mean a
     # regression could silently reopen the edge -- which is the failure this
     # whole gate exists to catch.
-    # Systems S1. Derived from the heightfield alone, so it runs as soon as the
-    # terrain is certified and before anything that wants to read it. Forestry,
-    # surfacing, siting and scree all consume this one field rather than each
-    # re-deriving slope and wetness and quietly disagreeing about where the wet
-    # hollow is.
-    site = write_site_conditions(batch_dir)
-    _write(batch_dir / "site_conditions.json", site)
-    print(
-        "  site conditions: %d fields at %d^2, flow at %d^2, %.0f m2 of sink, "
-        "deepest %.1f m"
-        % (
-            len(site["fields"]),
-            site["resolution"],
-            site["flow"]["working_resolution"],
-            site["flow"]["sink_area_m2"],
-            site["flow"]["deepest_sink_m"],
-        )
-    )
-
-    # Systems S2. Reads the finished terrain, so it runs after the outlet has
-    # been cut rather than predicting it: what survives the fill *is* the map's
-    # standing water, and whether each body is fed decides whether it is a
-    # stagnant bog or a cold pond.
-    hydrology = build_hydrology(batch_dir)
-    _write(batch_dir / "hydrology_plan.json", hydrology)
-    print(
-        "  hydrology: %d bodies (%d fed pond, %d bog), %.0f m2 water, "
-        "%.0f m2 channel, outlet %s"
-        % (
-            hydrology["body_count"],
-            hydrology["pond_count"],
-            hydrology["bog_count"],
-            hydrology["water_area_m2"],
-            hydrology["channel_area_m2"],
-            (hydrology["outlet"] or {}).get("edge", "none"),
-        )
-    )
-
-    # Systems S6. Reads the site conditions field and the water S2 found, so a
-    # bog gets sedge and a shaded flank gets more forest than the baked one
-    # beside it -- none of which is authored anywhere.
-    vegetation = build_vegetation(batch_dir)
-    _write(batch_dir / "vegetation_plan.json", vegetation)
-    dominant = max(vegetation["families"], key=lambda f: f["area_m2"])
-    print(
-        "  vegetation: %d families, canopy %.0f m2, bare %.0f%%, treeline %s m "
-        "(dominant %s)"
-        % (
-            len(vegetation["families"]),
-            vegetation["canopy_area_m2"],
-            vegetation["bare_fraction"] * 100.0,
-            vegetation["measured_treeline_m"],
-            dominant["key"],
-        )
-    )
 
     # Systems S10. Scores the world for structure siting and audits what is
     # already placed. D13 is reported today as "no lane runs end to end", which

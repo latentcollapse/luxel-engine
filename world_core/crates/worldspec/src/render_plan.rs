@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value, json};
@@ -17,12 +18,35 @@ struct AssetRef {
 #[derive(Clone, Copy)]
 struct Terrain<'a> {
     heights: &'a [f32],
+    /// S6's canopy suitability, one byte per cell, row-major, in the same
+    /// resolution and orientation as `heights` -- so it is sampled by the
+    /// coordinate maths that already exists rather than introducing a second
+    /// convention for the two to disagree about.
+    suitability: &'a [u8],
     resolution: usize,
     width: f64,
     length: f64,
 }
 
 impl Terrain<'_> {
+    /// Suitability at a world position, 0..=1.
+    fn suitability_at(self, x: f64, z: f64) -> f64 {
+        let u = (x / self.width + 0.5).clamp(0.0, 1.0);
+        let v = (0.5 - z / self.length).clamp(0.0, 1.0);
+        let column = (u * (self.resolution - 1) as f64).round() as usize;
+        let row = (v * (self.resolution - 1) as f64).round() as usize;
+        self.suitability[row * self.resolution + column] as f64 / 255.0
+    }
+
+    /// The world position of a cell centre; the inverse of `sample`'s indexing.
+    fn cell_position(self, row: usize, column: usize) -> [f64; 2] {
+        let last = (self.resolution - 1) as f64;
+        [
+            (column as f64 / last - 0.5) * self.width,
+            (0.5 - row as f64 / last) * self.length,
+        ]
+    }
+
     fn sample(self, x: f64, z: f64) -> f64 {
         let u = (x / self.width + 0.5).clamp(0.0, 1.0);
         let v = (0.5 - z / self.length).clamp(0.0, 1.0);
@@ -88,6 +112,7 @@ pub fn compile_render_plan_value(
     asset_preflight: &Value,
     terrain_manifest: &Value,
     heightfield_bytes: &[u8],
+    suitability_bytes: &[u8],
     landform_plan: &Value,
 ) -> Result<Value, WorldSpecError> {
     let world = validate_value(zone)?;
@@ -110,8 +135,16 @@ pub fn compile_render_plan_value(
     if heights.iter().any(|height| !height.is_finite()) {
         return Err(contract("heightfield contains non-finite samples"));
     }
+    if suitability_bytes.len() != resolution * resolution {
+        return Err(contract(format!(
+            "canopy suitability has {} bytes; expected {} for a {resolution}^2 field",
+            suitability_bytes.len(),
+            resolution * resolution
+        )));
+    }
     let terrain = Terrain {
         heights: &heights,
+        suitability: suitability_bytes,
         resolution,
         width: number_at(terrain_manifest, "/world_bounds_m/width")?,
         length: number_at(terrain_manifest, "/world_bounds_m/length")?,
@@ -132,6 +165,7 @@ pub fn compile_render_plan_value(
     let exclusions = build_exclusions(features.values().copied())?;
     let mut instances = Vec::new();
     let mut ids = BTreeSet::new();
+    let mut shortfalls: Vec<Value> = Vec::new();
 
     for placement in array_at(landform_plan, "/placements")? {
         let mut record = placement
@@ -162,6 +196,7 @@ pub fn compile_render_plan_value(
                 &exclusions,
                 &mut instances,
                 &mut ids,
+                &mut shortfalls,
             )?;
         } else {
             compile_anchored(
@@ -197,6 +232,7 @@ pub fn compile_render_plan_value(
         "asset_preflight_sha256": canonical_sha256(asset_preflight),
         "terrain_manifest_sha256": canonical_sha256(terrain_manifest),
         "heightfield_sha256": bytes_sha256(heightfield_bytes),
+        "canopy_suitability_sha256": bytes_sha256(suitability_bytes),
         "landform_placement_plan_sha256": canonical_sha256(landform_plan),
         "generator": {
             "name": "codeweald-worldspec",
@@ -205,6 +241,10 @@ pub fn compile_render_plan_value(
             "generation_seed": seed,
         },
         "counts_by_role": counts,
+        // Where the ecology gave less than the spec asked for. Empty is the
+        // normal case; a non-empty list is the terrain disagreeing with the
+        // author, in its own words, rather than a build failure.
+        "ecology_shortfalls": shortfalls,
         "corridors": corridors,
         "instances": instances,
     });
@@ -214,6 +254,7 @@ pub fn compile_render_plan_value(
         asset_preflight,
         terrain_manifest,
         heightfield_bytes,
+        suitability_bytes,
         landform_plan,
         &plan,
     )?;
@@ -226,6 +267,7 @@ pub fn validate_render_plan_value(
     asset_preflight: &Value,
     terrain_manifest: &Value,
     heightfield_bytes: &[u8],
+    suitability_bytes: &[u8],
     landform_plan: &Value,
     render_plan: &Value,
 ) -> Result<usize, WorldSpecError> {
@@ -251,6 +293,15 @@ pub fn validate_render_plan_value(
         &canonical_sha256(terrain_manifest),
     )?;
     fingerprint(root, "heightfield_sha256", &bytes_sha256(heightfield_bytes))?;
+    // The ecology now decides where things stand, so it is an input the plan is
+    // bound to. Without this a stale suitability field would validate against a
+    // plan compiled from a different one, which is the exact failure the
+    // heightfield binding above exists to prevent.
+    fingerprint(
+        root,
+        "canopy_suitability_sha256",
+        &bytes_sha256(suitability_bytes),
+    )?;
     fingerprint(
         root,
         "landform_placement_plan_sha256",
@@ -265,8 +316,16 @@ pub fn validate_render_plan_value(
         .chunks_exact(4)
         .map(|bytes| f32::from_le_bytes(bytes.try_into().expect("four-byte chunk")))
         .collect::<Vec<_>>();
+    if suitability_bytes.len() != resolution * resolution {
+        return Err(contract(format!(
+            "canopy suitability has {} bytes; expected {} for a {resolution}^2 field",
+            suitability_bytes.len(),
+            resolution * resolution
+        )));
+    }
     let terrain = Terrain {
         heights: &heights,
+        suitability: suitability_bytes,
         resolution,
         width: number_at(terrain_manifest, "/world_bounds_m/width")?,
         length: number_at(terrain_manifest, "/world_bounds_m/length")?,
@@ -315,18 +374,39 @@ pub fn validate_render_plan_value(
         if record.get("source").and_then(Value::as_str) == Some("rust_scatter") {
             let feature_id = string_field(record, "feature_id", id)?;
             let layer_id = string_field(record, "layer_id", id)?;
-            let limit = foliage_slope_limits
+            let promised = foliage_slope_limits
                 .get(&(feature_id.to_owned(), layer_id.to_owned()))
                 .ok_or_else(|| {
                     contract(format!(
                         "{id} has no foliage slope contract for {feature_id}:{layer_id}"
                     ))
                 })?;
+            let limit = promised.slope_limit;
             let slope = terrain.slope_degrees(position[0], position[2]);
-            if slope > *limit + 1e-6 {
+            if slope > limit + 1e-6 {
                 return Err(contract(format!(
                     "{id} stands on {slope:.3} degree terrain; limit is {limit:.3}"
                 )));
+            }
+            // **A floor, not a re-derivation.** The compiler draws in
+            // proportion to suitability, so there is no single value the
+            // validator could demand without reimplementing the RNG and
+            // guaranteeing the two drift. What *is* checkable, and is the thing
+            // that actually matters, is the boundary: nothing may stand where
+            // its ecology says nothing grows. Compiler and validator agree
+            // exactly there, which is where agreement is load-bearing.
+            if let Some(field) = promised.ecology_field.as_deref() {
+                if field != "canopy_suitability" {
+                    return Err(contract(format!(
+                        "{id} declares unknown ecology field {field:?}"
+                    )));
+                }
+                if terrain.suitability_at(position[0], position[2]) <= 0.0 {
+                    return Err(contract(format!(
+                        "{id} stands where {field} is zero: the scatter ignored \
+                         the ecology it declares"
+                    )));
+                }
             }
             if protected_landforms
                 .iter()
@@ -351,9 +431,19 @@ pub fn validate_render_plan_value(
     Ok(instances.len())
 }
 
+/// What the asset plan promised about one foliage layer.
+///
+/// Slope and ecology travel together because the validator has to re-check both
+/// against the same layer, and two parallel maps keyed by the same pair is how
+/// they end up disagreeing about which layers exist.
+struct FoliageContract {
+    slope_limit: f64,
+    ecology_field: Option<String>,
+}
+
 fn collect_foliage_slope_limits(
     asset_plan: &Value,
-) -> Result<BTreeMap<(String, String), f64>, WorldSpecError> {
+) -> Result<BTreeMap<(String, String), FoliageContract>, WorldSpecError> {
     let mut limits = BTreeMap::new();
     for assignment in array_at(asset_plan, "/assignments")? {
         let assignment = assignment
@@ -385,7 +475,16 @@ fn collect_foliage_slope_limits(
                     "{feature_id}:{layer_id} has invalid slope limit {limit}"
                 )));
             }
-            limits.insert((feature_id.to_owned(), layer_id.to_owned()), limit);
+            limits.insert(
+                (feature_id.to_owned(), layer_id.to_owned()),
+                FoliageContract {
+                    slope_limit: limit,
+                    ecology_field: layer
+                        .get("ecology_field")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                },
+            );
         }
     }
     Ok(limits)
@@ -568,6 +667,145 @@ fn compile_anchored(
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Every cell inside `polygon` whose suitability is non-zero, with a running
+/// cumulative weight for proportional sampling.
+///
+/// **Why sample from the field instead of rejecting against it.** The obvious
+/// change is to keep throwing uniform darts at the bounding box and discard
+/// those that land on unsuitable ground. Measured on the alpine arena, canopy
+/// suitability is non-zero on 2.7%-5.2% of each forest polygon, and the loop is
+/// budgeted at 50 darts per instance: 28 conifers would need roughly 1400 darts
+/// to yield 28 hits at a ~2% hit rate, which is the expected value exactly. So
+/// the build would fail the `placed N of target` contract intermittently, on
+/// terrain rather than on code, and the failure would move around as the map
+/// changed. Sampling the field directly cannot miss.
+///
+/// It also gets the *shape* right, which is the actual point. Drawing in
+/// proportion to suitability makes density fall off with the niche, so the
+/// treeline thins instead of stopping at a contour -- the stamped edge the soft
+/// niche bands in S6 exist to avoid.
+/// **The admissible set, not merely the suitable one (D33).**
+///
+/// This used to weight cells by suitability alone and leave slope and exclusions
+/// to the rejection test inside the scatter loop. That reintroduced exactly the
+/// fragility the doc comment above says sampling the field avoids, because the
+/// dart budget was then spent on ground no tree could ever stand on. Measured
+/// 2026-08-04, share of each polygon's suitability weight that was actually
+/// reachable once lanes, streams, keeps and protected landforms were accounted
+/// for:
+///
+/// | forest | arena | gentler world |
+/// |---|---|---|
+/// | `central_forest` | 3.3% | 1.4% |
+/// | `western_valley_woodland` | 26.0% | 8.5% |
+/// | `eastern_valley_woodland` | 4.3% | **0.0%** |
+///
+/// At 3.3% reachable, 1400 darts yield ~46 hits, so the nine trees
+/// `central_forest` placed were partly a fact about the dart budget rather than
+/// about the ecology -- which means the shortfall counts reported on 2026-08-03
+/// were not the pure "terrain answering" they were described as. Filtering here
+/// makes every dart land on admissible ground, so the placed count is decided by
+/// the ecology and the spacing and nothing else.
+///
+/// It also makes the empty case answerable *before* sampling, and answerable
+/// precisely: a polygon with no admissible cell is a different statement from a
+/// sampler that happened to miss.
+fn suitable_cells(
+    terrain: Terrain<'_>,
+    polygon: &[[f64; 2]],
+    bounds: [f64; 4],
+    maximum_slope: f64,
+    exclusions: &[Exclusion],
+) -> (Vec<[f64; 2]>, Vec<f64>) {
+    let [min_x, max_x, min_z, max_z] = bounds;
+    let last = (terrain.resolution - 1) as f64;
+    let column_of = |x: f64| {
+        ((x / terrain.width + 0.5).clamp(0.0, 1.0) * last).round() as usize
+    };
+    let row_of =
+        |z: f64| ((0.5 - z / terrain.length).clamp(0.0, 1.0) * last).round() as usize;
+    // z increases northward while rows increase southward, hence the swap.
+    let first_row = row_of(max_z);
+    let last_row = row_of(min_z);
+    let first_column = column_of(min_x);
+    let last_column = column_of(max_x);
+
+    let mut positions = Vec::new();
+    let mut cumulative = Vec::new();
+    let mut running = 0.0_f64;
+    for row in first_row..=last_row {
+        for column in first_column..=last_column {
+            // Cheap array lookup first: it prunes ~95% of the box before the
+            // per-vertex polygon test ever runs.
+            let weight = terrain.suitability[row * terrain.resolution + column] as f64;
+            if weight <= 0.0 {
+                continue;
+            }
+            let position = terrain.cell_position(row, column);
+            if !point_in_polygon(position, polygon) {
+                continue;
+            }
+            // Same three tests the scatter loop applies, applied once here
+            // instead of once per dart. Spacing stays in the loop: it depends
+            // on what has already been accepted and has no meaning per cell.
+            if terrain.slope_degrees(position[0], position[1]) > maximum_slope {
+                continue;
+            }
+            if exclusions
+                .iter()
+                .any(|exclusion| excluded(position, exclusion))
+            {
+                continue;
+            }
+            running += weight / 255.0;
+            positions.push(position);
+            cumulative.push(running);
+        }
+    }
+    (positions, cumulative)
+}
+
+/// Draw one cell in proportion to its weight, then jitter inside it.
+///
+/// Without the jitter every instance would sit exactly on a grid node, which at
+/// this resolution is a 0.25 m lattice -- invisible individually and unmistakable
+/// across a hillside.
+fn draw_weighted(
+    positions: &[[f64; 2]],
+    cumulative: &[f64],
+    cell_m: [f64; 2],
+    rng: &mut StableRng,
+) -> [f64; 2] {
+    let total = cumulative.last().copied().unwrap_or(0.0);
+    let target = rng.range(0.0, total);
+    let index = match cumulative
+        .binary_search_by(|value| value.partial_cmp(&target).unwrap_or(Ordering::Less))
+    {
+        Ok(index) => index,
+        Err(index) => index.min(positions.len() - 1),
+    };
+    // **The jitter must stay strictly inside its own cell.**
+    //
+    // `suitability_at` rounds a world position to the nearest cell, and Rust
+    // rounds halves *away from zero*, so an offset of exactly -0.5 cells lands
+    // in the previous one. `rng.range(-half, half)` returns exactly `-half`
+    // whenever `unit()` returns 0.0, which is reachable. That would place an
+    // instance whose suitability the validator then reads from a neighbouring
+    // cell -- and if that neighbour is zero, the validator rejects a plan the
+    // compiler just built. Rare enough (~2^-53 a draw) to present as a ghost
+    // failure on one machine and not another, which is the worst kind.
+    //
+    // 0.49 keeps every draw inside the cell it was chosen from, at a cost of 2%
+    // of the jitter range that nobody can see.
+    const INSIDE_CELL: f64 = 0.49;
+    // Per-axis, because a world is not required to be square and the two cell
+    // sizes are only equal when it is.
+    [
+        positions[index][0] + rng.range(-cell_m[0] * INSIDE_CELL, cell_m[0] * INSIDE_CELL),
+        positions[index][1] + rng.range(-cell_m[1] * INSIDE_CELL, cell_m[1] * INSIDE_CELL),
+    ]
+}
+
 fn compile_foliage(
     seed: u64,
     feature: &Map<String, Value>,
@@ -577,6 +815,7 @@ fn compile_foliage(
     exclusions: &[Exclusion],
     instances: &mut Vec<Map<String, Value>>,
     ids: &mut BTreeSet<String>,
+    shortfalls: &mut Vec<Value>,
 ) -> Result<(), WorldSpecError> {
     let feature_id = string_field(feature, "id", "feature")?;
     let polygon = feature_points(feature)?;
@@ -625,6 +864,10 @@ fn compile_foliage(
             .get("maximum_slope_degrees")
             .and_then(Value::as_f64)
             .unwrap_or(35.0);
+        // Declared by the asset plan, never inferred from the role name. Absent
+        // means "no ecological field describes this layer yet", which is a
+        // statement rather than an omission -- see `asset_plan.ECOLOGY_FIELDS`.
+        let ecology_field = layer.get("ecology_field").and_then(Value::as_str);
         let scales = scale_range(layer)?;
         let assets = assignment_assets(layer, asset_bounds)?;
         if assets.is_empty() {
@@ -632,13 +875,79 @@ fn compile_foliage(
                 "{feature_id}:{layer_id} has no selected assets"
             )));
         }
+        let ecology = match ecology_field {
+            None => None,
+            Some("canopy_suitability") => {
+                let (positions, cumulative) = suitable_cells(
+                    terrain,
+                    &polygon,
+                    [min_x, max_x, min_z, max_z],
+                    maximum_slope,
+                    exclusions,
+                );
+                if positions.is_empty() {
+                    // **Two different statements, and they must not share an
+                    // error (D33).** If the field is zero everywhere in the
+                    // polygon, the author put a forest where its own ecology
+                    // forbids one -- a spec defect, and hard.
+                    //
+                    // If the field is non-zero but every such cell is under a
+                    // lane, a keep, a stream or a protected landform, the spec
+                    // is fine and the world simply has no room left. That is the
+                    // same "terrain answering" the ceiling rule exists for, and
+                    // failing the build for it would demand the author measure
+                    // an occupancy they cannot see. It is recorded as a
+                    // shortfall of zero and printed, never swallowed.
+                    let (unfiltered, _) = suitable_cells(
+                        terrain,
+                        &polygon,
+                        [min_x, max_x, min_z, max_z],
+                        f64::INFINITY,
+                        &[],
+                    );
+                    if unfiltered.is_empty() {
+                        return Err(contract(format!(
+                            "{feature_id}:{layer_id} declares canopy_suitability but the \
+                             field is zero across its whole polygon: this forest is \
+                             authored somewhere its own ecology forbids"
+                        )));
+                    }
+                    shortfalls.push(json!({
+                        "feature_id": feature_id,
+                        "layer_id": layer_id,
+                        "requested": target,
+                        "placed": 0,
+                        "limited_by": "occupancy",
+                        "suitable_cells": unfiltered.len(),
+                        "admissible_cells": 0,
+                    }));
+                    continue;
+                }
+                Some((positions, cumulative))
+            }
+            Some(other) => {
+                return Err(contract(format!(
+                    "{feature_id}:{layer_id} declares unknown ecology field {other:?}"
+                )));
+            }
+        };
+        let cell_m = [
+            terrain.width / (terrain.resolution - 1) as f64,
+            terrain.length / (terrain.resolution - 1) as f64,
+        ];
+
         let mut rng = StableRng::from_parts(seed, &[feature_id, layer_id, role]);
         let mut accepted = Vec::<[f64; 2]>::new();
         for _ in 0..target.saturating_mul(50).max(1) {
             if accepted.len() == target {
                 break;
             }
-            let candidate = [rng.range(min_x, max_x), rng.range(min_z, max_z)];
+            let candidate = match &ecology {
+                Some((positions, cumulative)) => {
+                    draw_weighted(positions, cumulative, cell_m, &mut rng)
+                }
+                None => [rng.range(min_x, max_x), rng.range(min_z, max_z)],
+            };
             if !point_in_polygon(candidate, &polygon)
                 || terrain.slope_degrees(candidate[0], candidate[1]) > maximum_slope
                 || exclusions
@@ -670,11 +979,50 @@ fn compile_foliage(
             push_unique(instances, ids, record)?;
             accepted.push(candidate);
         }
+        // **Under an ecology, the authored count is a ceiling, not a quota.**
+        //
+        // That is the whole point of obeying the field. `central_forest` asks
+        // for 28 conifers; canopy suitability is non-zero on 2.7% of its
+        // polygon, and 1.8 m spacing over that much ground holds nine. The old
+        // rule would call that a failed build. But the author did not measure
+        // the ecology -- the solver did -- so a shortfall is the terrain
+        // answering, not the spec being wrong.
+        //
+        // Layers with no ecological field keep the strict quota. Nothing there
+        // has an opinion about density, so falling short really is a failure to
+        // place, and weakening it would hide a real defect.
         if accepted.len() != target {
-            return Err(contract(format!(
-                "{feature_id}:{layer_id} placed {} of {target} instances",
-                accepted.len()
-            )));
+            if ecology.is_none() {
+                return Err(contract(format!(
+                    "{feature_id}:{layer_id} placed {} of {target} instances",
+                    accepted.len()
+                )));
+            }
+            if accepted.is_empty() {
+                // Since D33 the candidate set is pre-filtered by slope and
+                // exclusions, and an empty one is reported as a shortfall
+                // before we get here. So reaching this point means every dart
+                // landed on admissible ground and was still refused, which only
+                // spacing can do -- and spacing cannot refuse the first dart,
+                // because nothing has been accepted yet. This is therefore a
+                // defect in the scatter, not a fact about the world, and it is
+                // deliberately kept hard so it cannot be mistaken for one.
+                return Err(contract(format!(
+                    "{feature_id}:{layer_id} placed nothing from a non-empty \
+                     admissible set: the scatter refused every candidate it was \
+                     given, which spacing alone cannot do"
+                )));
+            }
+            // Recorded rather than swallowed. A forest that quietly becomes
+            // nine trees is exactly the kind of silent thinning that makes a
+            // world look broken with every gate green.
+            shortfalls.push(json!({
+                "feature_id": feature_id,
+                "layer_id": layer_id,
+                "requested": target,
+                "placed": accepted.len(),
+                "limited_by": "ecology",
+            }));
         }
     }
     Ok(())
@@ -1170,6 +1518,298 @@ fn contract(message: impl Into<String>) -> WorldSpecError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A flat 65^2 world 64 m square, with suitability confined to one band.
+    fn ecology_fixture(suitable_columns: std::ops::Range<usize>) -> (Vec<f32>, Vec<u8>) {
+        let resolution = 65;
+        let heights = vec![0.0_f32; resolution * resolution];
+        let mut suitability = vec![0_u8; resolution * resolution];
+        for row in 0..resolution {
+            for column in suitable_columns.clone() {
+                suitability[row * resolution + column] = 255;
+            }
+        }
+        (heights, suitability)
+    }
+
+    #[test]
+    fn the_scatter_only_draws_where_the_ecology_permits() {
+        // The crossing itself: S6 measures, and the scatter obeys. Before this,
+        // four solvers were correct and unread -- the trees in the viewer were
+        // wherever the polygon scatter happened to put them.
+        let (heights, suitability) = ecology_fixture(48..56);
+        let terrain = Terrain {
+            heights: &heights,
+            suitability: &suitability,
+            resolution: 65,
+            width: 64.0,
+            length: 64.0,
+        };
+        let polygon = [[-32.0, -32.0], [32.0, -32.0], [32.0, 32.0], [-32.0, 32.0]];
+        let (positions, cumulative) =
+            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
+        assert!(!positions.is_empty(), "the suitable band must be found");
+        assert_eq!(positions.len(), cumulative.len());
+        for position in &positions {
+            assert!(
+                terrain.suitability_at(position[0], position[1]) > 0.0,
+                "candidate at {position:?} sits where nothing grows"
+            );
+        }
+        // And every draw lands in the band, jitter included.
+        let mut rng = StableRng::from_parts(11, &["forest", "canopy"]);
+        let cell_m = [64.0 / 64.0, 64.0 / 64.0];
+        for _ in 0..200 {
+            let drawn = draw_weighted(&positions, &cumulative, cell_m, &mut rng);
+            assert!(
+                terrain.suitability_at(drawn[0], drawn[1]) > 0.0,
+                "jitter pushed a draw off suitable ground at {drawn:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn jitter_never_leaves_the_cell_it_was_drawn_from() {
+        // Found by red-teaming the crossing, not by a failing build.
+        //
+        // `suitability_at` rounds to the nearest cell and Rust rounds halves
+        // away from zero, so an offset of exactly -0.5 cells reads the previous
+        // cell. `rng.range(-half, half)` hits its lower bound whenever `unit()`
+        // returns 0.0. At ~2^-53 per draw that is a build that fails once in a
+        // blue moon, on one machine, with the validator rejecting a plan the
+        // compiler had just built -- the precise compile/validate divergence
+        // this crossing was written carefully to avoid.
+        //
+        // Checked against the worst case directly rather than by sampling: no
+        // number of random draws makes a 2^-53 event show up in a test.
+        let positions = [[0.0, 0.0]];
+        let cumulative = [1.0];
+        let cell = [2.0, 2.0];
+        let mut rng = StableRng::from_parts(1, &["jitter"]);
+        for _ in 0..5000 {
+            let drawn = draw_weighted(&positions, &cumulative, cell, &mut rng);
+            assert!(
+                drawn[0].abs() < cell[0] * 0.5 && drawn[1].abs() < cell[1] * 0.5,
+                "jitter {drawn:?} reached or passed the cell boundary"
+            );
+        }
+    }
+
+    #[test]
+    fn jitter_uses_each_axis_own_cell_size() {
+        // The other half of the same defect: a world is not required to be
+        // square, and jittering z by the width-derived cell size overshoots
+        // whenever it is not.
+        let positions = [[0.0, 0.0]];
+        let cumulative = [1.0];
+        let cell = [8.0, 1.0];
+        let mut rng = StableRng::from_parts(2, &["jitter"]);
+        let mut widest_z: f64 = 0.0;
+        for _ in 0..5000 {
+            let drawn = draw_weighted(&positions, &cumulative, cell, &mut rng);
+            widest_z = widest_z.max(drawn[1].abs());
+            assert!(drawn[1].abs() < cell[1] * 0.5, "z jitter used the x cell size");
+        }
+        assert!(widest_z > cell[1] * 0.3, "z jitter collapsed to nothing");
+    }
+
+    #[test]
+    fn the_polygon_still_bounds_the_ecology() {
+        // Suitability is a world field and does not know about the authored
+        // polygon. A forest must not spill across the map because the ground
+        // happens to suit it there.
+        let (heights, suitability) = ecology_fixture(0..65);
+        let terrain = Terrain {
+            heights: &heights,
+            suitability: &suitability,
+            resolution: 65,
+            width: 64.0,
+            length: 64.0,
+        };
+        let polygon = [[-8.0, -8.0], [8.0, -8.0], [8.0, 8.0], [-8.0, 8.0]];
+        let (positions, _) = suitable_cells(terrain, &polygon, [-8.0, 8.0, -8.0, 8.0], f64::INFINITY, &[]);
+        assert!(!positions.is_empty());
+        for position in &positions {
+            assert!(
+                point_in_polygon(*position, &polygon),
+                "candidate at {position:?} escaped the authored polygon"
+            );
+        }
+    }
+
+    #[test]
+    fn sampling_is_proportional_to_suitability() {
+        // A hard cut would stamp an edge; the treeline has to thin. Two bands,
+        // one four times as suitable, must draw roughly four times as often.
+        let resolution = 65;
+        let heights = vec![0.0_f32; resolution * resolution];
+        let mut suitability = vec![0_u8; resolution * resolution];
+        for row in 0..resolution {
+            suitability[row * resolution + 10] = 200;
+            suitability[row * resolution + 50] = 50;
+        }
+        let terrain = Terrain {
+            heights: &heights,
+            suitability: &suitability,
+            resolution,
+            width: 64.0,
+            length: 64.0,
+        };
+        let polygon = [[-32.0, -32.0], [32.0, -32.0], [32.0, 32.0], [-32.0, 32.0]];
+        let (positions, cumulative) =
+            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
+        let mut rng = StableRng::from_parts(3, &["forest", "canopy"]);
+        let mut rich = 0;
+        let mut poor = 0;
+        for _ in 0..4000 {
+            let drawn = draw_weighted(&positions, &cumulative, [0.0, 0.0], &mut rng);
+            if drawn[0] < 0.0 { rich += 1 } else { poor += 1 }
+        }
+        let ratio = rich as f64 / poor as f64;
+        assert!(
+            (2.5..=6.0).contains(&ratio),
+            "expected roughly 4:1 by weight, measured {ratio:.2}"
+        );
+    }
+
+    #[test]
+    fn a_zero_field_is_refused_rather_than_silently_emptying_a_forest() {
+        let (heights, suitability) = ecology_fixture(0..0);
+        let terrain = Terrain {
+            heights: &heights,
+            suitability: &suitability,
+            resolution: 65,
+            width: 64.0,
+            length: 64.0,
+        };
+        let polygon = [[-32.0, -32.0], [32.0, -32.0], [32.0, 32.0], [-32.0, 32.0]];
+        let (positions, _) = suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
+        assert!(
+            positions.is_empty(),
+            "an all-zero field must yield no candidates, so compile_foliage errors"
+        );
+    }
+
+    /// D33: the candidate set must be the *admissible* set.
+    ///
+    /// Before this, slope and exclusions were rejection tests applied after the
+    /// draw, so the dart budget was spent on ground no tree could stand on --
+    /// measured at 3.3% of `central_forest`'s weight actually reachable on the
+    /// arena, and 0.0% for `eastern_valley_woodland` on the gentler world.
+    #[test]
+    fn exclusions_are_applied_when_the_candidate_set_is_built() {
+        let (heights, suitability) = ecology_fixture(0..65);
+        let terrain = Terrain {
+            heights: &heights,
+            suitability: &suitability,
+            resolution: 65,
+            width: 64.0,
+            length: 64.0,
+        };
+        let polygon = [[-32.0, -32.0], [32.0, -32.0], [32.0, 32.0], [-32.0, 32.0]];
+        // A lane straight down the middle of an otherwise wholly suitable world.
+        let lane = Exclusion {
+            points: vec![[0.0, -32.0], [0.0, 32.0]],
+            radius: 10.0,
+            filled: false,
+        };
+
+        let (unfiltered, _) =
+            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
+        let (admissible, _) = suitable_cells(
+            terrain,
+            &polygon,
+            [-32.0, 32.0, -32.0, 32.0],
+            f64::INFINITY,
+            std::slice::from_ref(&lane),
+        );
+
+        // The negative case that makes the positive one mean something: without
+        // the exclusion the lane's ground is offered as candidates.
+        assert!(
+            unfiltered.iter().any(|p| excluded(*p, &lane)),
+            "precondition: the unfiltered set must include ground under the lane"
+        );
+        assert!(!admissible.is_empty(), "the lane must not empty the world");
+        assert!(admissible.len() < unfiltered.len());
+        for position in &admissible {
+            assert!(
+                !excluded(*position, &lane),
+                "candidate at {position:?} sits under the lane"
+            );
+        }
+    }
+
+    #[test]
+    fn slope_is_applied_when_the_candidate_set_is_built() {
+        // A world tilted steeply on one side. Suitability says yes everywhere;
+        // the slope limit must remove half of it before any dart is thrown.
+        let resolution = 65;
+        let mut heights = vec![0.0_f32; resolution * resolution];
+        for row in 0..resolution {
+            for column in 0..resolution {
+                // ~45 degrees on the east half, flat on the west.
+                heights[row * resolution + column] =
+                    if column > 32 { (column as f32 - 32.0) * 1.0 } else { 0.0 };
+            }
+        }
+        let suitability = vec![255_u8; resolution * resolution];
+        let terrain = Terrain {
+            heights: &heights,
+            suitability: &suitability,
+            resolution,
+            width: 64.0,
+            length: 64.0,
+        };
+        let polygon = [[-32.0, -32.0], [32.0, -32.0], [32.0, 32.0], [-32.0, 32.0]];
+        let (all, _) =
+            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
+        let (gentle, _) =
+            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], 20.0, &[]);
+        assert!(gentle.len() < all.len(), "the slope limit removed nothing");
+        assert!(!gentle.is_empty(), "the flat half must survive");
+        for position in &gentle {
+            assert!(
+                terrain.slope_degrees(position[0], position[1]) <= 20.0,
+                "candidate at {position:?} stands on ground too steep for it"
+            );
+        }
+    }
+
+    #[test]
+    fn a_wholly_occupied_polygon_is_a_shortfall_not_a_zero_field() {
+        // The two cases D33 separates. Both produce no candidates; only one of
+        // them is the author's mistake, and the build must tell them apart.
+        let (heights, suitability) = ecology_fixture(0..65);
+        let terrain = Terrain {
+            heights: &heights,
+            suitability: &suitability,
+            resolution: 65,
+            width: 64.0,
+            length: 64.0,
+        };
+        let polygon = [[-8.0, -8.0], [8.0, -8.0], [8.0, 8.0], [-8.0, 8.0]];
+        let blanket = Exclusion {
+            points: vec![[0.0, 0.0]],
+            radius: 64.0,
+            filled: false,
+        };
+        let (occupied, _) = suitable_cells(
+            terrain,
+            &polygon,
+            [-8.0, 8.0, -8.0, 8.0],
+            f64::INFINITY,
+            std::slice::from_ref(&blanket),
+        );
+        let (suitable, _) =
+            suitable_cells(terrain, &polygon, [-8.0, 8.0, -8.0, 8.0], f64::INFINITY, &[]);
+        assert!(occupied.is_empty(), "everything here is occupied");
+        assert!(
+            !suitable.is_empty(),
+            "...but the ecology itself permits this ground, which is what makes \
+             it a shortfall rather than a spec defect"
+        );
+    }
 
     #[test]
     fn stable_rng_is_reproducible_and_scoped() {

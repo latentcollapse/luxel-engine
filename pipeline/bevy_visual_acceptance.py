@@ -87,6 +87,76 @@ def _dilate(mask: np.ndarray, iterations: int) -> np.ndarray:
     return result
 
 
+# **One 8-bit code value.** A region whose local luma range falls below this has
+# no recoverable detail *in the data* -- the difference between its neighbouring
+# pixels is at or under the quantisation step of the file itself, so no exposure
+# or grade recovers structure that was never encoded. That is what makes it a
+# derived floor rather than a tuned one: it is a property of an 8-bit PNG, not a
+# number chosen to make a particular world pass. A shadowed cliff sits far above
+# it, because a shadow attenuates a gradient rather than deleting it.
+QUANTISATION_STEP = 1.0 / 255.0
+CRUSHED_LOCAL_RANGE = 2.0 * QUANTISATION_STEP
+
+# **The one re-baseline D25 authorises, with both sides recorded.**
+#
+# The old gate was `dark_foreground_fraction > 0.08`. This one measures a
+# different and much rarer quantity, so the old number carries no meaning here
+# and reusing it would have been a coincidence dressed as continuity. Measured
+# 2026-08-04 across every capture in the workspace:
+#
+# | capture                          | dark   | unreadable | structured |
+# |----------------------------------|--------|------------|------------|
+# | arena, `bevy_overview` (this gate)| 0.0027 | 0.0007     | 0.744      |
+# | arena, `bevy_player`             | 0.0114 | 0.0068     | 0.404      |
+# | arena, `bevy_border`             | 0.0270 | 0.0190     | 0.297      |
+# | arena, runtime frame             | 0.0156 | 0.0015     | 0.904      |
+# | arena, zone vista                | 0.0518 | 0.0172     | 0.667      |
+# | caledonia (failed build)         | 0.2260 | 0.1565     | 0.308      |
+#
+# The separation is the point, and it is widest on the capture this gate
+# actually runs on. The limit sits at roughly twice the worst good capture
+# (`bevy_border`, 0.0190) and a quarter of the bad one, so it has room for a
+# darker world without ceasing to be able to fail --
+# `tests/test_bevy_visual_acceptance.py` pins both directions.
+#
+# **Not yet in `metric_kinds`.** That table records which metrics were scored
+# against noise, shuffled pixels and an unfiltered render (tooling item 6), and
+# `unreadable_fraction` has not been through it -- nor had `dark_foreground_fraction`
+# before it. The evidence above is a comparison of real captures, which is a
+# weaker thing, and the label should not be claimed until the scoring is run.
+UNREADABLE_LIMIT = 0.04
+
+
+def _local_range(values: np.ndarray) -> np.ndarray:
+    """Max-minus-min in each pixel's 3x3 neighbourhood, per channel.
+
+    Range rather than standard deviation on purpose: std over a 3x3 window is
+    dominated by how many neighbours differ, so a region with one bright speck
+    scores the same as one with a genuine gradient across it. What decides
+    whether detail is recoverable is simply whether *any* difference survived
+    quantisation, which is what a range measures.
+
+    **Per channel, then the widest, and that is not a detail.** Quantisation
+    happens per channel, so the threshold only means "one code value" if it is
+    applied where the code values are. Measured on luma instead, two pixels
+    differing by a full step in blue alone come out 0.00028 apart -- because
+    blue carries a 0.0722 luma weight -- and would be called crushed while
+    holding real encoded detail. In a dark region that is exactly the case that
+    arises: shadow detail is often chroma before it is luminance.
+    """
+    if values.ndim == 2:
+        values = values[:, :, None]
+    padded = np.pad(values, ((1, 1), (1, 1), (0, 0)), mode="edge")
+    stack = np.stack(
+        [
+            padded[row : row + values.shape[0], column : column + values.shape[1], :]
+            for row in range(3)
+            for column in range(3)
+        ]
+    )
+    return (stack.max(axis=0) - stack.min(axis=0)).max(axis=2)
+
+
 def evaluate(zone_spec: dict[str, Any], capture_path: Path) -> dict[str, Any]:
     with Image.open(capture_path) as source:
         rgb = np.asarray(source.convert("RGB"), dtype=np.float32) / 255.0
@@ -178,6 +248,28 @@ def evaluate(zone_spec: dict[str, Any], capture_path: Path) -> dict[str, Any]:
         if foreground_luma.size
         else 1.0
     )
+    # **D25: dark is not the same thing as unreadable.**
+    #
+    # This gate used to fail on `dark_foreground_fraction` alone, and that made
+    # it an argument against mountains: the alpine arena went 0.0751 -> 0.0940
+    # purely by gaining the relief the art direction asks for, and the cheapest
+    # way to satisfy the gate was to build flatter mountains. Same standing
+    # incentive as D16 -- a critic that rewards a worse world.
+    #
+    # The two things it conflated are separable by measurement. A shadowed cliff
+    # is dark *and structured*: attenuating a surface scales its gradient down
+    # but leaves it encoded. A crushed region is dark and *flat* -- the detail is
+    # not dim, it is absent, and no grade recovers it. So the gate now fails on
+    # the part that is actually a render defect and merely reports the rest.
+    dark = foreground & (luma < 0.055)
+    structure = _local_range(luma)
+    crushed = dark & (structure < CRUSHED_LOCAL_RANGE)
+    unreadable_fraction = (
+        float(crushed.sum() / foreground.sum()) if foreground.any() else 1.0
+    )
+    dark_structured_fraction = (
+        float((dark & ~crushed).sum() / dark.sum()) if dark.any() else 0.0
+    )
     edge_density = float(edges[foreground].mean()) if foreground.any() else 0.0
     dynamic_range = (
         float(
@@ -195,8 +287,11 @@ def evaluate(zone_spec: dict[str, Any], capture_path: Path) -> dict[str, Any]:
         failures.append("Compiled world has implausible screen coverage")
     if border_edge_fraction > 0.04:
         failures.append("Compiled world is clipped by the overview frame")
-    if dark_fraction > 0.08:
-        failures.append("Compiled world contains excessive black/unreadable pixels")
+    # Threshold on the *crushed* fraction, not on darkness. It is set an order of
+    # magnitude below the old one because it is now measuring a different and
+    # much rarer thing -- see `UNREADABLE_LIMIT`.
+    if unreadable_fraction > UNREADABLE_LIMIT:
+        failures.append("Compiled world contains crushed, unreadable pixels")
     if edge_density < 0.008 or dynamic_range < 0.10:
         failures.append("Compiled world lacks readable visual structure")
     if road_fraction < 0.008:
@@ -225,7 +320,18 @@ def evaluate(zone_spec: dict[str, Any], capture_path: Path) -> dict[str, Any]:
             "background_rgb": [round(float(value), 5) for value in background],
             "foreground_fraction": round(foreground_fraction, 6),
             "border_edge_fraction": round(border_edge_fraction, 6),
+            # Kept, and deliberately no longer a gate. It is still the right
+            # number to watch when judging whether a world is legible, and
+            # keeping it visible is what lets the re-baseline be checked later
+            # rather than taken on trust.
             "dark_foreground_fraction": round(dark_fraction, 6),
+            "unreadable_fraction": round(unreadable_fraction, 6),
+            "unreadable_limit": UNREADABLE_LIMIT,
+            # Of the dark pixels, how many still carry recoverable detail. A
+            # world of real mountains should sit near 1.0; a crushed render
+            # collapses toward 0. This is the number that proves the split is
+            # measuring what it claims to.
+            "dark_structured_fraction": round(dark_structured_fraction, 6),
             "foreground_edge_density": round(edge_density, 6),
             # Computed by the same function as the source art's, on the
             # HUD-cropped frame, so the two are directly comparable. The

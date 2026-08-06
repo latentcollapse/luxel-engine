@@ -26,6 +26,25 @@ def _viewer_source_digest(world_core: Path) -> str:
     return source_tree_digest(roots, extensions=(".rs",))
 
 
+# The terrain shader is loaded at runtime from the renderer root, so it is not
+# compiled into the binary and `viewer_source_digest` -- which hashes `.rs`
+# under world_core -- cannot see it. That is a hole in exactly the provenance
+# this module exists to guarantee: edit the shader, change every pixel, and the
+# capture still reports the same viewer digest as the run before.
+#
+# Found while adding the fifth splat layer, which required editing this shader.
+TERRAIN_SHADER_RELATIVE = "assets/shaders/codeweald_terrain.wgsl"
+
+
+def _terrain_shader_digest(batch: Path) -> str:
+    """Hash the shader that actually drew the pixels, or say why we cannot."""
+    # <renderer_root>/concept_batches/<batch>
+    shader = batch.parents[1] / TERRAIN_SHADER_RELATIVE
+    if not shader.is_file():
+        return "absent:" + TERRAIN_SHADER_RELATIVE
+    return hashlib.sha256(shader.read_bytes()).hexdigest()
+
+
 def _viewer_provenance_mismatch(viewer: Path, world_core: Path) -> str | None:
     """None if the binary's self-reported build digest matches current
     sources; otherwise a human-readable reason it does not.
@@ -208,6 +227,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     # reader to separately go verify the binary that produced it still
     # matches what's on disk now.
     result["viewer_source_digest"] = _viewer_source_digest(world_core)
+    result["terrain_shader_sha256"] = _terrain_shader_digest(batch)
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n",

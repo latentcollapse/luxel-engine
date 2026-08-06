@@ -1,0 +1,282 @@
+{
+  "schema": "wge.conformance.closure/0.6",
+  "spec_draft": "0.6",
+  "fixtures": [
+    {
+      "id": "fixture.canonical.all_array_orderings",
+      "kind": "canonical_order",
+      "dependency_permutations": [
+        [
+          {"module_id": "demo.z", "semantic_digest": "sha256:0202020202020202020202020202020202020202020202020202020202020202", "document_digest": null},
+          {"module_id": "demo.a", "semantic_digest": "sha256:0101010101010101010101010101010101010101010101010101010101010101", "document_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}
+        ],
+        [
+          {"module_id": "demo.a", "semantic_digest": "sha256:0101010101010101010101010101010101010101010101010101010101010101", "document_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111"},
+          {"module_id": "demo.z", "semantic_digest": "sha256:0202020202020202020202020202020202020202020202020202020202020202", "document_digest": null}
+        ]
+      ],
+      "expected_dependency_order": ["demo.a", "demo.z"],
+      "declaration_dag": [
+        {"id": "demo.asset:world", "depends_on": []},
+        {"id": "demo.asset:sword", "depends_on": ["demo.asset:blade", "demo.asset:guard"]},
+        {"id": "demo.asset:guard", "depends_on": []},
+        {"id": "demo.asset:blade", "depends_on": []}
+      ],
+      "expected_declaration_order": [
+        "demo.asset:blade",
+        "demo.asset:guard",
+        "demo.asset:sword",
+        "demo.asset:world"
+      ],
+      "semantic_sequence_reorder": {
+        "left": ["transform.translate", "transform.rotate"],
+        "right": ["transform.rotate", "transform.translate"],
+        "expected_digest_equal": false
+      }
+    },
+    {
+      "id": "fixture.digest.complete_domain_matrix",
+      "kind": "digest_matrix",
+      "semantic_fields": [
+        "schema_version",
+        "language_version",
+        "semantic_compiler_compatibility_id",
+        "registry_digest",
+        "module_id",
+        "module_seed",
+        "target",
+        "product_profile_id",
+        "product_profile_digest",
+        "dependency_semantic_identities",
+        "semantic_evidence_pins",
+        "required_capabilities",
+        "declarations",
+        "constraints",
+        "policies",
+        "resolved_defaults",
+        "critical_extensions"
+      ],
+      "extension_fields": ["ignorable_extensions"],
+      "document_only_fields": [
+        "compiler_version",
+        "compiler_build_provenance",
+        "source_digest",
+        "source_map",
+        "diagnostics",
+        "repair_history",
+        "dependency_document_identities",
+        "evidence_manifest_digest",
+        "construction_evidence_pins",
+        "provenance"
+      ],
+      "document_includes": ["semantic_digest", "extension_digest"],
+      "self_excluded": ["semantic_digest", "extension_digest", "document_digest"],
+      "mutation_expectations": {
+        "schema_version": ["semantic_digest", "document_digest"],
+        "language_version": ["semantic_digest", "document_digest"],
+        "semantic_compiler_compatibility_id": ["semantic_digest", "document_digest"],
+        "registry_digest": ["semantic_digest", "document_digest"],
+        "module_id": ["semantic_digest", "document_digest"],
+        "module_seed": ["semantic_digest", "document_digest"],
+        "target": ["semantic_digest", "document_digest"],
+        "product_profile_id": ["semantic_digest", "document_digest"],
+        "product_profile_digest": ["semantic_digest", "document_digest"],
+        "dependency_semantic_identities": ["semantic_digest", "document_digest"],
+        "semantic_evidence_pins": ["semantic_digest", "document_digest"],
+        "required_capabilities": ["semantic_digest", "document_digest"],
+        "declarations": ["semantic_digest", "document_digest"],
+        "constraints": ["semantic_digest", "document_digest"],
+        "policies": ["semantic_digest", "document_digest"],
+        "resolved_defaults": ["semantic_digest", "document_digest"],
+        "critical_extensions": ["semantic_digest", "document_digest"],
+        "ignorable_extensions": ["extension_digest", "document_digest"],
+        "compiler_version": ["document_digest"],
+        "compiler_build_provenance": ["document_digest"],
+        "source_digest": ["document_digest"],
+        "source_map": ["document_digest"],
+        "diagnostics": ["document_digest"],
+        "repair_history": ["document_digest"],
+        "dependency_document_identities": ["document_digest"],
+        "evidence_manifest_digest": ["document_digest"],
+        "construction_evidence_pins": ["document_digest"],
+        "provenance": ["document_digest"],
+        "semantic_digest": ["document_digest"],
+        "extension_digest": ["document_digest"],
+        "document_digest": []
+      }
+    },
+    {
+      "id": "fixture.identity.module_move_and_registry_binding",
+      "kind": "module_identity",
+      "cases": [
+        {
+          "change": "source_path_only",
+          "left": {"source_path": "world/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "right": {"source_path": "moved/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "semantic_identity_changes": false
+        },
+        {
+          "change": "module_id",
+          "left": {"source_path": "world/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "right": {"source_path": "world/main.wge", "module_id": "demo.world.renamed", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "semantic_identity_changes": true
+        },
+        {
+          "change": "explicit_module_seed",
+          "left": {"source_path": "world/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "right": {"source_path": "world/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000002"},
+          "semantic_identity_changes": true
+        },
+        {
+          "change": "undeclared_registry_export",
+          "declared_exports": ["World", "Asset"],
+          "requested_export": "Secret",
+          "result": "binding_error"
+        },
+        {
+          "change": "source_and_request_seed_conflict",
+          "source_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001",
+          "request_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000002",
+          "result": "seed_conflict"
+        },
+        {
+          "change": "registry_dependency_cycle",
+          "dependency_graph": [
+            {"id": "demo.a", "depends_on": ["demo.b"]},
+            {"id": "demo.b", "depends_on": ["demo.a"]}
+          ],
+          "result": "cycle_error"
+        }
+      ],
+      "accepted_seed_source": "module_seed = seed(value=\"seed256:0000000000000000000000000000000000000000000000000000000000000001\")\n",
+      "rejected_seed_sources": [
+        "module_seed = seed(\"seed256:0000000000000000000000000000000000000000000000000000000000000001\")\n",
+        "module_seed = seed(value=\"seed-01\")\n",
+        "thing = asset(parts=[])\nmodule_seed = seed(value=\"seed256:0000000000000000000000000000000000000000000000000000000000000001\")\n",
+        "module_seed = seed(value=\"seed256:0000000000000000000000000000000000000000000000000000000000000001\")\nmodule_seed = seed(value=\"seed256:0000000000000000000000000000000000000000000000000000000000000002\")\n"
+      ]
+    },
+    {
+      "id": "fixture.profile.identity_and_cache_isolation",
+      "kind": "product_profile",
+      "cache_input_semantic_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "cases": [
+        {
+          "left": {"authored_alias": "render", "canonical_id": "asset.render@1", "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+          "right": {"authored_alias": "asset.render@1", "canonical_id": "asset.render@1", "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+          "semantic_identity_equal": true
+        },
+        {
+          "left": {"canonical_id": "asset.render@1", "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+          "right": {"canonical_id": "asset.gameplay@1", "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+          "semantic_identity_equal": false
+        },
+        {
+          "left": {"canonical_id": "asset.gameplay@1", "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+          "right": {"canonical_id": "asset.gameplay@1", "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},
+          "semantic_identity_equal": false
+        }
+      ]
+    },
+    {
+      "id": "fixture.syntax.mask_comparison_and_keywords",
+      "kind": "source_syntax",
+      "accepted": [
+        "join = connected(first=blade, second=guard)\n",
+        "gate = require(predicate=thickness(part=blade.edge) <= 1.5 * mm)\n",
+        "habitat = mask_all(items=[above, north, mask_not(item=bog)])\n"
+      ],
+      "rejected": [
+        {"source": "join = connected(blade, guard)\n", "code": "unexpected_positional_operand"},
+        {"source": "habitat = above and north\n", "code": "unsupported_boolean_operator"},
+        {"source": "habitat = not bog\n", "code": "unsupported_boolean_operator"},
+        {"source": "gate = 0.0 <= wetness <= 0.4\n", "code": "chained_comparison"}
+      ]
+    },
+    {
+      "id": "fixture.numeric.unit_scale_rounding",
+      "kind": "binary64_unit_vectors",
+      "rounding": "nearest_ties_even",
+      "vectors": [
+        {"source_magnitude": 52.0, "unit": "mm", "scale": 0.001, "expected_hex": "0x1.a9fbe76c8b43ap-5"},
+        {"source_magnitude": 10.0, "unit": "mm", "scale": 0.001, "expected_hex": "0x1.47ae147ae147bp-7"},
+        {"source_magnitude": 3.0, "unit": "deg", "scale": 0.017453292519943295, "expected_hex": "0x1.acee9f37bebd6p-5"},
+        {"source_magnitude": 900.0, "unit": "m", "scale": 1.0, "expected_hex": "0x1.c200000000000p+9"}
+      ]
+    },
+    {
+      "id": "fixture.compiler.patch_compatibility",
+      "kind": "compiler_identity",
+      "cases": [
+        {
+          "left": {"compiler_version": "1.0.1", "compatibility_id": "wge.frontend/core-1"},
+          "right": {"compiler_version": "1.0.2", "compatibility_id": "wge.frontend/core-1"},
+          "semantic_identity_equal": true,
+          "document_identity_equal": false
+        },
+        {
+          "left": {"compiler_version": "1.0.2", "compatibility_id": "wge.frontend/core-1"},
+          "right": {"compiler_version": "1.1.0", "compatibility_id": "wge.frontend/core-2"},
+          "semantic_identity_equal": false,
+          "document_identity_equal": false
+        }
+      ]
+    },
+    {
+      "id": "fixture.collections.and_identifier_roundtrip",
+      "kind": "collections_and_identifiers",
+      "rejected": [
+        {"source": "parts = (blade, guard)\n", "code": "tuple_literal_forbidden"},
+        {"source": "record = {\"role\": \"blade\", \"role\": \"guard\"}\n", "code": "duplicate_record_key"},
+        {"source": "record = {\"\\u0072ole\": \"blade\", \"role\": \"guard\"}\n", "code": "duplicate_record_key"}
+      ],
+      "external_identifier_values": [
+        "quote-\"-slash-\\\\-newline-\\n",
+        "snowman-☃",
+        "combining-é",
+        "delimiter-]); import os #"
+      ],
+      "must_never_become_source_bindings": true
+    },
+    {
+      "id": "fixture.migration.lenient_preview_requires_strict_promotion",
+      "kind": "migration_boundary",
+      "migration_manifest": "migration_worldbuilder_v1.json",
+      "lenient_result_type": "LenientCandidate",
+      "strict_result_type": "StrictIR",
+      "lenient_allowed_consumers": ["preview_sandbox"],
+      "lenient_forbidden_consumers": [
+        "world_application",
+        "artifact_application",
+        "scaffold_generation",
+        "cache_publication",
+        "certification"
+      ]
+    },
+    {
+      "id": "fixture.extensions.empty_set_digest",
+      "kind": "digest_vector",
+      "algorithm": "sha256",
+      "domain_tag": "wge.ir.extensions/1",
+      "projection_jcs": "[]",
+      "preimage_hex": "7767652e69722e657874656e73696f6e732f31005b5d",
+      "expected": "sha256:36a981833b0c0782839ca946dccbde5d2768e014d4e74eab70d00c05f7b6679f"
+    },
+    {
+      "id": "fixture.cache.reuse_event_location",
+      "kind": "cache_receipt",
+      "cache_entry_changes_on_hit": false,
+      "reuse_event_location": "current_build_receipt",
+      "receipt_document_identity_changes": true
+    },
+    {
+      "id": "fixture.policy.soft_promotion_label",
+      "kind": "policy_promotion",
+      "policy_id": "policy.gameplay",
+      "objective_id": "objective.reachability",
+      "expected_constraint_id": "promotion:policy.gameplay:objective.reachability",
+      "expected_class": "realized_hard",
+      "required_provenance_parents": ["policy.gameplay", "objective.reachability"]
+    }
+  ]
+}

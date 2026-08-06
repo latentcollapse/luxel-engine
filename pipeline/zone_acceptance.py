@@ -250,6 +250,11 @@ def evaluate_zone(
     palette = terrain.get("style_palette_srgb", {})
     if float(terrain.get("steep_surface_water_fraction", 0.0)) > 0.0001:
         failures.append("Terrain paints standing water onto steep faces")
+    # Peat sheds off a grade exactly as standing water does, and for a while
+    # only one of the two was checked -- so the wetland field ran up cliffs
+    # unmeasured until it was promoted to a material channel and became visible.
+    if float(terrain.get("steep_wetland_fraction", 0.0)) > 0.0001:
+        failures.append("Terrain paints peat wetland onto steep faces")
     if set(palette) != {"grass", "road", "rock", "snow", "water"}:
         failures.append("Terrain output lacks a complete concept-derived style palette")
     requested_materials = zone_spec.get("terrain_materials", {})

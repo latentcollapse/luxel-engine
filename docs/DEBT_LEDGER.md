@@ -743,6 +743,667 @@ a mountain). Measuring local contrast inside the dark region distinguishes them
 once, with the old and new values recorded side by side, against a world built
 to the current art direction rather than the previous one.
 
+### Resolved 2026-08-04
+
+`bevy_visual_acceptance.py`. The gate now fails on `unreadable_fraction` — dark
+**and** flat — and reports `dark_foreground_fraction` without gating it.
+
+**The crushed threshold is derived, not tuned.** A region whose local luma range
+is under two 8-bit code values has no recoverable detail *in the file*: the
+difference between neighbouring pixels is at or below the quantisation step, so
+no grade recovers structure that was never encoded. That is a property of an
+8-bit PNG rather than a number chosen to make a world pass. Local *range* rather
+than standard deviation, because std over a 3x3 window rewards how many
+neighbours differ, and what matters is whether any difference survived at all.
+
+Measured across every capture in the workspace:
+
+### First firing on a real world, 2026-08-04 — and it localised correctly
+
+The overview of the rebuilt arena fails: `unreadable_fraction` **0.0756**
+against the 0.04 limit, `dark_structured_fraction` **0.240**. That is the broken
+render signature, not the mountain signature — the taller massif (D26) throws
+large shadows and the renderer is **clipping them to black rather than shading
+them**.
+
+This is the whole point of the split, demonstrated on a world nobody staged for
+it. The old gate saw `dark_foreground_fraction` 0.0995 against 0.08 and would
+have said *"too dark — build smaller mountains."* The new one says *"these
+regions carry no recoverable detail"*, which points at lighting and exposure in
+the viewer and leaves the terrain alone. Same failing capture, opposite
+instruction.
+
+| capture | dark | unreadable | structured |
+|---|---|---|---|
+| **arena overview, 2026-08-04 (fails)** | **0.0995** | **0.0756** | **0.240** |
+| arena, `bevy_overview` (earlier, passed) | 0.0027 | 0.0007 | 0.744 |
+| arena, `bevy_player` | 0.0114 | 0.0068 | 0.404 |
+| arena, `bevy_border` | 0.0270 | 0.0190 | 0.297 |
+| arena, runtime frame | 0.0156 | 0.0015 | 0.904 |
+| caledonia (failed build) | 0.2260 | 0.1565 | 0.308 |
+
+`UNREADABLE_LIMIT` is 0.04 — about twice the worst good capture (`bevy_border`,
+0.0190) and a quarter of the bad one. That is the one re-baseline this entry
+authorises, and both sides are recorded above.
+
+**One correction found while red-teaming this.** The range was first measured on
+*luma*, and the "one 8-bit code value" rationale does not survive that: two
+pixels differing by a full step in blue alone are 0.00028 apart in luma, because
+blue carries a 0.0722 weight, so genuinely encoded detail was being called
+crushed. Quantisation is per channel, so the range is now taken per channel and
+the widest kept. It moved every number in the direction the rationale predicts —
+the worst good capture went 0.0208 → 0.0172 and its structured share 0.599 →
+0.667, while the broken render barely moved (0.1577 → 0.1565).
+
+`tests/test_bevy_visual_acceptance.py` pins both directions with two images
+built from a shared base, identical in luma distribution and dark fraction and
+differing only in whether the dark carries a gradient. A third test asserts that
+a world more than 8% dark — over the old hard limit — passes when it is
+structured, which is the specific regression this entry exists to prevent.
+
+---
+
+## D26. `wall_width_m` is one number deciding the valley profile everywhere
+
+**Evidence.** After the massif inversion took effect (2026-08-03), the world
+reads as a range from the east — several summits at different depths, a
+snow-capped horn standing behind the nearer ridge — and as a **flat-topped
+plateau** from the player-height view looking the other way. Same terrain, same
+build, one capture apart:
+
+| View | Reads as |
+|---|---|
+| `east-wall` | alpine range, peaks behind peaks |
+| `player` | one sharp horn, then a mesa with a hard horizontal top line |
+
+**Why it happens.** `_surrounding_massif` derives the carve from
+`into = smoothstep((play_distance - wilderness_margin_m) / wall_width_m)`, and
+`wall_width_m` is a single scalar (34 m) applied identically in every
+direction. Where the play envelope runs close to the map edge the transition
+consumes the available distance and the massif is still climbing at the
+boundary, which reads as a ridge. Where the envelope is far from the edge,
+`into` saturates at 1.0 well before the edge and everything beyond it is flat
+massif at full relief — a plateau top, because nothing varies once saturated.
+
+This is the same shape of defect as the play envelope itself: a single global
+number standing in for a field that should vary per-cell. The envelope fix on
+the same day removed thirteen unbounded landmark holes for the same reason.
+
+**Why it matters.** It puts a ceiling on how alpine the world can read
+regardless of `massif_relief_m`. Raising relief makes the plateau taller, not
+more mountainous, so the obvious knob does not address it and may look like the
+inversion failing when it is this instead.
+
+**Fix direction.** Make the transition a field rather than a scalar — scale the
+run by the distance actually available between envelope and map edge, so the
+profile completes in the room it has instead of saturating early. Ridged relief
+should continue to modulate beyond saturation rather than stopping, so a
+saturated cell is still terrain rather than a tabletop. Verify from at least two
+opposed views; a single capture cannot see this, which is why it survived the
+build that introduced it.
+
+### Resolved 2026-08-04 — and the stated cause above was wrong
+
+`_transition_run` in `zone_rasterizer.py`; `wall_width_m` is now a **ceiling on
+the run**, not the run. Tests in `tests/test_massif_transition.py`.
+
+**The mechanism was the opposite of what this entry assumed.** `into` was not
+saturating early and flattening everything beyond it. It was barely saturating
+at all — measured on the arena, only **20.2% of the non-play area** reached
+saturation, because **56.1% of the perimeter had less room than the 34 m run
+needed** (p10 = 9.4 m of room against p90 = 57.3 m).
+
+That inverts the consequence. Delivered relief is `massif x into x relief`, so
+where `into` never reaches 1 the ridged field is scaled *down* by it. Inside the
+saturated band the massif field averaged **0.080** and peaked at 0.453 against a
+world maximum of 1.000 — **every summit of the range sat outside the band and
+was carved away**. So raising `massif_relief_m` scaled up the low, smooth part
+of the noise, which is exactly the reported symptom. The entry's "flat massif at
+full relief" reading was a plausible story that the measurement did not support;
+it survived because nobody had printed the saturation fraction.
+
+Measured on the alpine arena, before and after:
+
+| | before | after |
+|---|---|---|
+| tallest point | 58.2 m | **94.9 m** |
+| delivered fraction of authored relief | 39% | 63% |
+| mountain area | 7,109 m² | **10,073 m²** |
+| protected cells that are visually flat | 39.9% | **24.8%** |
+| protected roughness (5-cell std) | 0.135 m | **0.420 m** |
+
+Enclosure, accessibility and byte-determinism all still hold. Half the residual
+flatness turned out to belong to a different defect and is logged as
+[D31](#d31-the-containment-floor-was-the-terrain-and-its-own-low-ground-is-flat).
+
+**Still owed: the two opposed views.** The numbers above are heightfield
+measurements, not a visual confirmation, and this entry itself is the reason to
+distrust a good-looking number — the previous diagnosis was numerically
+plausible and wrong.
+
+---
+
+## D27. The accessibility gate's threshold is inherited, not derived
+
+**Evidence.** The gate moved from `steep_edge_fraction` (steep walkable ÷
+walkable) to `steep_edge_world_fraction` (steep walkable ÷ every edge in the
+world) on 2026-08-03, because the walkable set is a design variable: raising
+protected relief from ~12% to 50.19% halved the denominator without moving a
+single steep edge, and the old rule then demanded the ridge flanks be smoothed
+to correct an accounting change. Same class as [D16](#) and D25.
+
+| | Value |
+|---|---|
+| steep edges | 12,490 |
+| accessible edges | 1,076,789 (51.3% of world) |
+| steep ÷ accessible | 1.1599% — failed the old 1% limit |
+| steep ÷ world | 0.5950% — passes the new 0.9% limit |
+
+**What is debt.** The denominator is now principled. **The threshold is not.**
+0.009 was chosen to preserve the absolute allowance the previous rule granted —
+1% of a world that was then ~87% walkable — so it encodes what the old gate
+happened to permit rather than a measured statement about how much
+walkable-but-steep ground a player should encounter. It is a defensible
+starting point and an undefended number.
+
+**Why it matters.** An inherited threshold looks derived once its provenance
+scrolls out of git blame. The next person to hit this gate has no way to tell
+whether 0.009 means something or was a translation artifact.
+
+**Fix direction.** Derive it from traversal evidence — what fraction of steep
+walkable ground actually costs a player a route, measured against the traversal
+probe — or declare it an authored policy value with an owner, per the language
+spec's requirement that every policy field carry a semantic owner and affected
+gates. Record the old and new values side by side when it changes.
+
+---
+
+## D28. The visual gates now argue against the ecology
+
+**Where:** `bevy_visual_acceptance`, `foliage_fraction` floor 0.008.
+**Measured 2026-08-03:** 0.006820, having been 0.011509 the same day.
+
+Nothing regressed. The scatter crossing (open decisions item 7) made the
+foliage obey `canopy_suitability`, canopy suitability is non-zero on 2.7%-5.2%
+of each forest polygon, and the forests thinned accordingly: 50 conifers where
+112 stood, 275 render-plan instances where there were 337. The gate measures
+green pixels, so obeying the ecology tripped it.
+
+**This is the third instance of one defect**, after [D16](#) and
+[D25](#): a metric whose cheapest satisfaction is to make the world *less*
+correct. Planting trees the ecology forbids would turn this gate green.
+
+**The two readings, and they are not equivalent:**
+
+1. The ecology is miscalibrated — 2.7% canopy suitability on a valley floor is
+   too strict, and the same question already sits open as decisions item 4
+   ("heath scrub takes 69.5% of the map... I could not tell from one map
+   whether this is honest or miscalibrated").
+2. The gate is wrong — "enough green pixels" is not "the foliage is correct",
+   and a genuinely sparse subalpine world should be allowed to look sparse.
+
+**Do not re-baseline 0.008 to make this green.** That answers neither question
+and destroys the evidence that they were ever asked. Item 4's second, gentler
+world discriminates between the two readings in a single build, which is now a
+stronger argument for doing it than the one originally recorded.
+
+### The second world's evidence — 2026-08-04
+
+`glenmara_highland_vale_v1`: the same gameplay graph on highland terrain,
+`massif_relief_m` 78 against 150, three of six crag fields removed.
+
+| | alpine arena | highland vale |
+|---|---|---|
+| heath scrub, share of vegetated area | 85.9% | **92.0%** |
+| canopy area | 6,803 m² | 4,265 m² |
+| measured treeline | 17.6 m | 47.9 m |
+| bare fraction | 18.4% | 19.2% |
+
+**The terrain is not what makes these worlds heath.** Halving the relief, moving
+from alpine horns to highland whalebacks and removing half the crag fields made
+the world *more* heath-dominated, not less, and raised the treeline nearly
+threefold while producing less canopy. The reading that the arena's cliffs were
+suppressing the forests is not supported.
+
+**So reading 1 above is narrowed, not confirmed.** What the two worlds show is
+that heath dominance is a property of the ecology rather than of any one
+terrain. Whether ~90% heath is *wrong* is a different question, and it is an
+art-direction call rather than a measurement: an alpine valley floor genuinely
+is mostly grass and heath with conifer in bands, which is the reference Matt
+gave. If that is the intended world, then the defect is reading 2 — a gate
+counting green pixels against a floor inherited from a differently-vegetated
+world.
+
+### And then the capture settled it — `foliage_fraction` is frame-relative
+
+Measured on the alpine arena the same night, on two builds of the *same world*
+whose only difference is this session's fixes:
+
+| | 2026-08-03 | 2026-08-04 |
+|---|---|---|
+| render-plan instances | 275 | **301** |
+| `foliage_fraction` | 0.006820 | **0.005207** |
+
+**More foliage was placed and the metric went down.** D33 added 26 instances,
+and D26 made the surrounding massif taller, which changed what share of the
+frame is rock and shadow. The metric moved because the *composition* moved.
+
+That is the same defect already recorded for `road_fraction` in
+[D24](#d24-road_fraction-is-frame-relative-and-the-framing-is-not-stable) —
+"frame-relative, and the framing is not stable" — and nobody had noticed it
+applies to `foliage_fraction` identically. Both are a green-or-warm pixel share
+of a frame whose composition is a function of terrain height.
+
+**So D28's answer is reading 2: the gate is wrong.** Not because a sparse world
+should be allowed to look sparse — that argument was always available and was
+never decisive — but because `foliage_fraction` **does not measure the quantity
+of foliage**, and a build that plants 9% more trees can lower it. Whatever
+threshold it is given, it is the wrong instrument for the question.
+
+**Do not re-baseline it. Replace it.** The fix has the same shape as D18's:
+project the known foliage instances into the frame and measure what fraction of
+them are visible, rather than counting green pixels and hoping. The render plan
+already has every instance's position, and the capture already records the
+camera.
+
+**What remains for Matt, and it is now a smaller question:** whether ~90% heath
+is the world he wants. That is taste, and no measurement settles it. But it is
+no longer entangled with the gate — the gate is independently broken.
+
+---
+
+## D29. Moving the obstructing placements cannot clear the navmesh gate
+
+**Where:** `siting_plan.obstructing_placements`, `navigation_plan.lanes[].obstructions`.
+
+[D13](#) says twelve placements obstruct lanes and the villages have not moved.
+Closing it was scheduled to clear navmesh acceptance. Measured 2026-08-03, it
+will not, because the twelve are not what is blocking two of the three lanes:
+
+| lane | obstructions | owner |
+|---|---|---|
+| `north_lane` | 14 | **12 `hibernia_keep`**, 2 `westcentral_hamlet` |
+| `central_lane` | 10 | `southwest_hamlet` 5, `eastcentral_hamlet` 5 |
+| `south_lane` | 17 | **14 `albion_keep`**, 3 hamlets |
+
+Moving every hamlet clears `central_lane` and leaves the other two failing. The
+dominant blockers are keep *gate* components — piers, flank roofs, flank towers
+— standing in the lane the gate exists to admit. The siting plan does not list
+them, correctly: a lane is *meant* to pass through a keep gate, so the keep is
+exempt from lane keep-out. The defect is that the gate's collision then blocks
+the aperture.
+
+**That is a different problem from D13 and has never been logged.** It is about
+whether a gate is a wall with a doorway or a solid object that happens to look
+like a gate, and it needs a decision — carve a traversable aperture through gate
+collision, model the gate as a doorway with a navigable span, or route the lane
+around the keep and stop claiming it runs through.
+
+D13 remains real and worth closing. It is just not sufficient, and scheduling it
+as the fix for navmesh acceptance was based on a count nobody had broken down by
+owner.
+
+### Decided 2026-08-04 by Matt — a gate is a door, and it starts closed
+
+**A keep gate is solid when closed and an opening when broken.** It is not a
+traversable doorway from the start, and it is not permanently solid. So the
+navmesh question was malformed: it asked for one static answer to something with
+two states.
+
+The design, in his words:
+
+- **Gates begin closed and barred.** They are destructible; they cannot be
+  repaired once broken.
+- **Minions do not use the gate.** Forces spawn from **posterns** to either side
+  and at the front, outside the wall, and make their way down the lanes. So a
+  lane never needed to pass through a closed gate — which is why the lane
+  routing that assumed it did has been failing.
+- **Three mage towers** protect the keep.
+- **When the gate falls, the Lord spawns in the courtyard**, visible. Killing
+  the Lord ends the game. The Lord is formidable but cannot survive a
+  coordinated team attack once the mage towers are gone, so it needs protection.
+- Open question he flagged, not yet settled: whether the Lord gets a permanent
+  lower-power tower that cannot be killed, or an ability instead.
+
+**What this means for the compiler.** Lane connectivity must be solved against
+**postern spawn points outside the wall**, not through the gate aperture. The
+gate's collision staying solid is *correct* and was never the defect; the defect
+is that `navigation_plan` routes lanes through a closed gate and then reports
+its own routing choice as an obstruction. Destruction state is runtime, so the
+compiled navmesh should describe the closed world, with the aperture as a
+declared dynamic opening rather than a baked one.
+
+**Not implemented** — terrain work is paused pending a rethink (see the
+2026-08-04 handoff), and this wants doing after that lands rather than against a
+world whose shape is about to change.
+
+---
+
+## D30. `source_tree_digest` over NTFS is slow enough to look like a hang
+
+**Where:** `_viewer_source_digest` / `source_tree_digest`, `pipeline/capture_bevy.py`.
+
+The digest walks `world_core/{apps,crates}` hashing every `.rs` — **9.9s warm** —
+and `test_capture_bevy`'s provenance class calls it **once per test**. The
+workspace is on `/mnt/d`, an NTFS data disk.
+
+**How it presented.** On 2026-08-03, after a session of builds and Bevy captures,
+`python3 -m unittest discover -s tests` appeared to hang in
+`ViewerProvenanceMismatchTests` at ~1% CPU. Three experiments went to ruling out
+code changes as the cause. Re-run on a cold, idle machine the same suite passes
+**513/513 in 199s** — it was never blocked, only slow against a saturated disk.
+
+**Why it matters.** It cost a session's confidence in a green suite, and it
+scales the wrong way: every new test in that class adds ~10s of redundant
+hashing of files that did not change between tests.
+
+**Fix direction.** Cache the digest per process, keyed on the tree root. The
+inputs cannot change mid-run, so there is nothing to invalidate within a test
+session.
+
+**Diagnostic note worth keeping:** a stall point that *moves* between runs — 109
+dots, then 88, then 4 — means slow, not blocked. Re-run idle before hunting a
+deadlock.
+
+### Root cause found 2026-08-04: it is a mechanical disk behind FUSE
+
+This entry blamed NTFS, which was half of it. `/mnt/d` is `/dev/sda2`, an
+**HGST HUS724030ALA640 -- a 3 TB 7200 rpm mechanical hard drive** -- formatted
+NTFS and mounted through `fuseblk`. Spinning platters, a foreign filesystem, and
+a userspace driver, stacked.
+
+Measured with the same binary and prefix, Gaea's `Swarm --help`: **33 s from
+`/mnt/d` with a warm page cache, 1 s from NVMe.** `/home` is btrfs on NVMe and
+has 61 GB free.
+
+So `source_tree_digest` is not expensive because hashing is expensive. It is
+expensive because it walks thousands of small files on a hard disk through a
+userspace filesystem. Caching it per process is still worth doing, but the
+larger and cheaper fix is to stop putting hot, many-small-file work on that
+mount -- starting with `CARGO_TARGET_DIR`, which is entirely disposable.
+
+
+---
+
+## D31. The containment floor was the terrain, and its own low ground is flat
+
+**Where:** `_border_rampart` run as the containment floor, `zone_rasterizer.py`.
+
+**Found while fixing [D26](#d26-wall_width_m-is-one-number-deciding-the-valley-profile-everywhere), and it is a bigger finding than D26 was.**
+Since the massif inversion the rampart is applied as `maximum(massif, rampart)`
+and the code calls it "a containment floor". It was not behaving as one.
+Measured on the alpine arena, 2026-08-04:
+
+| | before | after `containment_only` |
+|---|---|---|
+| protected massif cells replaced by the floor | **87.7%** | 69.2% |
+| mean relief lost where it replaced | 18.6 m | 15.0 m |
+
+**Nearly nine cells in ten of what the world presented as its new massif-carved
+mountains were the old rampart.** The cause was that the floor kept the
+play-space and spur terms, so it followed the rhomboid inland instead of
+guarding the map edge — a floor shaped like the border is the border. Dropping
+those terms in containment mode is landed, and enclosure still holds
+(`enclosed: true`, `leak_length_m: 0`, `edge_reach_fraction: 0.0`).
+
+**What remains is the second half.** The floor is `height_m x shape x modulation`
+with `crest_relief` 0.72, so where its own ridged noise is near zero the surface
+sits at `62 x 0.28 = 17.36 m` — and a ridged multifractal is near zero over most
+of its area by construction. Measured after the fix: **10.6% of the world sits
+in a single 1.7 m height band around 17.4 m**, 92% of it within 28 m of the map
+edge. That is the flat rim on the horizon, and it is the surviving half of the
+"hard horizontal top line" D26 was raised for.
+
+**Why it matters.** It caps how alpine the world can read from inside, and it is
+invisible to every gate we have — enclosure passes, accessibility passes, and
+the visual gates measure shadow and foliage, none of which a flat rim moves.
+
+**Fix direction.** Two candidates, and they are not exclusive. (a) Derive the
+floor's height from the containment requirement — agent `max_slope_degrees` 45
+and `max_climb_m` 4.0 over the local face — instead of inheriting an authored
+62 m chosen when the rampart *was* the border; this is the same defect class as
+[D27](#d27-the-accessibility-gates-threshold-is-inherited-not-derived).
+(b) Let the floor's low ground follow the massif field rather than an
+independent noise field, so a saddle in the floor is a saddle in the range
+rather than a plane crossing it.
+
+**Not attempted here**, because both change enclosure geometry, and enclosure is
+a hard safety gate that should not be altered in the same pass as the thing that
+exposed it.
+
+---
+
+## D32. The render plan scattered against the previous build's ecology
+
+**Where:** `build_zone.py` stage order — `_compile_render_plan` against
+`build_vegetation`. **Fixed 2026-08-04, same day it was found.**
+
+`_compile_render_plan` passes `terrain/canopy_suitability_u8.bin` to the Rust
+scatter, which reads it to decide where a tree may stand (systems S6/S7,
+open-decisions item 7). That file is written by `build_vegetation` — which ran
+**98 lines later in the same function.**
+
+**Every build therefore scattered against the previous build's ecology**, and
+recorded that stale file's digest as `canopy_suitability_sha256`. The provenance
+field asserted the plan was bound to a field the plan had never seen.
+
+**Why it survived a session of testing.** On any batch that has been built once,
+the file is simply there from last time, so the build succeeds and the numbers
+look stable. It is invisible except on a batch with no `terrain/` directory,
+where the build fails outright — which is exactly how it was found, on the first
+run of the second world (open-decisions item 4). This is the case for building a
+second world stated better than the argument that scheduled it.
+
+**It also weakens a claim made on 2026-08-03.** "Rebuilds are byte-identical,
+verified across two full builds on five artifacts" was true, but partly for the
+wrong reason: the canopy field was constant across those builds because it was
+stale, not because the pipeline is deterministic.
+
+**Re-verified properly on 2026-08-04, with `terrain/` deleted between runs** —
+which is the test the original claim needed and did not have, since a surviving
+directory is exactly what made the stale input invisible. All five artifacts are
+byte-identical, including `canopy_suitability_u8.bin` (the input that was stale)
+and `render_plan.json` (the artifact that consumes it):
+
+```
+8f377502…83b95f2f  render_plan.json
+52dbf6b5…d15e5b8cd1 terrain/heightfield_f32le.bin
+ff3cc130…9d908369c  terrain/canopy_suitability_u8.bin
+d5b7fc6f…78d9c8f6e9 terrain/splatmap.png
+f1ea71a8…6d7937a5bf collision_plan.json
+```
+
+**Delete the batch's `terrain/` directory when verifying determinism.** A rebuild
+over a populated one cannot distinguish a deterministic pipeline from a frozen
+input.
+
+**But do not do it while the test suite is running.** `test_boundary_plan` and
+`test_navigation_plan` both have `CompiledBatchTests` that read the alpine
+arena's artifacts straight off disk, so a concurrent rebuild takes the files out
+from under them — four `FileNotFoundError`s on `terrain/playable_mask.bin`,
+which look exactly like real defects until the traceback is read. **The suite
+and a build of the arena cannot run at the same time**, and nothing in either
+says so. That is the same shared-mutable-directory coupling as the rest of this
+entry, seen from the test side.
+
+**Fix.** The S1/S2/S6 block (site conditions, hydrology, vegetation) moved to
+directly after the terrain manifest is written, which is where its own comment
+already said it belonged — "runs as soon as the terrain is certified and before
+anything that wants to read it". None of the three read `asset_plan`,
+`placement_plan` or `render_plan`, so nothing else had to move. `build_siting`
+audits placements and correctly stays after the render plan.
+
+**The general lesson.** A pipeline whose stages communicate through files in a
+shared directory cannot detect its own ordering errors, because a stale file is
+indistinguishable from a fresh one. Stage inputs should be passed or hash-checked
+against the run that produced them, not found on disk. Not attempted here.
+
+### The provenance field did catch it — downstream, silently
+
+The Bevy viewer refused to load the world built under the old order:
+
+```
+ERROR codeweald_world_viewer: compiled-world reload rejected:
+      invalid ZoneSpec: canopy_suitability_sha256 does not match its source artifact
+```
+
+Which is exactly right, and vindicates binding the plan to the field's bytes.
+The render plan hashed the old canopy field; vegetation then overwrote the file;
+the digests disagreed. **So the artifact set every build produced was internally
+inconsistent, and the one component that checked said so.** Nothing upstream
+asked it.
+
+The check belongs in the build, not only in the renderer. Until it is there, a
+build can report every stage green and emit a world no viewer will load.
+See [D34](#d34-the-viewer-hangs-instead-of-exiting-when-it-rejects-a-world).
+
+**Verified fixed** by running the renderer's own check by hand against the
+second world's artifacts — the digest `render_plan.json` records and the
+`canopy_suitability_u8.bin` on disk are now the same bytes:
+
+```
+field on disk : bdbfd2dfba3f4ccf12c5fbe2e4f3c5d906702afd79327c1ad4052bf12f41cea9
+plan records  : bdbfd2dfba3f4ccf12c5fbe2e4f3c5d906702afd79327c1ad4052bf12f41cea9
+```
+
+### A second, latent instance of the same class
+
+Found while auditing the fix, not yet triggered. Under
+`--cross-engine-handoffs`, `build_zone.py` adds `engine_artifacts.unreal` to
+`terrain.manifest` and **rewrites `terrain_manifest.json`** — after
+`boundary_plan` has already recorded `terrain_manifest_bytes_sha256` over the
+earlier bytes. Any consumer checking that digest against the file on disk would
+find them disagreeing, exactly as the viewer did for the canopy field.
+
+It is dormant because the flag is off by default and Godot is the sole
+production target, so it has never fired. **Left unfixed on purpose**: fixing it
+properly means hashing manifests at the point of consumption rather than
+re-ordering another pair of writes, which is the structural change described
+above, and doing it piecemeal in a dormant path would create the appearance of
+having addressed the class.
+
+---
+
+## D33. The scatter's dart budget was spent on ground no tree could stand on
+
+**Where:** `suitable_cells` / `compile_foliage`, `world_core/crates/worldspec/src/render_plan.rs`.
+**Found and fixed 2026-08-04**, on the first build of the second world.
+
+Item 7 (2026-08-03) crossed S6 into the Rust scatter and recorded this design
+note: *"the scatter samples the field rather than rejecting against it"*, because
+uniform rejection sampling *"would have failed the `placed N of target` contract
+intermittently — on terrain, not on code."*
+
+**Half of that was true.** The scatter drew cells in proportion to canopy
+suitability, but slope, exclusions and spacing were still applied as rejection
+tests *after* the draw. Suitability knows nothing about lanes, keeps, streams or
+protected landforms, so most darts landed on ground that was never admissible.
+Share of each polygon's suitability weight actually reachable:
+
+| forest | alpine arena | gentler world |
+|---|---|---|
+| `central_forest` | 3.3% | 1.4% |
+| `western_valley_woodland` | 26.0% | 8.5% |
+| `eastern_valley_woodland` | 4.3% | **0.0%** |
+
+**So the shortfall counts reported on 2026-08-03 were not what they were said to
+be.** "`central_forest` asks 28 conifers and its ecology holds nine" was
+presented as the terrain answering. At 3.3% reachable weight and a 1400-dart
+budget the expected number of admissible hits is ~46, so the nine was partly a
+fact about the dart budget.
+
+**Confirmed by rebuilding the arena after the fix**, with nothing else about the
+world changed:
+
+| forest | placed before | placed after | of |
+|---|---|---|---|
+| `western_valley_woodland` | 10 | **27** | 28 |
+| `eastern_valley_woodland` | 3 | **13** | 28 |
+| `central_forest` | 9 | 8 | 28 |
+| **total render-plan instances** | 275 | **301** | |
+
+`western_valley_woodland` had 26% of its weight reachable and now nearly fills
+its quota; it was never the ecology that held it to ten. `central_forest` is
+genuinely tight — 3.3% reachable, and it lands in the same place either way,
+which is what a real ecological limit looks like. The old numbers conflated the
+two cases and reported both as the terrain.
+
+**And on the gentler world it fails the build outright.**
+`eastern_valley_woodland` has 2,222 cells of non-zero suitability, 1,599 of them
+walkable — and **zero** outside the lanes, streams and the filled
+`eastern_alps` protected polygon. The scatter placed nothing and raised
+*"its ecology permits ground somewhere in the polygon but spacing, slope or
+exclusions rule out every cell"* as a hard contract failure. The message named
+three causes without distinguishing them, and treated the honest answer as a
+defect.
+
+**Fix.** `suitable_cells` now applies slope and exclusions when it builds the
+weighted set, so every dart lands on admissible ground and the placed count is
+decided by the ecology and the spacing alone — which is what item 7 claimed. The
+empty case is answered before sampling and split in two:
+
+- **field zero across the polygon** — the author sited a forest where its own
+  ecology forbids one. Still a hard error; it is a spec defect.
+- **field non-zero, but every such cell occupied** by a lane, keep, stream or
+  protected landform — the spec is fine and the world has no room. Recorded as a
+  shortfall with `limited_by: "occupancy"` and printed. Failing here would demand
+  the author measure an occupancy no one can see from the annotations.
+
+Spacing stays a rejection test: it depends on what has already been accepted and
+has no per-cell meaning.
+
+**The general lesson.** "Sample the field instead of rejecting against it" only
+holds if the field is the *whole* constraint. Where several systems each veto
+ground, sampling one of them and rejecting against the rest is rejection
+sampling with extra steps — and it reports the resulting scarcity as if it came
+from the one system that was sampled.
+
+---
+
+## D34. The viewer hangs instead of exiting when it rejects a world
+
+**Where:** `world_core/apps/world_viewer/src/main.rs`, `capture_certified_world`.
+
+The capture waits for `GeneratedWorld` to exist and then for 120 settled frames.
+When the compiled world is **rejected** — as it was on 2026-08-04 with
+`canopy_suitability_sha256 does not match its source artifact` ([D32](#d32-the-render-plan-scattered-against-the-previous-builds-ecology)) — the
+root is never spawned, `settled_frames` never increments, and the viewer runs its
+render loop forever. Measured: **20 minutes at 55% of a core, 587 s of CPU, no
+capture written and no exit.**
+
+**Why it matters more than it looks.** It converts a clean, correctly-diagnosed
+rejection into an indefinite hang. `capture_bevy.py` calls `subprocess.run`
+with no `timeout`, so a viewer that never exits hangs the capture forever, and
+`--suite` never reaches the remaining three views.
+
+**Correction to the first version of this entry.** It said `capture_bevy.py`
+pipes the viewer through a buffering `tail`, hiding the diagnosis. It does not —
+it inherits stdout and stderr directly, and the viewer's `ERROR` line would have
+been on the terminal immediately. **The `tail` was in the operator's own shell
+command.** Twenty minutes went into inspecting `/proc` for a defect the program
+had named in its first second, and the reason it was invisible was the
+invocation, not the tool. Worth keeping because the lesson is the opposite of
+the one first recorded: do not pipe a long-running subprocess through anything
+that buffers.
+
+This is also the second time this shape of thing has cost a session: the
+[D30](#d30-source_tree_digest-over-ntfs-is-slow-enough-to-look-like-a-hang) test-suite
+"hang" was likewise something slow or stuck presenting with no output.
+
+**Fix direction.** Two independent halves, both cheap:
+
+1. **The viewer should exit non-zero when it rejects a world** rather than
+   entering the render loop with nothing to render. A capture run that cannot
+   produce a capture has failed.
+2. **`capture_bevy.py` should pass a `timeout` to `subprocess.run`** and fail
+   loudly when it trips. A capture stage with no upper bound on its runtime
+   cannot be run unattended, and `--suite` currently loses the remaining three
+   views to a hang on the first.
+
+**Not attempted here** — the build-order fix removes today's trigger, and this
+wants to be verified against a deliberately rejected world rather than bundled
+into the change that stopped producing one.
+
 ---
 
 ## Deliberately not listed

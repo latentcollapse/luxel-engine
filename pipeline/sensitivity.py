@@ -63,6 +63,11 @@ TRACKED_METRICS = (
     "surface_variation_coverage",
     "foliage_fraction",
     "dark_foreground_fraction",
+    # D25 split darkness from unreadability. Both are tracked: the sensitivity
+    # matrix is how we would notice a knob that buys a passing `unreadable_fraction`
+    # by flattening the world, which is the failure mode the split exists to stop.
+    "unreadable_fraction",
+    "dark_structured_fraction",
     "road_fraction",
     "water_fraction",
 )

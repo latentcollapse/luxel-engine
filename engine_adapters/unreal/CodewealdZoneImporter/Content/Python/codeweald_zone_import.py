@@ -72,7 +72,9 @@ def preflight(manifest_path: str | Path) -> dict[str, Any]:
     if not isinstance(landscape.get("z_scale"), (float, int)) or landscape["z_scale"] <= 0:
         errors.append("Landscape z_scale must be positive")
     layers = landscape.get("layer_sources", {}).get("weightmaps", {})
-    for name in ("grass", "road", "rock", "snow"):
+    # Five, not four. A Landscape missing the wetland weightmap renders every
+    # bog as grass, which is the defect this layer was added to end.
+    for name in ("grass", "road", "rock", "snow", "wetland"):
         if _existing(root, layers.get(name) if isinstance(layers, dict) else None) is None:
             errors.append("missing %s Landscape layer" % name)
     asset_sources = 0

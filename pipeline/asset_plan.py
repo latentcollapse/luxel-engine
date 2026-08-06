@@ -14,6 +14,22 @@ from zone_compiler import ZONE_SPEC_VERSION, ZoneCompileError
 
 ASSET_PLAN_VERSION = "codeweald.asset-plan/v1"
 
+# Which S6 suitability field decides where each foliage role may stand.
+#
+# `canopy_suitability_u8.bin` describes **canopy**, so it governs canopy roles
+# and nothing else. Applying it to groundcover, understory or forest-floor rock
+# would be a category error dressed as ecology: a boulder has no treeline, and
+# gating one on canopy suitability would strip scree out of exactly the open
+# ground it belongs on.
+#
+# A role absent from this table scatters as it always did -- inside its authored
+# polygon, on slope and spacing alone. That is a statement that no ecological
+# field describes it yet, not an oversight, and it is why the value is allowed
+# to be `None` rather than defaulted to something.
+ECOLOGY_FIELDS: dict[str, str] = {
+    "conifer_canopy": "canopy_suitability",
+}
+
 
 def _read(path: Path) -> dict[str, Any]:
     try:
@@ -96,9 +112,15 @@ def _select_layer(profile_id: str, layer: dict[str, Any], assets: list[dict[str,
             "Asset profile %s layer %s needs %d variants tagged %s; catalog has %d"
             % (profile_id, layer.get("id", "unnamed"), variant_count, sorted(required_tags), len(selected))
         )
+    role = layer.get("role", profile_id)
     return {
         "id": layer.get("id", "primary"),
-        "role": layer.get("role", profile_id),
+        "role": role,
+        # Which S6 field governs where this layer may stand, declared rather
+        # than inferred. The scatter is compiled in Rust, and a Rust that
+        # sniffed `role` for the substring "canopy" would be one rename away
+        # from silently scattering trees by no ecology at all.
+        "ecology_field": ECOLOGY_FIELDS.get(role),
         "instance_count": int(layer.get("instances_per_feature", 1)),
         "scale_m": layer.get("scale_m", [1.0, 1.0]),
         "minimum_spacing_m": float(layer.get("minimum_spacing_m", 0.0)),

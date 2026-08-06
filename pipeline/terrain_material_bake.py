@@ -70,10 +70,26 @@ def bake_material_preview(
         raise ValueError("wetland mask must match terrain splat resolution")
 
     weights = splat_rgba.astype(np.float32) / 255.0
-    wetland = (
-        (wetland_mask.astype(np.float32) / 255.0) * weights[:, :, 0] * 0.82
-    )
-    weights[:, :, 0] = np.clip(weights[:, :, 0] - wetland, 0.0, 1.0)
+    # The fifth splat weight, taken as given. This used to derive its own
+    # wetland coverage here -- mask x grass x 0.82 -- because the splat had no
+    # wetland channel to read and the bake was the only lane that rendered peat
+    # at all. Now that the rasterizer normalises all five together, deriving it
+    # a second time would mean the preview and the shipped splat disagreed about
+    # how much of a cell is bog.
+    wetland = wetland_mask.astype(np.float32) / 255.0
+
+    # All five weights describe one texel's surface, so they sum to 1. Taking
+    # them as given means an over-weighted splat no longer gets silently
+    # absorbed -- it adds material on top of material and comes out too bright,
+    # which reads as a lighting bug rather than as the contract violation it is.
+    # The tolerance covers uint8 quantisation across five channels, nothing more.
+    total = weights.sum(axis=2) + wetland
+    if float(np.abs(total - 1.0).max()) > 0.05:
+        raise ValueError(
+            "terrain splat weights must sum to 1 across all five layers; "
+            "measured %.4f to %.4f"
+            % (float(total.min()), float(total.max()))
+        )
 
     albedo = np.zeros((resolution, resolution, 3), dtype=np.float32)
     roughness = np.zeros((resolution, resolution), dtype=np.float32)

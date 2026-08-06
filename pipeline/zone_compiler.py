@@ -111,6 +111,13 @@ DEFAULT_BORDER_POLICY = {
     "crest_relief": 0.72,
     # Which range this world's mountains belong to (systems S18).
     "massif_character": "alps",
+    # How tall the surrounding range stands above the valley floor. Generous,
+    # because it is outside the playable area and its only job is to look like
+    # somewhere -- Lauterbrunnen's walls are as tall as its valley is wide.
+    "massif_relief_m": 150.0,
+    # Horizontal run of the valley wall. The single number deciding whether the
+    # world reads as a glacial trough or as a bowl.
+    "wall_width_m": 34.0,
     # Systems S3. **Off by default, deliberately.** The erosion solver is
     # correct in isolation -- it turns a V into a U, the three characters
     # differ, thermal settling is stable -- but integrating it after the border
@@ -886,7 +893,8 @@ def _validate_border_policy(value: Any) -> dict[str, Any]:
         raise ZoneCompileError(
             "border_policy.profile must be one of %s" % sorted(BORDER_PROFILES)
         )
-    for field in ("height_m", "crest_m", "inner_face_m", "landmark_clearance_m", "crest_relief", "wilderness_margin_m", "spur_amplitude_m"):
+    for field in ("height_m", "crest_m", "inner_face_m", "landmark_clearance_m", "crest_relief", "wilderness_margin_m", "spur_amplitude_m",
+        "massif_relief_m", "wall_width_m"):
         number = policy[field]
         if not isinstance(number, (int, float)) or isinstance(number, bool):
             raise ZoneCompileError("border_policy.%s must be numeric" % field)

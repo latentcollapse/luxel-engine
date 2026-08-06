@@ -131,7 +131,13 @@ def adapt_unity(zone_spec: dict[str, Any], terrain: dict[str, Any], asset_plan: 
             "size_m": {"x": bounds.get("width"), "y": maximum - minimum, "z": bounds.get("length")},
             "resolution": terrain.get("resolution"),
             "splatmap": terrain.get("artifacts", {}).get("splatmap"),
+            # The fifth weight rides in its own single-channel image; Unity
+            # terrain already composites more layers than one control texture
+            # holds, so this is an ordinary second control map rather than an
+            # exception.
+            "wetland_mask": terrain.get("artifacts", {}).get("wetland_mask"),
             "layers": terrain.get("channel_convention", {}).get("splatmap", {}),
+            "layer_order": terrain.get("channel_convention", {}).get("layers", []),
             "materials": terrain.get("terrain_materials", {}),
         },
         "features": features,
@@ -145,6 +151,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     parser.add_argument("terrain_manifest", type=Path)
     parser.add_argument("asset_plan", type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--project-root", type=Path, default=None, help="Path to the project root directory")
     args = parser.parse_args(argv)
     try:
         output = adapt_unity(_read(args.zone_spec), _read(args.terrain_manifest), _read(args.asset_plan), project_root=args.project_root)

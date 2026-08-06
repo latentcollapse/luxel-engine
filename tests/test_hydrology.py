@@ -25,6 +25,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "pipeline"))
 
 from hydrology import (  # noqa: E402
     BOG_CATCHMENT,
+    BOG_DEPTH_FRACTION,
+    DEFAULT_AGENT_HEIGHT_M,
+    SWIM_DEPTH_FRACTION,
     carve_channels,
     channel_depth_field,
     carve_outlet,
@@ -36,6 +39,13 @@ from hydrology import (  # noqa: E402
 
 SIDE = 65
 CELL_M = 1.0
+
+# Depths in these tests are expressed against the agent, not in absolute metres.
+# Writing `6.0` and calling it "over your head" is the exact mistake that put a
+# 1.6 m swim threshold in front of an 8 m actor.
+AGENT_M = DEFAULT_AGENT_HEIGHT_M
+BOG_CEILING_M = AGENT_M * BOG_DEPTH_FRACTION
+SWIM_M = AGENT_M * SWIM_DEPTH_FRACTION
 
 
 def _basin(rim: float = 20.0, floor: float = 0.0) -> np.ndarray:
@@ -170,21 +180,65 @@ class ChannelTest(unittest.TestCase):
 
 
 class ClassificationTest(unittest.TestCase):
-    def _bodies(self, height):
+    def _bodies(self, height, *, agent_height_m=AGENT_M):
         filled = fill_depressions(height)
         accumulation = flow_accumulation(filled)
-        return classify(height, filled, accumulation, cell_m=CELL_M)
+        return classify(
+            height,
+            filled,
+            accumulation,
+            cell_m=CELL_M,
+            agent_height_m=agent_height_m,
+        )
 
-    def test_an_isolated_hollow_is_a_bog(self):
-        """No catchment but its own rain: stagnant, green, shallow-looking."""
+    def test_an_isolated_shallow_hollow_is_a_bog(self):
+        """No catchment but its own rain, and wadeable: stagnant and green."""
         height = np.full((SIDE, SIDE), 10.0)
-        height[30:36, 30:36] = 8.0
+        height[30:36, 30:36] = 10.0 - BOG_CEILING_M * 0.5
         report = self._bodies(height)
         self.assertEqual(1, report["body_count"])
         body = report["bodies"][0]
         self.assertEqual("bog", body["kind"])
         self.assertEqual("stagnant_green", body["surface"])
         self.assertFalse(body["fed"])
+        self.assertTrue(body["wadeable"])
+
+    def test_the_same_hollow_cut_deeper_is_a_tarn(self):
+        """The defect this pair exists to pin.
+
+        Catchment is identical -- rain landing in it and nothing else -- so the
+        old rule called both of these a bog and painted an eight-metre pool
+        stagnant green. Depth is the only thing that differs, and it is what
+        separates waterlogged ground from open water sitting in rock.
+        """
+        height = np.full((SIDE, SIDE), 10.0)
+        height[30:36, 30:36] = 10.0 - BOG_CEILING_M * 3.0
+        report = self._bodies(height)
+        self.assertEqual(1, report["body_count"])
+        body = report["bodies"][0]
+        self.assertEqual("tarn", body["kind"])
+        self.assertFalse(body["fed"], "still stagnant -- only the depth changed")
+        self.assertFalse(body["wadeable"])
+        self.assertEqual(
+            "cold_blue",
+            body["surface"],
+            "a tarn is stagnant but clear; green scum needs a shallow margin",
+        )
+
+    def test_feed_and_depth_are_independent_axes(self):
+        """Depth must not be able to turn fed water stagnant, or vice versa."""
+        height = np.full((SIDE, SIDE), 10.0)
+        height[30:36, 30:36] = 10.0 - BOG_CEILING_M * 3.0
+        deep = self._bodies(height)["bodies"][0]
+        # Same hollow, agent tall enough to wade it.
+        wadeable = self._bodies(height, agent_height_m=AGENT_M * 4.0)["bodies"][0]
+        self.assertEqual("tarn", deep["kind"])
+        self.assertEqual("bog", wadeable["kind"])
+        self.assertEqual(
+            deep["fed"],
+            wadeable["fed"],
+            "changing the actor must not change whether water is fed",
+        )
 
     def test_a_hollow_at_the_foot_of_a_slope_is_a_fed_pond(self):
         """Same hollow, given something draining into it, becomes a pond.
@@ -213,12 +267,59 @@ class ClassificationTest(unittest.TestCase):
         self.assertEqual(0, report["body_count"])
 
     def test_depth_decides_swimmable(self):
-        height = np.full((SIDE, SIDE), 10.0)
-        height[20:26, 20:26] = 9.4   # ankle deep
-        height[40:46, 40:46] = 6.0   # over your head
+        height = np.full((SIDE, SIDE), 20.0)
+        height[20:26, 20:26] = 20.0 - BOG_CEILING_M * 0.5  # ankle deep
+        height[40:46, 40:46] = 20.0 - SWIM_M * 1.2         # over your head
         report = self._bodies(height)
         kinds = {b["swimmable"] for b in report["bodies"]}
         self.assertEqual({True, False}, kinds)
+
+    def test_swimming_depth_scales_with_the_agent(self):
+        """The defect: 1.6 m was hardcoded as swimming depth for an 8 m actor.
+
+        That is shin height on the agent this world actually declares, so the
+        same pool must not stay 'swimmable' when the thing standing in it
+        doubles in size.
+        """
+        height = np.full((SIDE, SIDE), 20.0)
+        height[30:36, 30:36] = 20.0 - SWIM_M * 1.2
+        small = self._bodies(height)["bodies"][0]
+        large = self._bodies(height, agent_height_m=AGENT_M * 2.0)["bodies"][0]
+        self.assertTrue(small["swimmable"])
+        self.assertFalse(large["swimmable"], "a bigger actor stands up in it")
+
+    def test_no_bog_is_ever_swimmable(self):
+        """A bog you can swim in is not a bog.
+
+        The old output asserted exactly this contradiction on six of fifteen
+        bodies, and nothing caught it because the two thresholds were never
+        compared. `classify` now raises rather than emit one; this proves the
+        guard is reachable in the ordinary case rather than only in theory.
+        """
+        rng = np.random.default_rng(20260803)
+        height = np.full((SIDE, SIDE), 30.0)
+        for _ in range(12):
+            row = int(rng.integers(4, SIDE - 10))
+            column = int(rng.integers(4, SIDE - 10))
+            drop = float(rng.uniform(0.4, SWIM_M * 1.5))
+            height[row : row + 5, column : column + 5] = 30.0 - drop
+        report = self._bodies(height)
+        self.assertGreater(report["body_count"], 1)
+        for body in report["bodies"]:
+            if body["kind"] == "bog":
+                self.assertFalse(body["swimmable"], body)
+
+    def test_wetland_area_counts_only_bogs(self):
+        """Item 6 consumes this, and open water is not wet ground."""
+        height = np.full((SIDE, SIDE), 20.0)
+        height[10:16, 10:16] = 20.0 - BOG_CEILING_M * 0.5   # bog
+        height[40:46, 40:46] = 20.0 - SWIM_M * 1.2          # tarn
+        report = self._bodies(height)
+        self.assertEqual(1, report["bog_count"])
+        self.assertEqual(1, report["tarn_count"])
+        bog = next(b for b in report["bodies"] if b["kind"] == "bog")
+        self.assertAlmostEqual(bog["area_m2"], report["wetland_area_m2"], places=3)
+        self.assertLess(report["wetland_area_m2"], report["water_area_m2"])
 
 
 if __name__ == "__main__":

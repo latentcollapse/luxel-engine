@@ -36,6 +36,7 @@ from hydrology import (
 Outlet_ = _namedtuple("Outlet_", "row column")
 _OutletAt = _namedtuple("_OutletAt", "row column")
 from erosion import PROFILES as EROSION_PROFILES, erode
+from forestry import BOG_MAXIMUM_SLOPE_DEGREES
 from massif_character import shape_relief
 
 from worldbuilder_dsl import _PATTERN_SCALARS
@@ -628,7 +629,70 @@ def _carve_hydrology(
     return result.astype(np.float32, copy=False)
 
 
-def _border_rampart(
+def _play_envelope(
+    x: np.ndarray,
+    z: np.ndarray,
+    features: list[dict[str, Any]],
+    width: float,
+    length: float,
+) -> tuple[np.ndarray | None, int]:
+    """Distance from the ground the game actually uses, in metres.
+
+    Zero inside the lanes and the woodlands they run through; growing outward
+    from there. This is the shape the world is built around -- the playable
+    region is a rhomboid, not a rectangle, and anything driven off the map rect
+    produces a square basin however it is dressed.
+
+    **Landmarks are deliberately not sources.** They were, and it silently
+    switched the mountains off: thirteen of them scattered across a 256 m map
+    each contributed an unbounded hole, so the median distance to *something*
+    claiming play space was 4.2 m and the massif reached full relief on 0.82% of
+    the world. A 150 m range rendered as a handful of isolated cones.
+
+    They do not need to be sources, because a landmark is protected twice over
+    and this was the wrong one of the two. `_surrounding_massif` pulls its carve
+    outward around each landmark's own footprint, and `_border_rampart` clamps
+    the containment floor by the same rule -- both bounded by the keep-out
+    radius. This one was unbounded, and it grew with every structure authored.
+    The rampart never noticed because it was driven off distance-from-edge; the
+    massif is driven off this field alone, so an over-inclusive envelope stopped
+    being cosmetic and started deciding whether the range existed at all.
+
+    Returns `None` when nothing declares a play space, because a rectangle is
+    then the only shape available and a square border beats no border.
+    """
+    distance = np.full(x.shape, np.inf, dtype=np.float64)
+    sources = 0
+    for feature in features:
+        geometry = feature.get("geometry") or {}
+        points = geometry.get("points") or []
+        category = feature.get("category")
+        if category == "corridor" and len(points) >= 2:
+            lane_width = float(
+                (feature.get("properties") or {}).get("minimum_width_m", 10.0)
+            )
+            distance = np.minimum(
+                distance, _polyline_distance(x, z, points) - lane_width * 0.5
+            )
+            sources += 1
+        elif category == "biome" and len(points) >= 3:
+            # The background woodland spans nearly the whole map by design and
+            # would swallow the envelope whole, taking the mountains with it.
+            span = max(
+                max(p[0] for p in points) - min(p[0] for p in points),
+                max(p[1] for p in points) - min(p[1] for p in points),
+            )
+            if span > min(width, length) * 0.8:
+                continue
+            inside, boundary = _polygon_mask(x, z, points)
+            distance = np.minimum(distance, np.where(inside, 0.0, boundary))
+            sources += 1
+    if not sources:
+        return None, 0
+    return np.maximum(distance, 0.0), sources
+
+
+def _surrounding_massif(
     height: np.ndarray,
     x: np.ndarray,
     z: np.ndarray,
@@ -638,7 +702,141 @@ def _border_rampart(
     policy: dict[str, Any],
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, dict[str, Any], np.ndarray]:
+    """Build a range across the whole map, then carve the valley out of it.
+
+    **This inverts how the border was built, and the inversion is the point.**
+    The rampart was a distance function with noise on it -- "how far am I from
+    the play space" -- which is why every pass on it still read as a wall
+    however much ridged relief and spur perturbation was layered on. Real
+    mountains beyond a valley are not a function of the valley. They are their
+    own terrain, and the valley is a hole in them.
+
+    So the massif is generated everywhere at full relief, and the playable
+    ground is carved down into it. Three things fall out that the rampart could
+    not give:
+
+    - **Peaks behind peaks.** A near ridge no longer exhausts the range, because
+      the range does not stop where the wall stopped. That is what the reference
+      photographs have and what a distance function structurally cannot produce.
+    - **Enclosure for free.** The map edge is simply massif nobody carved, so
+      there is no wall to breach -- though a floor is still applied below,
+      because "probably high enough" is not a containment guarantee.
+    - **Somewhere for ice to work.** S3 planes the tallest thing it can find; a
+      rampart was destroyed by it, and a range is what it is meant to carve.
+
+    The valley profile is glacial on purpose: a flat floor, then walls that
+    steepen and stand. `wall_width_m` is the horizontal run of that transition
+    and is the single number deciding whether the world reads as a trough or a
+    bowl.
+
+    **A per-cell run was tried on 2026-08-04 and reverted the same night (D26).**
+    Where the map edge crowds the play space it shortened the run to 6 m against
+    ~95 m of relief, and since the run's plan shape is the play envelope's offset
+    curve -- straight lane and polygon segments -- it extruded those segments into
+    vertical slabs. It made the border *more* of a distance function, which is
+    the one thing the massif inversion exists to avoid.
+    """
+    report: dict[str, Any] = {
+        "enabled": bool(policy.get("enabled", True)),
+        "construction": "massif_carved",
+    }
+    empty = np.zeros(height.shape, dtype=bool)
+    if not report["enabled"]:
+        report["reason"] = "border_policy.enabled is false"
+        return height, report, empty
+
+    play_distance, sources = _play_envelope(x, z, features, width, length)
+    report["envelope_sources"] = sources
+    if play_distance is None:
+        report["enabled"] = False
+        report["reason"] = "no feature declares a play space to carve"
+        return height, report, empty
+
+    character = str(policy.get("massif_character", "alps"))
+    relief = float(policy.get("massif_relief_m", 150.0))
+    margin = float(policy.get("wilderness_margin_m", 22.0))
+    wall = max(float(policy.get("wall_width_m", 34.0)), 1.0)
+    clearance = float(policy.get("landmark_clearance_m", 10.0))
+
+    # The range itself: ridged multifractal at full relief, everywhere.
+    massif = shape_relief(x.shape, rng, character) * relief
+
+    # How far into the mountains each cell is. 0 across the playable floor and
+    # its wilderness margin, 1 once fully out in the range.
+    #
+    # Smoothstepped rather than linear: the toe of the wall has to meet the
+    # valley floor tangentially or the accessibility gate measures the corner as
+    # walkable ground standing at a cliff angle -- the same defect the rampart
+    # toe had, and it does not stop being true because the construction changed.
+    into = np.clip((play_distance - margin) / wall, 0.0, 1.0)
+    into = into * into * (3.0 - 2.0 * into)
+
+    # Never bury a landmark. A keep near the wall pulls the carve outward around
+    # its own footprint rather than being swallowed by the range.
+    for feature in features:
+        if feature.get("category") != "landmark":
+            continue
+        points = (feature.get("geometry") or {}).get("points") or []
+        radius = float(
+            (feature.get("properties") or {}).get("scatter_exclusion_radius_m", 0.0)
+        )
+        for point in points:
+            keep_out = radius + clearance
+            reach = np.hypot(x - float(point[0]), z - float(point[1]))
+            into = np.minimum(into, np.clip((reach - keep_out) / wall, 0.0, 1.0))
+
+    carved = height * (1.0 - into) + (height + massif) * into
+
+    report.update(
+        {
+            "massif_character": character,
+            "massif_relief_m": round(relief, 2),
+            "wall_width_m": round(wall, 2),
+            "wilderness_margin_m": round(margin, 2),
+            "mountain_area_m2": round(
+                float((into > 0.5).sum())
+                * (width / (x.shape[1] - 1))
+                * (length / (x.shape[0] - 1)),
+                1,
+            ),
+            "valley_floor_area_m2": round(
+                float((into < 0.05).sum())
+                * (width / (x.shape[1] - 1))
+                * (length / (x.shape[0] - 1)),
+                1,
+            ),
+        }
+    )
+    # Everything the range covers is intentional, unwalkable terrain. Untagged
+    # it lands in `background`, where the accessibility gate measures a mountain
+    # as walkable ground that happens to be a cliff.
+    return carved, report, into > 0.12
+
+
+def _border_rampart(
+    height: np.ndarray,
+    x: np.ndarray,
+    z: np.ndarray,
+    features: list[dict[str, Any]],
+    width: float,
+    length: float,
+    policy: dict[str, Any],
+    rng: np.random.Generator,
+    *,
+    containment_only: bool = False,
+) -> tuple[np.ndarray, dict[str, Any], np.ndarray]:
     """Close the world at its own edge (roadmap 2.5 / systems S4).
+
+    **`containment_only` is what this is now called with, and it matters (D26).**
+    Since the massif inversion the rampart is applied as a floor beneath the
+    range -- `maximum(massif, rampart)` -- and a floor that follows the play
+    space is not a floor, it is the border again. Measured on the alpine arena:
+    the floor was replacing **87.7% of the protected massif cells**, at a mean
+    cost of 18.6 m of relief, so most of what the world showed as "mountains"
+    was the old rampart wearing the massif's name. In containment mode the
+    play-space term is dropped and only the distance-from-map-edge term
+    survives, which is the only part enclosure actually needs. The massif
+    shapes the valley; the floor guarantees the boundary. One job each.
 
     A world whose terrain stops at the data edge does not contain its players:
     `boundary_plan` reports the walkable spans that leak, and the alpine arena
@@ -674,60 +872,8 @@ def _border_rampart(
     half_width, half_length = width * 0.5, length * 0.5
     inward = np.minimum(half_width - np.abs(x), half_length - np.abs(z))
 
-    # **Distance from the play space, not from the map rectangle.**
-    #
-    # Driving the rampart off the rect edge builds a square basin, because that
-    # is what "everywhere N metres from a rectangle" is. Reviewed 2026-08-02:
-    # "the actual playable map is a rhomboid; anything that is not playable map
-    # should be Alps and valley walls." The lanes and the woodlands they run
-    # through are that rhomboid, so the wall is built outward from *them* and
-    # everything the game does not use becomes mountain.
-    #
-    # The rect-edge term stays, unioned in below, because enclosure is not
-    # negotiable: however the play space is shaped, the world still has to be
-    # shut at its own boundary.
-    play_distance = np.full(x.shape, np.inf, dtype=np.float64)
-    envelope_sources = 0
-    for feature in features:
-        geometry = feature.get("geometry") or {}
-        points = geometry.get("points") or []
-        category = feature.get("category")
-        if category == "corridor" and len(points) >= 2:
-            width_m = float((feature.get("properties") or {}).get("minimum_width_m", 10.0))
-            play_distance = np.minimum(
-                play_distance, _polyline_distance(x, z, points) - width_m * 0.5
-            )
-            envelope_sources += 1
-        elif category == "biome" and len(points) >= 3:
-            # The background woodland spans nearly the whole map by design and
-            # would swallow the envelope whole, taking the wall with it.
-            span = max(
-                max(p[0] for p in points) - min(p[0] for p in points),
-                max(p[1] for p in points) - min(p[1] for p in points),
-            )
-            if span > min(width, length) * 0.8:
-                continue
-            inside, boundary = _polygon_mask(x, z, points)
-            play_distance = np.minimum(play_distance, np.where(inside, 0.0, boundary))
-            envelope_sources += 1
-        elif category == "landmark" and points:
-            radius = float(
-                (feature.get("properties") or {}).get("scatter_exclusion_radius_m", 0.0)
-            )
-            for point in points:
-                play_distance = np.minimum(
-                    play_distance,
-                    np.hypot(x - float(point[0]), z - float(point[1])) - radius,
-                )
-            envelope_sources += 1
-    if envelope_sources:
-        play_distance = np.maximum(play_distance, 0.0)
-        report["envelope_sources"] = envelope_sources
-    else:
-        # Nothing declares a play space, so the rectangle is the only shape
-        # available. Better a square basin than no border at all.
-        play_distance = None
-        report["envelope_sources"] = 0
+    play_distance, envelope_sources = _play_envelope(x, z, features, width, length)
+    report["envelope_sources"] = envelope_sources
 
     # **How far the rampart may reach is a field, not a number.** A single global
     # depth is set by whichever landmark sits closest to the edge, which on this
@@ -738,7 +884,8 @@ def _border_rampart(
     # Pinching is safe in the direction that matters: the same height over a
     # shorter face is a *steeper* face, and steeper is what stops a body. The
     # thing that must never happen is burying a landmark, so that is what the
-    # field protects.
+    # field protects -- and it still must, now that this runs as the containment
+    # floor beneath the massif rather than as the border itself.
     allowed = np.full(inward.shape, crest + face, dtype=np.float64)
     limiting: str | None = None
     tightest = math.inf
@@ -794,7 +941,8 @@ def _border_rampart(
     # keeps height/face fixed everywhere, so saddles are lower but no gentler.
     ramp = np.maximum(np.minimum(face, allowed) * modulation, 1.0)
     fraction = np.clip((allowed - inward) / ramp, 0.0, 1.0)
-    if play_distance is not None:
+    report["containment_only"] = bool(containment_only)
+    if play_distance is not None and not containment_only:
         # Wilderness first, then wall. The margin is the belt of open ground
         # outside the lanes that jungling still uses -- it is play space even
         # though no lane runs through it, so the wall starts beyond it.
@@ -1900,11 +2048,28 @@ def rasterize_zone_spec(
     # The world closes itself before roads and water are reconciled, so a route
     # or a channel authored to reach the edge still cuts its own notch through
     # the rampart rather than being buried by it.
-    height, border_report, border_footprint = _border_rampart(
-        height, x, z, features, width, length,
-        zone_spec.get("border_policy") or {},
-        np.random.default_rng(int(zone_spec.get("generation_seed", 1)) * 7919 + 104729),
+    massif_rng = np.random.default_rng(
+        int(zone_spec.get("generation_seed", 1)) * 7919 + 104729
     )
+    height, border_report, massif_footprint = _surrounding_massif(
+        height, x, z, features, width, length,
+        zone_spec.get("border_policy") or {}, massif_rng,
+    )
+    # The rampart survives only as a containment floor. The range should already
+    # be far too high to walk out of, but "should already be" is not what an
+    # enclosure gate accepts, and a saddle in a ridged multifractal that happens
+    # to reach the map edge is exactly the sort of thing nobody notices.
+    floor_only, rampart_report, rampart_footprint = _border_rampart(
+        np.zeros_like(height), x, z, features, width, length,
+        zone_spec.get("border_policy") or {},
+        np.random.default_rng(int(zone_spec.get("generation_seed", 1)) * 7919 + 7),
+        containment_only=True,
+    )
+    height = np.maximum(height, floor_only)
+    border_report["containment_floor"] = {
+        k: rampart_report.get(k) for k in ("height_m", "inner_face_m", "crest_relief")
+    }
+    border_footprint = massif_footprint | rampart_footprint
     height = _flatten_landmark_pads(height, x, z, features)
     height = _grade_corridors(height, x, z, features, width, length)
     height = _carve_hydrology(height, x, z, features, width, length)
@@ -2077,11 +2242,32 @@ def rasterize_zone_spec(
     gradient_z, gradient_x = np.gradient(height, spacing_z, spacing_x)
     slope = np.sqrt(gradient_x * gradient_x + gradient_z * gradient_z)
     # Standing/surface water cannot conform to a cliff face. Source-art water
-    # polygons may overlap a massif in image space; retain their wetland
-    # influence, but remove the renderable water surface as grade approaches
-    # a 24-degree face. True waterfalls require an explicit vertical-water
-    # semantic and mesh rather than blue terrain paint.
+    # polygons may overlap a massif in image space; remove the renderable water
+    # surface as grade approaches a 24-degree face. True waterfalls require an
+    # explicit vertical-water semantic and mesh rather than blue terrain paint.
     water_weight *= 1.0 - _smoothstep(0.18, 0.45, slope)
+
+    # **Peat sheds off a slope exactly as standing water does.**
+    #
+    # This gate used to be deliberately withheld: the line above once ended
+    # "retain their wetland influence", because wetland was only a 22% darkening
+    # of the preview and over-coverage was harmless. Promoting wetland to a
+    # material channel destroys that premise. A soft tint that reaches too far
+    # is a smudge; a material that reaches too far is a peat bog painted up a
+    # cliff.
+    #
+    # Measured before this gate existed: strong wetland covered 24.3% of cells
+    # steeper than 35 deg against 16.9% of cells below 5 deg, and mean slope
+    # under wetland was 21.6 deg against 17.8 deg elsewhere. The field was
+    # *anti*-correlated with the ground that can hold water, because it came
+    # from blurring authored image-space rills that no longer follow the terrain
+    # the massif inversion produced.
+    #
+    # The limit is S6's, imported rather than restated: forestry plants sedge
+    # below 8 deg, so surfacing paints peat below 8 deg. The taper runs to twice
+    # that, which is where blanket bog genuinely gives out on Highland ground.
+    bog_slope = math.tan(math.radians(BOG_MAXIMUM_SLOPE_DEGREES))
+    wetland_weight *= 1.0 - _smoothstep(bog_slope, bog_slope * 2.0, slope)
     # Systems S7/S5: surfacing derived from site conditions rather than from
     # height and slope alone.
     #
@@ -2130,8 +2316,32 @@ def rasterize_zone_spec(
     # Snow does not cling to a vertical face; it slides off and lands below.
     snow_weight *= 1.0 - _smoothstep(1.6, 3.0, slope)
     grass_weight = np.clip(1.0 - road_weight - rock_weight * 0.9 - snow_weight, 0.0, 1.0)
-    total = np.maximum(grass_weight + road_weight + rock_weight + snow_weight, 1e-6)
+
+    # **Wetland is the fifth surface, and it displaces grass alone.**
+    #
+    # Peat forms where soil already was, so the alternative to a bog on a cell
+    # is the meadow next to it -- never the cliff or the snowfield. Subtracting
+    # from grass rather than from the normalised total is what keeps a wet
+    # hollow from eating the rock weight of the crag above it.
+    #
+    # Before this, S2 knew about twenty stagnant bodies and S1 knew where the
+    # ground was wet, and neither reached a surface: `wetland_weight` fed a 22%
+    # darkening of a preview PNG and a bake that no shipped backend reads. Every
+    # real backend iterated four channels, so a bog rendered as grass.
+    wetland_surface = np.clip(wetland_weight * grass_weight, 0.0, 1.0)
+    grass_weight = np.clip(grass_weight - wetland_surface, 0.0, 1.0)
+
+    total = np.maximum(
+        grass_weight + road_weight + rock_weight + snow_weight + wetland_surface,
+        1e-6,
+    )
     splat = np.stack([grass_weight / total, road_weight / total, rock_weight / total, snow_weight / total], axis=-1)
+    # The fifth weight rides in `wetland_mask.png`, which already existed as an
+    # unnormalised influence map. It is now a splat weight on the same footing
+    # as the other four: RGBA sums to 1 - wetland, and a backend composites all
+    # five. Reusing the file rather than minting `splatmap_2.png` keeps the
+    # artifact set stable; what changed is that the contract now admits it.
+    wetland_weight = wetland_surface / total
 
     normal = np.stack([-gradient_x, np.ones_like(height), -gradient_z], axis=-1)
     normal /= np.maximum(np.linalg.norm(normal, axis=-1, keepdims=True), 1e-6)
@@ -2142,8 +2352,16 @@ def rasterize_zone_spec(
     )
     palette = np.array([style_palette["grass"], style_palette["road"], style_palette["rock"], style_palette["snow"]], dtype=np.float32) * 255.0
     preview = np.tensordot(splat, palette, axes=([2], [0]))
+    # Peat: the grass token driven dark and desaturated toward the water token,
+    # rather than a fresh authored colour. A bog is the same ground waterlogged,
+    # and deriving it keeps it inside whatever palette the concept art produced
+    # instead of importing a swamp green the source never contained.
+    peat = (
+        np.array(style_palette["grass"], dtype=np.float32) * 0.52
+        + np.array(style_palette["water"], dtype=np.float32) * 0.30
+    ) * 255.0
+    preview += wetland_weight[:, :, None] * peat[None, None, :]
     preview = preview * (0.62 + 0.38 * np.clip(normal[:, :, 1:2], 0.0, 1.0))
-    preview = preview * (1.0 - wetland_weight[:, :, None] * 0.22)
     # Water in the reference is shallow Highland wetland: dark, peat-stained,
     # and integrated into its banks. A thresholded cyan replacement made every
     # pool read as a plastic cutout. Blend continuously so bank fragments retain
@@ -2255,12 +2473,34 @@ def rasterize_zone_spec(
             and feature.get("semantic") in {"river", "stream"}
             and feature.get("geometry", {}).get("type") == "polyline"
         ],
-        "channel_convention": {"splatmap": {"r": "grass", "g": "road", "b": "rock", "a": "snow"}},
+        # Five surfaces across two images. The fifth is not an afterthought
+        # bolted onto RGBA -- it is declared here so a backend that ignores it
+        # is visibly non-conforming rather than quietly painting bogs as grass,
+        # which is what every backend did while the contract said four.
+        "channel_convention": {
+            "splatmap": {"r": "grass", "g": "road", "b": "rock", "a": "snow"},
+            "wetland_mask": {"l": "wetland"},
+            "layers": ["grass", "road", "rock", "snow", "wetland"],
+            "normalization": "all five weights sum to 1 per texel",
+        },
         "wetland_coverage_fraction": round(
             float((wetland_weight >= 0.20).mean()), 6
         ),
         "steep_surface_water_fraction": round(
             float(((water_weight >= 0.20) & (slope >= 0.45)).mean()), 8
+        ),
+        # The peat twin of the line above. Water had this gate and wetland did
+        # not, which is exactly why wetland was free to climb a cliff for as
+        # long as it did: nothing measured it. Same shape, same threshold, so
+        # neither can regress without the other noticing.
+        "steep_wetland_fraction": round(
+            float(
+                (
+                    (wetland_weight >= 0.20)
+                    & (slope >= math.tan(math.radians(BOG_MAXIMUM_SLOPE_DEGREES * 2.0)))
+                ).mean()
+            ),
+            8,
         ),
         "style_palette_srgb": style_palette,
         "style_guidance": style_guidance_contract,

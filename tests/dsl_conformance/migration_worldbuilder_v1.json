@@ -1,0 +1,33 @@
+{
+  "schema": "wge.migration-fixtures/1",
+  "source_test_file": "tests/test_worldbuilder_dsl.py",
+  "fixtures": [
+    {"test": "test_python_shaped_intent_compiles_without_execution", "disposition": "preserve"},
+    {"test": "test_intent_applies_to_matching_typed_landform", "disposition": "preserve"},
+    {"test": "test_host_access_and_control_flow_are_rejected", "disposition": "preserve"},
+    {"test": "test_unknown_or_mistyped_features_are_rejected", "disposition": "preserve"},
+    {"test": "test_misspelled_feature_id_suggests_the_real_one", "disposition": "preserve"},
+    {"test": "test_composition_illegal_for_semantic_suggests_the_legal_one", "disposition": "preserve"},
+    {"test": "test_patching_a_non_landform_lists_the_shapeable_landforms", "disposition": "preserve"},
+    {"test": "test_unknown_enum_value_suggests_nearest_valid_value", "disposition": "preserve"},
+    {"test": "test_out_of_range_scalar_suggests_the_clamped_value", "disposition": "preserve"},
+    {"test": "test_control_flow_error_explains_that_intent_is_declarative", "disposition": "preserve"},
+    {"test": "test_errors_report_the_offending_line", "disposition": "preserve"},
+    {"test": "test_bare_message_stays_available_for_programmatic_callers", "disposition": "preserve"},
+    {"test": "test_lenient_mode_clamps_and_records_instead_of_raising", "disposition": "replace_with_strict_promotion", "rationale": "The repair remains previewable but the replacement returns LenientCandidate rather than an application-compatible intent record.", "replacement_fixture": "fixture.migration.lenient_preview_requires_strict_promotion"},
+    {"test": "test_strict_mode_is_the_default_and_still_rejects", "disposition": "preserve"},
+    {"test": "test_lenient_mode_still_rejects_structural_mistakes", "disposition": "preserve"},
+    {"test": "test_clean_source_records_no_repairs", "disposition": "preserve"},
+    {"test": "test_lenient_output_still_applies_to_a_zone", "disposition": "replace_with_strict_promotion", "rationale": "Direct application of unacknowledged repaired output violates the strict promotion boundary; only a labelled preview sandbox may consume it.", "replacement_fixture": "fixture.migration.lenient_preview_requires_strict_promotion"},
+    {"test": "test_scaffold_compiles_and_applies_as_written", "disposition": "preserve"},
+    {"test": "test_scaffold_lists_every_shapeable_landform_and_no_others", "disposition": "preserve"},
+    {"test": "test_scaffold_header_marks_jitter_bounds_as_documented_not_buildable", "disposition": "preserve"},
+    {"test": "test_scaffold_preserves_existing_composition_values", "disposition": "preserve"},
+    {"test": "test_scaffold_repairs_a_composition_illegal_for_its_semantic", "disposition": "preserve"},
+    {"test": "test_scaffold_imports_only_the_constructors_it_uses", "disposition": "preserve"},
+    {"test": "test_scaffold_notes_landforms_it_cannot_author", "disposition": "preserve"},
+    {"test": "test_scaffold_refuses_a_zone_with_nothing_to_author", "disposition": "preserve"},
+    {"test": "test_scaffold_comments_do_not_reach_the_compiler", "disposition": "preserve"},
+    {"test": "test_scaffold_round_trips_the_production_zone_without_drift", "disposition": "preserve"}
+  ]
+}

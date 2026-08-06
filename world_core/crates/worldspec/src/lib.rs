@@ -507,6 +507,20 @@ pub fn validate_terrain_analysis_value(
                 .into(),
         ));
     }
+    let maximum_steep_world_fraction = finite_number(
+        required(
+            policy,
+            "maximum_accessible_steep_world_fraction",
+            "terrain analysis.policy",
+        )?,
+        "terrain analysis.policy.maximum_accessible_steep_world_fraction",
+    )?;
+    if !(0.0..=1.0).contains(&maximum_steep_world_fraction) {
+        return Err(WorldSpecError::Contract(
+            "terrain analysis.policy.maximum_accessible_steep_world_fraction must be between zero and one"
+                .into(),
+        ));
+    }
 
     let accessible = validate_grade_summary(
         required(report, "accessible", "terrain analysis")?,
@@ -553,8 +567,13 @@ pub fn validate_terrain_analysis_value(
         required(report, "status", "terrain analysis")?,
         "terrain analysis.status",
     )?;
+    // Must mirror the analyzer's gate exactly. It moved to the world-relative
+    // denominator because the walkable set is a design variable: raising
+    // protected relief from 12% to 50% halved the denominator without moving a
+    // single steep edge, and the old rule turned that accounting change into a
+    // demand that the ridge flanks be smoothed.
     let violates_policy = accessible.maximum_grade > maximum_grade
-        || accessible.steep_edge_fraction > maximum_steep_fraction;
+        || accessible.steep_edge_world_fraction > maximum_steep_world_fraction;
     match status {
         "passed" if !failures.is_empty() => {
             return Err(WorldSpecError::Contract(
@@ -598,6 +617,7 @@ pub fn validate_terrain_analysis_value(
 struct GradeSummary {
     maximum_grade: f64,
     steep_edge_fraction: f64,
+    steep_edge_world_fraction: f64,
 }
 
 fn validate_grade_summary(
@@ -648,9 +668,30 @@ fn validate_grade_summary(
             "{path}.steep_edge_fraction must be between zero and one"
         )));
     }
+    // The gated quantity. `steep_edge_fraction` divides by the region's own
+    // edges, so it moves whenever the mountain/valley split moves; this divides
+    // by every edge in the world, which resolution alone fixes. The validator
+    // has to read the same one the analyzer gates on, or it rejects exactly the
+    // reports the analyzer just passed.
+    let steep_edge_world_fraction = finite_number(
+        required(summary, "steep_edge_world_fraction", path)?,
+        &format!("{path}.steep_edge_world_fraction"),
+    )?;
+    if !(0.0..=1.0).contains(&steep_edge_world_fraction) {
+        return Err(WorldSpecError::Contract(format!(
+            "{path}.steep_edge_world_fraction must be between zero and one"
+        )));
+    }
+    if steep_edge_world_fraction > steep_edge_fraction + 1e-9 {
+        return Err(WorldSpecError::Contract(format!(
+            "{path}.steep_edge_world_fraction must not exceed {path}.steep_edge_fraction; \
+             the world cannot contain fewer edges than one of its regions"
+        )));
+    }
     Ok(GradeSummary {
         maximum_grade,
         steep_edge_fraction,
+        steep_edge_world_fraction,
     })
 }
 
@@ -1027,7 +1068,10 @@ mod tests {
             "p999_grade": 0.0,
             "maximum_grade": maximum_grade,
             "steep_grade_threshold": 2.0,
-            "steep_edge_fraction": steep_fraction
+            "steep_edge_fraction": steep_fraction,
+            // Always <= the region fraction: the same steep edges over a larger
+            // denominator. Half is arbitrary but keeps the ordering honest.
+            "steep_edge_world_fraction": steep_fraction / 2.0
         })
     }
 
@@ -1065,7 +1109,8 @@ mod tests {
             "policy": {
                 "maximum_accessible_grade": 12.0,
                 "steep_grade": 2.0,
-                "maximum_accessible_steep_fraction": 0.01
+                "maximum_accessible_steep_fraction": 0.01,
+                "maximum_accessible_steep_world_fraction": 0.009
             },
             "accessible": {
                 "edge_count": 12,
@@ -1075,7 +1120,11 @@ mod tests {
                 "p999_grade": 0.4,
                 "maximum_grade": if failed { 13.0 } else { 0.5 },
                 "steep_grade_threshold": 2.0,
-                "steep_edge_fraction": if failed { 0.02 } else { 0.0 }
+                "steep_edge_fraction": if failed { 0.02 } else { 0.0 },
+                // The gated quantity, so the failed fixture has to breach *this*
+                // one; breaching only the region fraction would now describe a
+                // report the analyzer would have passed.
+                "steep_edge_world_fraction": if failed { 0.01 } else { 0.0 }
             },
             "intentional_relief": {
                 "edge_count": 1,
@@ -1085,7 +1134,8 @@ mod tests {
                 "p999_grade": 4.0,
                 "maximum_grade": 5.0,
                 "steep_grade_threshold": 2.0,
-                "steep_edge_fraction": 0.5
+                "steep_edge_fraction": 0.5,
+                "steep_edge_world_fraction": 0.25
             },
             "regions": {
                 "lane": grade_summary(0.0, 0.0),

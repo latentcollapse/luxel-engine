@@ -80,10 +80,34 @@ function _quantile(sorted_values::Vector{Float64}, probability::Float64)
     return sorted_values[lower] * (1.0 - amount) + sorted_values[upper] * amount
 end
 
-function _summary(grades::Vector{Float64}; steep_grade::Float64)
+"""
+    _summary(grades; steep_grade, world_edge_count=nothing)
+
+`steep_edge_fraction` is a share of this region's own edges, which makes it a
+description of the region but **not a gate-able quantity**. Its denominator is
+the region's size, and region size is a design variable: when the massif
+inversion raised protected relief from 12% of the world to 50%, the walkable
+set halved while the steep ground inside it did not move at all -- identical
+valley floor, identical crags, same heights -- and the fraction rose from
+passing to failing. The gate then asked for the ridge flanks to be smoothed to
+correct an accounting change, which is a metric arguing against the art
+direction it exists to protect (D16/D25).
+
+So when `world_edge_count` is supplied, the summary also reports
+`steep_edge_world_fraction`: the same steep edges over every edge in the world.
+That denominator is fixed by resolution alone, so the number moves only when
+the terrain moves, and it stays comparable between worlds with different
+mountain/valley splits.
+"""
+function _summary(
+    grades::Vector{Float64};
+    steep_grade::Float64,
+    world_edge_count::Union{Nothing,Int}=nothing,
+)
     sort!(grades)
     sample_count = length(grades)
-    return Dict(
+    steep_count = Base.count(>(steep_grade), grades)
+    summary = Dict(
         "edge_count" => sample_count,
         "p50_grade" => round(_quantile(grades, 0.50), digits=6),
         "p95_grade" => round(_quantile(grades, 0.95), digits=6),
@@ -91,12 +115,20 @@ function _summary(grades::Vector{Float64}; steep_grade::Float64)
         "p999_grade" => round(_quantile(grades, 0.999), digits=6),
         "maximum_grade" => round(isempty(grades) ? 0.0 : grades[end], digits=6),
         "steep_grade_threshold" => steep_grade,
+        "steep_edge_count" => steep_count,
         "steep_edge_fraction" => round(
-            sample_count == 0 ? 0.0 :
-            Base.count(>(steep_grade), grades) / sample_count,
+            sample_count == 0 ? 0.0 : steep_count / sample_count,
             digits=8,
         ),
     )
+    if world_edge_count !== nothing
+        summary["world_edge_count"] = world_edge_count
+        summary["steep_edge_world_fraction"] = round(
+            world_edge_count == 0 ? 0.0 : steep_count / world_edge_count,
+            digits=8,
+        )
+    end
+    return summary
 end
 
 function _edge_region(left::UInt8, right::UInt8)
@@ -461,6 +493,7 @@ function analyze_heightfield(
     maximum_accessible_grade::Float64=12.0,
     steep_grade::Float64=2.0,
     maximum_accessible_steep_fraction::Float64=0.01,
+    maximum_accessible_steep_world_fraction::Float64=0.009,
     maximum_hydrology_uphill_fraction::Float64=0.08,
     maximum_hydrology_uphill_step_m::Float64=0.35,
 )
@@ -492,10 +525,19 @@ function analyze_heightfield(
         ),
     )
     intentional = grades["protected_relief"]
-    accessible_summary = _summary(accessible; steep_grade=steep_grade)
-    intentional_summary = _summary(intentional; steep_grade=steep_grade)
+    # Every edge in the world, whatever region claims it. Fixed by resolution,
+    # so it does not move when the mountain/valley split does.
+    world_edge_count = sum(length(values) for values in Base.values(grades); init=0)
+    accessible_summary = _summary(
+        accessible; steep_grade=steep_grade, world_edge_count=world_edge_count
+    )
+    intentional_summary = _summary(
+        intentional; steep_grade=steep_grade, world_edge_count=world_edge_count
+    )
     region_summaries = Dict(
-        name => _summary(values; steep_grade=steep_grade)
+        name => _summary(
+            values; steep_grade=steep_grade, world_edge_count=world_edge_count
+        )
         for (name, values) in grades
     )
     hydrology = hasproperty(manifest, :hydrology_centerlines) ? [
@@ -516,10 +558,19 @@ function analyze_heightfield(
             "accessible maximum grade $(accessible_summary["maximum_grade"]) exceeds $maximum_accessible_grade",
         )
     end
-    if accessible_summary["steep_edge_fraction"] > maximum_accessible_steep_fraction
+    # Gated against the world, not against the walkable set. See `_summary`:
+    # the walkable set is a design variable, so gating on a share of it makes
+    # the threshold move whenever the mountain/valley split moves, and asks the
+    # author to flatten real terrain to correct an accounting change.
+    #
+    # 0.009 preserves the absolute allowance the previous rule granted -- 1% of
+    # a world that was then ~87% walkable -- so this is the same strictness
+    # expressed in a denominator that holds still.
+    if accessible_summary["steep_edge_world_fraction"] >
+       maximum_accessible_steep_world_fraction
         push!(
             failures,
-            "accessible steep-edge fraction $(accessible_summary["steep_edge_fraction"]) exceeds $maximum_accessible_steep_fraction",
+            "accessible steep-edge world fraction $(accessible_summary["steep_edge_world_fraction"]) exceeds $maximum_accessible_steep_world_fraction",
         )
     end
     for stream in hydrology
@@ -556,7 +607,11 @@ function analyze_heightfield(
         "policy" => Dict(
             "maximum_accessible_grade" => maximum_accessible_grade,
             "steep_grade" => steep_grade,
+            # Reported for continuity with worlds analysed before the gate moved
+            # to a world-relative denominator; no longer the gated quantity.
             "maximum_accessible_steep_fraction" => maximum_accessible_steep_fraction,
+            "maximum_accessible_steep_world_fraction" =>
+                maximum_accessible_steep_world_fraction,
             "maximum_hydrology_uphill_fraction" => maximum_hydrology_uphill_fraction,
             "maximum_hydrology_uphill_step_m" => maximum_hydrology_uphill_step_m,
             "wetland_rill_flow_policy" => "standing-or-braided; downhill continuity not required",

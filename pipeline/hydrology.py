@@ -10,7 +10,8 @@ drainage graph, not a property anyone authors:**
 
 | Wanted | Derived from |
 |---|---|
-| stagnant green bog, lilypads | closed sink, negligible catchment |
+| stagnant green bog, lilypads | shallow closed sink, negligible catchment |
+| still cold tarn | *deep* closed sink, negligible catchment |
 | deeper darker pond | sink with upstream inflow |
 | trickle from the mountains | low-order reach, high ground |
 | river across the map | high-order reach |
@@ -50,8 +51,33 @@ MINIMUM_WATER_DEPTH_M = 0.35
 CHANNEL_ACCUMULATION = 60.0
 
 # A sink whose catchment is under this many cells is fed by rain landing in it
-# and nothing else -- the hydrological definition of a bog rather than a pond.
+# and nothing else -- the hydrological definition of stagnant water rather than
+# a fed pond. Catchment decides whether water is *stagnant*; it does not decide
+# whether the body is a bog, because depth does. See below.
 BOG_CATCHMENT = 140.0
+
+# Depth thresholds are **fractions of the agent**, never absolute metres.
+#
+# This world is authored at heroic scale -- `agent_height_m` is 8.0, not 1.8 --
+# and the previous rule hardcoded 1.6 m as the swimming depth, which is chest
+# height on a human and shin height on the actual agent. The result was output
+# that contradicted itself: fifteen bodies classified `bog`, six of them also
+# flagged `swimmable`. You cannot swim in a bog. That is what makes it a bog.
+#
+# Expressing these as proportions means they stay correct for any agent, and a
+# world that changes its actor size does not silently reclassify its water.
+
+# Knee-deep. Past this you are not walking through waterlogged ground -- which
+# is what a bog *is* -- you are in open water that merely happens to be
+# stagnant. A deep stagnant sink in rock is a tarn.
+BOG_DEPTH_FRACTION = 0.25
+
+# Shoulder-deep: the point where the feet leave the bottom.
+SWIM_DEPTH_FRACTION = 0.75
+
+# Only a fallback for direct callers. The build path passes the world's own
+# authored value; this default matches `zone_compiler.DEFAULT_TRAVERSAL_POLICY`.
+DEFAULT_AGENT_HEIGHT_M = 8.0
 
 
 @dataclass(frozen=True)
@@ -226,6 +252,7 @@ def classify(
     accumulation: np.ndarray,
     *,
     cell_m: float,
+    agent_height_m: float = DEFAULT_AGENT_HEIGHT_M,
 ) -> dict:
     """Name every body of water the terrain implies.
 
@@ -233,7 +260,30 @@ def classify(
     rain landing in it is stagnant and green, and one fed by a mountain stream
     is deeper, clearer and colder. That is the distinction the art direction
     asked for, and it falls out of the drainage graph for free.
+
+    **Catchment alone is not enough**, which is the defect this function used to
+    have. Feed decides whether water is stagnant. It says nothing about depth,
+    so a deep closed basin in rock came out labelled `bog` and rendered stagnant
+    green -- and the arena had a 7.96 m one. A stagnant body too deep to wade is
+    a **tarn**: still, cold and clear, because there is no shallow warm margin
+    for anything to rot in. Green scum on an eight-metre pool is the visible
+    lie, and it survived precisely because nothing in the output disagreed with
+    it until `swimmable` was also made honest.
+
+    So the two axes are independent and both are needed:
+
+    | | shallow | deep |
+    |---|---|---|
+    | **stagnant** | bog | tarn |
+    | **fed** | pond | pond |
+
+    Fed water is left as one kind deliberately. Splitting it would be inventing
+    a distinction this world has no evidence for -- every fed body in the arena
+    is shallow -- and inventing categories to fill a table is how a taxonomy
+    stops tracking the terrain.
     """
+    bog_ceiling_m = agent_height_m * BOG_DEPTH_FRACTION
+    swim_depth_m = agent_height_m * SWIM_DEPTH_FRACTION
     depth = np.maximum(filled - height, 0.0)
     water = depth > MINIMUM_WATER_DEPTH_M
     channels = (accumulation >= CHANNEL_ACCUMULATION) & ~water
@@ -267,19 +317,48 @@ def classify(
             inflow = max(float(accumulation[r, c]) for r, c in cells)
             deepest = max(float(depth[r, c]) for r, c in cells)
             fed = inflow >= BOG_CATCHMENT
+            wadeable = deepest <= bog_ceiling_m
+            if fed:
+                kind = "pond"
+            elif wadeable:
+                kind = "bog"
+            else:
+                kind = "tarn"
             bodies.append(
                 {
-                    "kind": "pond" if fed else "bog",
+                    "kind": kind,
                     "fed": fed,
+                    "wadeable": bool(wadeable),
                     "area_m2": round(area, 1),
                     "maximum_depth_m": round(deepest, 3),
                     "inflow_cells": round(inflow, 1),
-                    # What the art direction reads. Stagnant water is green and
-                    # shallow-looking; fed water is darker and colder.
-                    "surface": "stagnant_green" if not fed else "cold_blue",
-                    "swimmable": bool(deepest >= 1.6),
+                    # What the art direction reads. Only a bog is green: it is
+                    # the shallow stagnant margin that grows the scum. A tarn is
+                    # stagnant too and still reads cold, so this keys off `kind`
+                    # rather than off `fed` as it once did.
+                    "surface": "stagnant_green" if kind == "bog" else "cold_blue",
+                    "swimmable": bool(deepest >= swim_depth_m),
                 }
             )
+
+    # A bog you can swim in is not a bog. The thresholds are ordered so this is
+    # unreachable -- BOG_DEPTH_FRACTION is well under SWIM_DEPTH_FRACTION -- but
+    # they are two independent constants, and the whole reason this function was
+    # wrong is that nothing ever compared them. Assert rather than trust.
+    contradictions = [
+        b for b in bodies if b["kind"] == "bog" and b["swimmable"]
+    ]
+    if contradictions:
+        raise AssertionError(
+            "hydrology classified %d swimmable bog(s); BOG_DEPTH_FRACTION=%.3f "
+            "must stay below SWIM_DEPTH_FRACTION=%.3f (agent %.2f m)"
+            % (
+                len(contradictions),
+                BOG_DEPTH_FRACTION,
+                SWIM_DEPTH_FRACTION,
+                agent_height_m,
+            )
+        )
 
     return {
         "water_area_m2": round(float(water.sum()) * cell_m * cell_m, 1),
@@ -287,12 +366,23 @@ def classify(
         "bodies": sorted(bodies, key=lambda b: -b["area_m2"]),
         "body_count": len(bodies),
         "bog_count": sum(1 for b in bodies if b["kind"] == "bog"),
+        "tarn_count": sum(1 for b in bodies if b["kind"] == "tarn"),
         "pond_count": sum(1 for b in bodies if b["kind"] == "pond"),
+        # Everything a bog renders as wet walkable ground rather than open
+        # water. Item 6's fifth splat channel consumes exactly this.
+        "wetland_area_m2": round(
+            sum(b["area_m2"] for b in bodies if b["kind"] == "bog"), 1
+        ),
     }
 
 
-def build(batch_dir) -> dict:
-    """Classify the water a compiled world implies, from its own terrain."""
+def build(batch_dir, *, agent_height_m: float = DEFAULT_AGENT_HEIGHT_M) -> dict:
+    """Classify the water a compiled world implies, from its own terrain.
+
+    `agent_height_m` comes from the world's own traversal policy rather than
+    from the terrain manifest, which does not carry one. Depth only means
+    anything relative to whoever is standing in it.
+    """
     import json
     from pathlib import Path
 
@@ -315,7 +405,13 @@ def build(batch_dir) -> dict:
 
     filled = fill_depressions(coarse)
     accumulation = flow_accumulation(filled)
-    report = classify(coarse, filled, accumulation, cell_m=cell_m)
+    report = classify(
+        coarse,
+        filled,
+        accumulation,
+        cell_m=cell_m,
+        agent_height_m=agent_height_m,
+    )
     report.update(
         {
             "schema_version": "codeweald.hydrology-plan/v1",
@@ -328,6 +424,14 @@ def build(batch_dir) -> dict:
                 "minimum_water_depth_m": MINIMUM_WATER_DEPTH_M,
                 "channel_accumulation_cells": CHANNEL_ACCUMULATION,
                 "bog_catchment_cells": BOG_CATCHMENT,
+                # Recorded in metres *and* as the fractions they derive from,
+                # so a reader can tell the difference between a number that was
+                # chosen and a number that was computed.
+                "agent_height_m": round(agent_height_m, 4),
+                "bog_depth_fraction": BOG_DEPTH_FRACTION,
+                "bog_maximum_depth_m": round(agent_height_m * BOG_DEPTH_FRACTION, 4),
+                "swim_depth_fraction": SWIM_DEPTH_FRACTION,
+                "swim_depth_m": round(agent_height_m * SWIM_DEPTH_FRACTION, 4),
             },
         }
     )

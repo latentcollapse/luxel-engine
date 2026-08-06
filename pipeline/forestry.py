@@ -52,6 +52,15 @@ class Niche:
     notes: str = ""
 
 
+# The grade above which ground stops holding standing water and starts shedding
+# it. Named and exported because **surfacing needs the same number**: S7 paints
+# the peat and S6 plants the sedge, and when each carried its own limit they
+# disagreed by more than thirty degrees -- the splat field had strong wetland on
+# 24% of cells steeper than 35 deg while this niche cut off at 8. One engine
+# should not hold two opinions about where a bog is.
+BOG_MAXIMUM_SLOPE_DEGREES = 8.0
+
+
 HIGHLAND_NICHES: tuple[Niche, ...] = (
     Niche(
         key="montane_conifer",
@@ -90,7 +99,7 @@ HIGHLAND_NICHES: tuple[Niche, ...] = (
         key="bog_sedge",
         elevation_band=(0.0, 0.35),
         elevation_falloff=0.10,
-        maximum_slope_degrees=8.0,
+        maximum_slope_degrees=BOG_MAXIMUM_SLOPE_DEGREES,
         wetness_band=(8.5, 16.0),
         insolation_preference=0.6,
         insolation_strength=0.20,
