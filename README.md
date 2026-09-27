@@ -252,6 +252,28 @@ cargo test --workspace                       # from world_core/
 julia --project=. test/runtests.jl           # from terrain_lab/
 ```
 
+## MVP vertical slice
+
+The current game-development harness slice is driven by the Rust-owned project
+ledger. The Python command is only orchestration: it copies and hashes pinned
+inputs, then asks Rust to validate, certify, and emit the Unity handoff.
+
+```sh
+python3 pipeline/wge_mvp.py prepare --output <candidate>
+python3 pipeline/wge_mvp.py verify-all \
+  --spec <candidate>/project_spec.json \
+  --evidence <candidate>/evidence.json \
+  --snapshot-output <candidate>/project_snapshot.json \
+  --unity-output <candidate>/wge_unity_mvp_import.json
+```
+
+`verify-all` exits nonzero and reports the blocked gates until target-runtime
+evidence has actually been observed. It never upgrades an indeterminate Unity
+import, playthrough, or visual result into a pass. A certified handoff is
+imported through **Tools > Codeweald > WGE MVP > Import Certified Snapshot** in
+the Unity adapter. The conventional-engine comparison is reported by
+`pipeline/benchmark_mvp.py` only after both measured runs exist.
+
 ## As substrate for a world model (Project Aisling)
 
 > Design intent, not measured. Aisling is not trained yet. Recorded here because it shapes what WGE

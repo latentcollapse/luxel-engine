@@ -1,0 +1,15 @@
+{
+  "schema_version": "wge.runtime-asset/v1",
+  "asset_id": "hero",
+  "source_sha256": "sha256:asset-source-pending",
+  "rig": {"profile": "humanoid_minimal", "root": "root", "bones": ["root", "spine", "hand_r", "foot_l", "foot_r"], "weighted_vertices": 1},
+  "animations": [
+    {"id": "idle", "duration_s": 1.0, "loop": true, "root_motion": false, "contact_events": []},
+    {"id": "move", "duration_s": 0.8, "loop": true, "root_motion": true, "contact_events": ["foot_l", "foot_r"]},
+    {"id": "ability", "duration_s": 0.6, "loop": false, "root_motion": false, "contact_events": ["ability_release"]}
+  ],
+  "sockets": [{"id": "ability_origin", "bone": "hand_r", "position_m": [0.25, 1.35, 0.0]}],
+  "collision": {"shape": "capsule", "radius_m": 0.45, "height_m": 1.8, "center_m": [0.0, 0.9, 0.0]},
+  "lods": [{"level": 0, "triangle_budget": 12000, "screen_height_fraction": 0.25}, {"level": 1, "triangle_budget": 5000, "screen_height_fraction": 0.08}],
+  "provenance": {"preparer": "wge-asset-pipeline", "source_tool": "fixture"}
+}

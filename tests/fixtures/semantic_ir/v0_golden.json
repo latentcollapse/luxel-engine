@@ -1,0 +1,67 @@
+{
+  "vectors": [
+    {
+      "name": "lane_place",
+      "source_fixture": "semantic_kernel/repaired.wge",
+      "canonical_sha256": "sha256:f08d7d783789e299033fb3b2db78cf3f7ba1575b4e3bd43658ce485f6d66f224",
+      "expected": {
+        "declarations": [
+          {
+            "binding": "central_lane",
+            "constructor": "lane",
+            "footprint": {"x0": 0, "x1": 100, "y0": 40, "y1": 60},
+            "id": "central",
+            "span": {"column": 0, "end_column": 77, "end_line": 4, "line": 4}
+          },
+          {
+            "binding": "blocked_keep",
+            "constructor": "place",
+            "footprint": {"x0": 40, "x1": 70, "y0": 0, "y1": 20},
+            "id": "keep",
+            "span": {"column": 0, "end_column": 74, "end_line": 5, "line": 5}
+          }
+        ],
+        "module_id": "spike.lane.world",
+        "registry_digest": "sha256:efb28a4b8cdb17c375fe51d82ed7e3e9377c4702a69ff470b6f0869c5c1e6ab8",
+        "schema": "wge.semantic-ir/v0"
+      }
+    },
+    {
+      "name": "lane_place_path",
+      "source_fixture": "semantic_kernel/path_repaired.wge",
+      "canonical_sha256": "sha256:582a72749bda5aacb4df7570f5ce4e5e682f10e586ad8bb2c09ce0322d1384fc",
+      "expected": {
+        "declarations": [
+          {
+            "binding": "central_lane",
+            "constructor": "lane",
+            "footprint": {"x0": 0, "x1": 100, "y0": 40, "y1": 60},
+            "id": "central",
+            "span": {"column": 0, "end_column": 77, "end_line": 4, "line": 4}
+          },
+          {
+            "binding": "safe_keep",
+            "constructor": "place",
+            "footprint": {"x0": 40, "x1": 70, "y0": 0, "y1": 20},
+            "id": "keep",
+            "span": {"column": 0, "end_column": 71, "end_line": 5, "line": 5}
+          },
+          {
+            "binding": "long_route",
+            "budget": 50,
+            "constructor": "path",
+            "id": "route",
+            "span": {"column": 0, "end_column": 65, "end_line": 6, "line": 6},
+            "x0": 0,
+            "x1": 40,
+            "y0": 0,
+            "y1": 0
+          }
+        ],
+        "module_id": "spike.lane.world",
+        "registry_digest": "sha256:efb28a4b8cdb17c375fe51d82ed7e3e9377c4702a69ff470b6f0869c5c1e6ab8",
+        "schema": "wge.semantic-ir/v0"
+      }
+    }
+  ]
+}

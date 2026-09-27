@@ -1,0 +1,17 @@
+{
+  "constructors": [
+    {"kind": "constructor", "namespace": "wge.geometry", "symbol": "path"},
+    {"kind": "constructor", "namespace": "wge.geometry", "symbol": "rect"},
+    {"kind": "constructor", "namespace": "wge.world", "symbol": "lane"},
+    {"kind": "constructor", "namespace": "wge.world", "symbol": "place"}
+  ],
+  "gates": [
+    {"id": "lane.footprint_clear", "operation": "lane_overlap"},
+    {"id": "path.within_budget", "operation": "path_length"}
+  ],
+  "operations": [
+    {"id": "lane_overlap"},
+    {"id": "path_length"}
+  ],
+  "schema": "wge.registry/v0"
+}

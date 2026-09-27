@@ -1,0 +1,94 @@
+{
+  "schema_version": "wge.authored-world-layout/v1",
+  "world_id": "riverwatch_pass",
+  "title": "Riverwatch Pass",
+  "width_m": 96.0,
+  "length_m": 72.0,
+  "resolution": 49,
+  "seed": 791483,
+  "terrain": {
+    "base_elevation_m": 12.0,
+    "noise_amplitude_m": 0.22,
+    "features": [
+      {
+        "feature_id": "western_basalt_ridge",
+        "center_xz_m": [-17.0, 8.0],
+        "radius_x_m": 12.0,
+        "radius_z_m": 11.0,
+        "elevation_m": 7.0
+      },
+      {
+        "feature_id": "eastern_spur",
+        "center_xz_m": [23.0, -2.0],
+        "radius_x_m": 10.0,
+        "radius_z_m": 15.0,
+        "elevation_m": 4.0
+      },
+      {
+        "feature_id": "saddle_basin",
+        "center_xz_m": [2.0, 1.0],
+        "radius_x_m": 8.0,
+        "radius_z_m": 7.0,
+        "elevation_m": -2.5
+      }
+    ]
+  },
+  "regions": [
+    {
+      "region_id": "northwest_tarn",
+      "code": 1,
+      "priority": 10,
+      "blocks_traversal": true,
+      "polygon_xz_m": [
+        [-47.0, 25.0],
+        [-29.0, 25.0],
+        [-29.0, 34.0],
+        [-47.0, 34.0]
+      ]
+    }
+  ],
+  "obstacles": [
+    {
+      "obstacle_id": "fallen_spire",
+      "center_xz_m": [17.0, 13.0],
+      "radius_m": 3.0,
+      "height_m": 5.5
+    }
+  ],
+  "spawns": [
+    {
+      "spawn_id": "player_start",
+      "role": "player_start",
+      "position_xz_m": [-41.0, -27.0]
+    },
+    {
+      "spawn_id": "guard_spawn",
+      "role": "opponent",
+      "position_xz_m": [2.0, 1.0]
+    }
+  ],
+  "encounters": [
+    {
+      "encounter_id": "saddle_guard",
+      "center_xz_m": [2.0, 1.0],
+      "radius_m": 5.0,
+      "required": true,
+      "traversal_order": 1,
+      "opponent_spawn_id": "guard_spawn"
+    }
+  ],
+  "traversal": {
+    "start_spawn_id": "player_start",
+    "objective_id": "pass_beacon",
+    "objective_position_xz_m": [41.0, 27.0],
+    "agent_radius_m": 0.6,
+    "maximum_grade": 0.55
+  },
+  "reference_camera": {
+    "projection": "top_down_orthographic",
+    "width_px": 320,
+    "height_px": 240,
+    "orthographic_span_m": 108.0,
+    "distance_m": 160.0
+  }
+}

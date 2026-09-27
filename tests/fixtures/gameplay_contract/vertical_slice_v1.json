@@ -1,0 +1,84 @@
+{
+  "snapshot": {
+    "schema_version": "wge.gameplay-snapshot/v1",
+    "navigation": {
+      "adjacency": {
+      "arena": ["bridge", "relay"],
+      "bridge": ["arena", "spawn"],
+      "relay": ["arena"],
+      "spawn": ["bridge"]
+      }
+    },
+    "entities": {
+      "npc_wyrm": {
+        "control": {
+          "kind": "npc",
+          "behavior": {
+            "kind": "guard_objective_counterattack",
+            "attack_damage": 2,
+            "attack_range_steps": 0
+          }
+        },
+        "location": "arena",
+        "attributes": {
+          "health": 6,
+          "max_health": 6,
+          "energy": 0,
+          "max_energy": 0
+        },
+        "tags": ["enemy"]
+      },
+      "player_ash": {
+        "control": {"kind": "playable"},
+        "location": "spawn",
+        "attributes": {
+          "health": 12,
+          "max_health": 12,
+          "energy": 4,
+          "max_energy": 4
+        },
+        "tags": ["player", "scout"]
+      },
+      "player_bram": {
+        "control": {"kind": "playable"},
+        "location": "spawn",
+        "attributes": {
+          "health": 12,
+          "max_health": 12,
+          "energy": 4,
+          "max_energy": 4
+        },
+        "tags": ["player", "arcanist"]
+      }
+    },
+    "ability": {
+      "id": "arc_bolt",
+      "energy_cost": 2,
+      "cooldown_ticks": 2,
+      "targeting": {
+        "kind": "enemy_within_navigation_steps",
+        "max_steps": 0
+      },
+      "effect": {"kind": "damage", "amount": 3}
+    },
+    "objective": {
+      "location": "relay",
+      "prerequisite": "all_npcs_defeated",
+      "tags": ["objective"]
+    }
+  },
+  "trace": {
+    "schema_version": "wge.gameplay-trace/v1",
+    "events": [
+      {"kind": "move", "destination": "bridge"},
+      {"kind": "move", "destination": "arena"},
+      {"kind": "use_ability", "ability": "arc_bolt", "target": "npc_wyrm"},
+      {"kind": "select_entity", "entity": "player_bram"},
+      {"kind": "move", "destination": "bridge"},
+      {"kind": "move", "destination": "arena"},
+      {"kind": "use_ability", "ability": "arc_bolt", "target": "npc_wyrm"},
+      {"kind": "move", "destination": "relay"},
+      {"kind": "interact_objective"}
+    ]
+  }
+}

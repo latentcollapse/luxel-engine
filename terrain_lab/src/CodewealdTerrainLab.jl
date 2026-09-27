@@ -4,6 +4,12 @@ using JSON3
 using SHA
 
 export analyze_heightfield, solve_landform_placements, write_analysis, write_placement_plan
+export EROSION_REQUEST_SCHEMA, EROSION_RESULT_SCHEMA
+export ErosionProfile, ErodeRequest, ThermalErosionRequest, FluxFieldRequest
+export ErosionOutcome, ErosionReport, ErosionWorkerError
+export erode_heightfield, thermal_erosion, flux_field, valley_cross_section
+
+include("Erosion.jl")
 
 const ANALYSIS_SCHEMA = "codeweald.terrain-analysis/v1"
 const REGION_PROTECTED_RELIEF = UInt8(1 << 0)

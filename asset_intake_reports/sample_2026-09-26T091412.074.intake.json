@@ -1,0 +1,552 @@
+{
+  "benchmark_status": "intake_complete_rigging_required",
+  "canonical_report_sha256": "14301dc1dc20272b7d35e270a3d0221a310b3376470c0cc025f97f8d06638f71",
+  "extensions": {
+    "required": [
+      "EXT_texture_webp"
+    ],
+    "used": [
+      "EXT_texture_webp"
+    ]
+  },
+  "geometry": {
+    "attributes_absent_from_all_primitives": [
+      "TANGENT",
+      "COLOR_0",
+      "JOINTS_0",
+      "WEIGHTS_0"
+    ],
+    "attributes_present": [
+      "NORMAL",
+      "POSITION",
+      "TEXCOORD_0"
+    ],
+    "mesh_count": 1,
+    "meshes": [
+      {
+        "extras": {},
+        "index": 0,
+        "name": "geometry_0",
+        "primitive_count": 1,
+        "primitives": [
+          {
+            "attributes": {
+              "NORMAL": {
+                "buffer_view": 5,
+                "byte_offset": 10947460,
+                "byte_stride": 12,
+                "component_count": 3,
+                "component_type": "FLOAT",
+                "component_type_code": 5126,
+                "count": 252602,
+                "index": 3,
+                "max": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "min": [
+                  -1.0,
+                  -1.0,
+                  -1.0
+                ],
+                "normalized": false,
+                "type": "VEC3"
+              },
+              "POSITION": {
+                "buffer_view": 1,
+                "byte_offset": 3521724,
+                "byte_stride": 12,
+                "component_count": 3,
+                "component_type": "FLOAT",
+                "component_type_code": 5126,
+                "count": 252602,
+                "index": 1,
+                "max": [
+                  0.500567555,
+                  0.36826551,
+                  0.296313733
+                ],
+                "min": [
+                  -0.500257254,
+                  -0.369954765,
+                  -0.29562062
+                ],
+                "normalized": false,
+                "type": "VEC3"
+              },
+              "TEXCOORD_0": {
+                "buffer_view": 4,
+                "byte_offset": 8926644,
+                "byte_stride": 8,
+                "component_count": 2,
+                "component_type": "FLOAT",
+                "component_type_code": 5126,
+                "count": 252602,
+                "index": 2,
+                "max": [
+                  0.999577701,
+                  0.99957484
+                ],
+                "min": [
+                  0.0,
+                  0.0
+                ],
+                "normalized": false,
+                "type": "VEC2"
+              }
+            },
+            "index": 0,
+            "index_count": 880431,
+            "material": 0,
+            "mesh_index": 0,
+            "missing_common_attributes": [
+              "TANGENT",
+              "COLOR_0",
+              "JOINTS_0",
+              "WEIGHTS_0"
+            ],
+            "mode": "TRIANGLES",
+            "mode_code": 4,
+            "morph_target_count": 0,
+            "normal_quality": {
+              "max_length": 1.0,
+              "min_length": 0.99999994,
+              "non_unit_count": 0
+            },
+            "position_bounds": {
+              "max": [
+                0.500567555,
+                0.36826551,
+                0.296313733
+              ],
+              "min": [
+                -0.500257254,
+                -0.369954765,
+                -0.29562062
+              ],
+              "size": [
+                1.000824809,
+                0.738220274,
+                0.591934323
+              ]
+            },
+            "topology": {
+              "boundary_edge_count": 181508,
+              "component_vertex_counts_top": [
+                3151,
+                3131,
+                2587,
+                2574,
+                643,
+                642,
+                595,
+                592,
+                564,
+                557
+              ],
+              "connected_component_count": 15941,
+              "degenerate_index_triangles": 0,
+              "edge_count": 530969,
+              "isolated_vertex_count": 0,
+              "largest_component_vertices": 3151,
+              "manifold_edge_count": 349460,
+              "max_edge_uses": 3,
+              "non_manifold_edge_count": 1,
+              "normal_orientation_disagreement_count": 2298,
+              "triangle_area_m2": {
+                "max": 0.00015033,
+                "mean": 1.2204e-05,
+                "min": 0.0
+              },
+              "triangle_count": 293477,
+              "zero_area_triangles": 6
+            },
+            "uv0_quality": {
+              "max": [
+                0.999577701,
+                0.99957484
+              ],
+              "min": [
+                0.0,
+                0.0
+              ],
+              "outside_0_1_count": 0
+            },
+            "vertex_count": 252602
+          }
+        ]
+      }
+    ],
+    "primitive_count": 1,
+    "total_index_count": 880431,
+    "total_triangle_count": 293477,
+    "total_vertex_count": 252602,
+    "unused_accessor_indices": []
+  },
+  "inference_boundary": {
+    "not_safe_to_infer": [
+      "A semantic identity such as humanoid, creature, weapon, armor, or prop.",
+      "Anatomical joints, rest pose, bone hierarchy, or animation intent.",
+      "Real-world scale, gameplay affordances, collision, sockets, or LOD policy.",
+      "Whether transparent pixels in the base-color image are meaningful, because alphaMode is OPAQUE.",
+      "Whether disconnected shells are intentional parts or defective fragmentation."
+    ],
+    "safe_inferences": [
+      {
+        "claim": "The file contains renderable triangle geometry.",
+        "evidence": "A TRIANGLES primitive has POSITION and indices."
+      },
+      {
+        "claim": "The mesh has vertex normals and a TEXCOORD_0 UV set.",
+        "evidence": "NORMAL and TEXCOORD_0 accessors are bound to the primitive."
+      },
+      {
+        "claim": "The material uses embedded PBR base-color and metallic-roughness textures.",
+        "evidence": "The material binds both textures and the image bytes are embedded in the GLB."
+      },
+      {
+        "claim": "The asset is not rigged or animated in this file.",
+        "evidence": "There are no skins, no animations, and no JOINTS_0 or WEIGHTS_0 attributes."
+      },
+      {
+        "claim": "The glTF coordinate convention is Y-up, but gameplay scale is not verified.",
+        "evidence": "No authored scale or unit calibration is present in the scene graph."
+      }
+    ]
+  },
+  "input": {
+    "asset": {
+      "generator": "https://github.com/mikedh/trimesh",
+      "version": "2.0"
+    },
+    "byte_length": 13980532,
+    "container": {
+      "bin_byte_length": 13978684,
+      "declared_length": 13980532,
+      "extra_chunks": [],
+      "json_byte_length": 1818,
+      "magic": "glTF",
+      "version": 2
+    },
+    "file_name": "sample_2026-09-26T091412.074.glb",
+    "sha256": "858fa104880822d081405579fb5b39d533d3b3b341d38aa1490a44b634f5e2b4"
+  },
+  "materials": {
+    "image_count": 2,
+    "images": [
+      {
+        "alpha_non_opaque_fraction": 0.633562803,
+        "alpha_non_opaque_pixel_count": 2657355,
+        "alpha_zero_pixel_count": 94506,
+        "buffer_view": 2,
+        "decoded_format": "WEBP",
+        "embedded": true,
+        "encoded_byte_length": 1941800,
+        "encoded_sha256": "aa5b1bb2b07b9a9411e244021408229be0601643ff45fada6ed3979e9b81ccd5",
+        "height_px": 2048,
+        "index": 0,
+        "mime_type": "image/webp",
+        "mode": "RGBA",
+        "width_px": 2048
+      },
+      {
+        "alpha_non_opaque_fraction": 0.0,
+        "alpha_non_opaque_pixel_count": 0,
+        "alpha_zero_pixel_count": 0,
+        "buffer_view": 3,
+        "decoded_format": "WEBP",
+        "embedded": true,
+        "encoded_byte_length": 431896,
+        "encoded_sha256": "50634008b16f08e125c0d6a6db2ec8d9cf4d748dc7ccce9fba52b6a00a7b10ed",
+        "height_px": 2048,
+        "index": 1,
+        "mime_type": "image/webp",
+        "mode": "RGB",
+        "width_px": 2048
+      }
+    ],
+    "material_count": 1,
+    "materials": [
+      {
+        "alpha_mode": "OPAQUE",
+        "bindings": {
+          "base_color": {
+            "image": {
+              "alpha_non_opaque_fraction": 0.633562803,
+              "alpha_non_opaque_pixel_count": 2657355,
+              "alpha_zero_pixel_count": 94506,
+              "buffer_view": 2,
+              "decoded_format": "WEBP",
+              "embedded": true,
+              "encoded_byte_length": 1941800,
+              "encoded_sha256": "aa5b1bb2b07b9a9411e244021408229be0601643ff45fada6ed3979e9b81ccd5",
+              "height_px": 2048,
+              "index": 0,
+              "mime_type": "image/webp",
+              "mode": "RGBA",
+              "width_px": 2048
+            },
+            "image_index": 0,
+            "texcoord": 0,
+            "texture_index": 0
+          },
+          "metallic_roughness": {
+            "image": {
+              "alpha_non_opaque_fraction": 0.0,
+              "alpha_non_opaque_pixel_count": 0,
+              "alpha_zero_pixel_count": 0,
+              "buffer_view": 3,
+              "decoded_format": "WEBP",
+              "embedded": true,
+              "encoded_byte_length": 431896,
+              "encoded_sha256": "50634008b16f08e125c0d6a6db2ec8d9cf4d748dc7ccce9fba52b6a00a7b10ed",
+              "height_px": 2048,
+              "index": 1,
+              "mime_type": "image/webp",
+              "mode": "RGB",
+              "width_px": 2048
+            },
+            "image_index": 1,
+            "texcoord": 0,
+            "texture_index": 1
+          }
+        },
+        "double_sided": false,
+        "extensions": {},
+        "index": 0,
+        "name": null,
+        "pbr_factors": {
+          "base_color_factor": [
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "metallic_factor": 1.0,
+          "roughness_factor": 1.0
+        }
+      }
+    ],
+    "texture_count": 2,
+    "textures": [
+      {
+        "extensions": {
+          "EXT_texture_webp": {
+            "source": 0
+          }
+        },
+        "index": 0,
+        "sampler": null,
+        "source": 0
+      },
+      {
+        "extensions": {
+          "EXT_texture_webp": {
+            "source": 1
+          }
+        },
+        "index": 1,
+        "sampler": null,
+        "source": 1
+      }
+    ]
+  },
+  "rigging_assessment": {
+    "observed": {
+      "animation_count": 0,
+      "boundary_edge_count": 181508,
+      "connected_component_count": 15941,
+      "has_joint_attributes": false,
+      "has_tangent_attributes": false,
+      "has_weight_attributes": false,
+      "morph_target_count": 0,
+      "non_manifold_edge_count": 1,
+      "normal_orientation_disagreement_count": 2298,
+      "skin_count": 0,
+      "zero_area_triangle_count": 6
+    },
+    "pre_rigging_repairs": [
+      {
+        "action": "Remove or repair zero-area triangles before binding",
+        "id": "GEO-001",
+        "observed_count": 6,
+        "status": "required"
+      },
+      {
+        "action": "Inspect and resolve non-manifold edges",
+        "id": "GEO-002",
+        "observed_count": 1,
+        "status": "required"
+      },
+      {
+        "action": "Classify open boundaries as intentional shells or repair targets",
+        "id": "GEO-003",
+        "observed_count": 181508,
+        "status": "required"
+      },
+      {
+        "action": "Segment disconnected shells into semantic parts or document why they remain separate",
+        "id": "GEO-004",
+        "observed_count": 15941,
+        "status": "required"
+      },
+      {
+        "action": "Validate winding and recalculate only the normal regions proven incorrect",
+        "id": "GEO-005",
+        "observed_count": 2298,
+        "status": "required"
+      },
+      {
+        "action": "Decide whether base-color alpha is intentional, then preserve it or discard it explicitly",
+        "id": "MAT-001",
+        "observed_count": 2657355,
+        "status": "target-dependent"
+      }
+    ],
+    "required_repairs_or_construction": [
+      {
+        "action": "Construct or author a semantic skeleton and rest pose",
+        "id": "RIG-001",
+        "reason": "The GLB contains no skins, joints, or joint hierarchy.",
+        "status": "required"
+      },
+      {
+        "action": "Assign and validate skin weights",
+        "id": "RIG-002",
+        "reason": "No JOINTS_0 or WEIGHTS_0 attributes are present.",
+        "status": "required"
+      },
+      {
+        "action": "Annotate semantic parts and rigging landmarks before binding",
+        "id": "RIG-003",
+        "reason": "The asset is one primitive with no semantic part labels or sockets.",
+        "status": "required"
+      },
+      {
+        "action": "Calibrate real-world scale and rest orientation",
+        "id": "RIG-004",
+        "reason": "The file supplies coordinates but no verified gameplay scale or authored pose.",
+        "status": "required"
+      },
+      {
+        "action": "Construct a minimum animation set and validate contacts",
+        "id": "RIG-005",
+        "reason": "The GLB contains no animations.",
+        "status": "required"
+      },
+      {
+        "action": "Construct collision, LOD, and gameplay socket metadata",
+        "id": "RIG-006",
+        "reason": "These are not represented in the GLB contract.",
+        "status": "required"
+      },
+      {
+        "action": "Generate or bake tangents for the target material pipeline",
+        "id": "RIG-007",
+        "reason": "No TANGENT vertex attribute is present.",
+        "status": "target-dependent"
+      },
+      {
+        "action": "Classify disconnected shells and decide whether to weld, preserve, or reject them",
+        "id": "RIG-008",
+        "reason": "Topology is fragmented or open; automatic skinning must not assume one continuous surface.",
+        "status": "required"
+      }
+    ],
+    "status": "unrigged_static_mesh"
+  },
+  "scene": {
+    "active_node_count": 2,
+    "active_scene": 0,
+    "animation_count": 0,
+    "camera_count": 0,
+    "mesh_count": 1,
+    "mesh_instances": [
+      {
+        "mesh_index": 0,
+        "node_index": 1,
+        "node_name": "geometry_0",
+        "primitive_index": 0,
+        "world_bounds": {
+          "max": [
+            0.500567555,
+            0.36826551,
+            0.296313733
+          ],
+          "min": [
+            -0.500257254,
+            -0.369954765,
+            -0.29562062
+          ]
+        }
+      }
+    ],
+    "node_count": 2,
+    "nodes": [
+      {
+        "children": [
+          1
+        ],
+        "has_explicit_matrix": false,
+        "has_rotation": false,
+        "has_scale": false,
+        "has_translation": false,
+        "index": 0,
+        "local_matrix": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "mesh": null,
+        "name": "world",
+        "skin": null
+      },
+      {
+        "children": [],
+        "has_explicit_matrix": false,
+        "has_rotation": false,
+        "has_scale": false,
+        "has_translation": false,
+        "index": 1,
+        "local_matrix": [
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "mesh": 0,
+        "name": "geometry_0",
+        "skin": null
+      }
+    ],
+    "scene_count": 1,
+    "skin_count": 0
+  },
+  "schema_version": "wge.asset-intake/v1"
+}

@@ -1,0 +1,6 @@
+{
+  "schema_version": "wge.gameplay-receipt/v1",
+  "outcome": "won",
+  "event_count": 9,
+  "receipt_sha256": "sha256:018af96979c1c965d53f3e5402c69635bf9ace82e46e287fd8d31de573300e8c"
+}

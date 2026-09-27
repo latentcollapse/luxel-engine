@@ -261,6 +261,7 @@ pub fn compile_render_plan_value(
     Ok(plan)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn validate_render_plan_value(
     zone: &Value,
     asset_plan: &Value,
@@ -719,11 +720,8 @@ fn suitable_cells(
 ) -> (Vec<[f64; 2]>, Vec<f64>) {
     let [min_x, max_x, min_z, max_z] = bounds;
     let last = (terrain.resolution - 1) as f64;
-    let column_of = |x: f64| {
-        ((x / terrain.width + 0.5).clamp(0.0, 1.0) * last).round() as usize
-    };
-    let row_of =
-        |z: f64| ((0.5 - z / terrain.length).clamp(0.0, 1.0) * last).round() as usize;
+    let column_of = |x: f64| ((x / terrain.width + 0.5).clamp(0.0, 1.0) * last).round() as usize;
+    let row_of = |z: f64| ((0.5 - z / terrain.length).clamp(0.0, 1.0) * last).round() as usize;
     // z increases northward while rows increase southward, hence the swap.
     let first_row = row_of(max_z);
     let last_row = row_of(min_z);
@@ -806,6 +804,7 @@ fn draw_weighted(
     ]
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_foliage(
     seed: u64,
     feature: &Map<String, Value>,
@@ -1028,6 +1027,7 @@ fn compile_foliage(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn instance_record(
     id: &str,
     feature_id: &str,
@@ -1546,8 +1546,13 @@ mod tests {
             length: 64.0,
         };
         let polygon = [[-32.0, -32.0], [32.0, -32.0], [32.0, 32.0], [-32.0, 32.0]];
-        let (positions, cumulative) =
-            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
+        let (positions, cumulative) = suitable_cells(
+            terrain,
+            &polygon,
+            [-32.0, 32.0, -32.0, 32.0],
+            f64::INFINITY,
+            &[],
+        );
         assert!(!positions.is_empty(), "the suitable band must be found");
         assert_eq!(positions.len(), cumulative.len());
         for position in &positions {
@@ -1608,7 +1613,10 @@ mod tests {
         for _ in 0..5000 {
             let drawn = draw_weighted(&positions, &cumulative, cell, &mut rng);
             widest_z = widest_z.max(drawn[1].abs());
-            assert!(drawn[1].abs() < cell[1] * 0.5, "z jitter used the x cell size");
+            assert!(
+                drawn[1].abs() < cell[1] * 0.5,
+                "z jitter used the x cell size"
+            );
         }
         assert!(widest_z > cell[1] * 0.3, "z jitter collapsed to nothing");
     }
@@ -1627,7 +1635,13 @@ mod tests {
             length: 64.0,
         };
         let polygon = [[-8.0, -8.0], [8.0, -8.0], [8.0, 8.0], [-8.0, 8.0]];
-        let (positions, _) = suitable_cells(terrain, &polygon, [-8.0, 8.0, -8.0, 8.0], f64::INFINITY, &[]);
+        let (positions, _) = suitable_cells(
+            terrain,
+            &polygon,
+            [-8.0, 8.0, -8.0, 8.0],
+            f64::INFINITY,
+            &[],
+        );
         assert!(!positions.is_empty());
         for position in &positions {
             assert!(
@@ -1656,8 +1670,13 @@ mod tests {
             length: 64.0,
         };
         let polygon = [[-32.0, -32.0], [32.0, -32.0], [32.0, 32.0], [-32.0, 32.0]];
-        let (positions, cumulative) =
-            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
+        let (positions, cumulative) = suitable_cells(
+            terrain,
+            &polygon,
+            [-32.0, 32.0, -32.0, 32.0],
+            f64::INFINITY,
+            &[],
+        );
         let mut rng = StableRng::from_parts(3, &["forest", "canopy"]);
         let mut rich = 0;
         let mut poor = 0;
@@ -1683,7 +1702,13 @@ mod tests {
             length: 64.0,
         };
         let polygon = [[-32.0, -32.0], [32.0, -32.0], [32.0, 32.0], [-32.0, 32.0]];
-        let (positions, _) = suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
+        let (positions, _) = suitable_cells(
+            terrain,
+            &polygon,
+            [-32.0, 32.0, -32.0, 32.0],
+            f64::INFINITY,
+            &[],
+        );
         assert!(
             positions.is_empty(),
             "an all-zero field must yield no candidates, so compile_foliage errors"
@@ -1714,8 +1739,13 @@ mod tests {
             filled: false,
         };
 
-        let (unfiltered, _) =
-            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
+        let (unfiltered, _) = suitable_cells(
+            terrain,
+            &polygon,
+            [-32.0, 32.0, -32.0, 32.0],
+            f64::INFINITY,
+            &[],
+        );
         let (admissible, _) = suitable_cells(
             terrain,
             &polygon,
@@ -1749,8 +1779,11 @@ mod tests {
         for row in 0..resolution {
             for column in 0..resolution {
                 // ~45 degrees on the east half, flat on the west.
-                heights[row * resolution + column] =
-                    if column > 32 { (column as f32 - 32.0) * 1.0 } else { 0.0 };
+                heights[row * resolution + column] = if column > 32 {
+                    (column as f32 - 32.0) * 1.0
+                } else {
+                    0.0
+                };
             }
         }
         let suitability = vec![255_u8; resolution * resolution];
@@ -1762,10 +1795,14 @@ mod tests {
             length: 64.0,
         };
         let polygon = [[-32.0, -32.0], [32.0, -32.0], [32.0, 32.0], [-32.0, 32.0]];
-        let (all, _) =
-            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], f64::INFINITY, &[]);
-        let (gentle, _) =
-            suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], 20.0, &[]);
+        let (all, _) = suitable_cells(
+            terrain,
+            &polygon,
+            [-32.0, 32.0, -32.0, 32.0],
+            f64::INFINITY,
+            &[],
+        );
+        let (gentle, _) = suitable_cells(terrain, &polygon, [-32.0, 32.0, -32.0, 32.0], 20.0, &[]);
         assert!(gentle.len() < all.len(), "the slope limit removed nothing");
         assert!(!gentle.is_empty(), "the flat half must survive");
         for position in &gentle {
@@ -1801,8 +1838,13 @@ mod tests {
             f64::INFINITY,
             std::slice::from_ref(&blanket),
         );
-        let (suitable, _) =
-            suitable_cells(terrain, &polygon, [-8.0, 8.0, -8.0, 8.0], f64::INFINITY, &[]);
+        let (suitable, _) = suitable_cells(
+            terrain,
+            &polygon,
+            [-8.0, 8.0, -8.0, 8.0],
+            f64::INFINITY,
+            &[],
+        );
         assert!(occupied.is_empty(), "everything here is occupied");
         assert!(
             !suitable.is_empty(),

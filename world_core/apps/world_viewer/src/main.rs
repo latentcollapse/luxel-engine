@@ -202,7 +202,9 @@ impl ViewerConfig {
                     surround_path = arguments.next().map(PathBuf::from);
                 }
                 "--surround-offset" => {
-                    let raw = arguments.next().context("--surround-offset requires x,y,z")?;
+                    let raw = arguments
+                        .next()
+                        .context("--surround-offset requires x,y,z")?;
                     let parts = raw
                         .split(',')
                         .map(|value| value.trim().parse::<f32>())
@@ -588,7 +590,10 @@ impl WorldPicker {
                         .get("zone_id")
                         .and_then(Value::as_str)
                         .unwrap_or_else(|| {
-                            batch.file_name().and_then(|name| name.to_str()).unwrap_or("?")
+                            batch
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("?")
                         })
                         .to_owned(),
                     preview,
@@ -634,7 +639,11 @@ impl WorldPicker {
                 "  {} {}{}{}",
                 if index == self.selected { ">" } else { " " },
                 entry.zone_id,
-                if entry.batch == current { "  (loaded)" } else { "" },
+                if entry.batch == current {
+                    "  (loaded)"
+                } else {
+                    ""
+                },
                 match &entry.missing {
                     Some(artifact) => format!("  -- incomplete, no {artifact}"),
                     None => String::new(),
@@ -866,8 +875,7 @@ fn generate_mipmaps(image: &mut Image) -> bool {
                         let source_y = (y * 2 + offset_y).min(height - 1);
                         for offset_x in 0..2u32 {
                             let source_x = (x * 2 + offset_x).min(width - 1);
-                            let index =
-                                ((source_y * width + source_x) as usize) * 4 + channel;
+                            let index = ((source_y * width + source_x) as usize) * 4 + channel;
                             let value = f32::from(current[index]) / 255.0;
                             // Alpha is a coverage weight, never gamma encoded.
                             total += if encoded_srgb && channel < 3 {
@@ -1294,7 +1302,7 @@ fn apply_camera_frame(
         return;
     }
     frame.pending = false;
-    if let Some(transform) = frame.transform.clone() {
+    if let Some(transform) = frame.transform {
         **camera = transform;
     }
 }
@@ -1334,12 +1342,15 @@ fn required_files(batch: &Path, mode: WorldMode) -> Vec<PathBuf> {
 /// `heightfield_f32le.bin`. Listing it without saying so makes the picker offer
 /// a world that cannot load and only explains itself after you pick it.
 fn first_missing_artifact(batch: &Path, mode: WorldMode) -> Option<String> {
-    required_files(batch, mode).into_iter().find(|path| !path.is_file()).map(|path| {
-        path.strip_prefix(batch)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/")
-    })
+    required_files(batch, mode)
+        .into_iter()
+        .find(|path| !path.is_file())
+        .map(|path| {
+            path.strip_prefix(batch)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
 }
 
 fn source_files(config: &ViewerConfig) -> Vec<PathBuf> {
@@ -1695,11 +1706,7 @@ fn monitor_compiled_world(
                     // Named apart from CertifiedTerrain on purpose: anything
                     // walking this scene graph must be able to tell scenery
                     // from certified world.
-                    parent.spawn((
-                        Name::new("Apron"),
-                        Mesh3d(mesh),
-                        MeshMaterial3d(material),
-                    ));
+                    parent.spawn((Name::new("Apron"), Mesh3d(mesh), MeshMaterial3d(material)));
                 }
                 for (id, corridor) in corridor_meshes {
                     parent.spawn((
@@ -1715,8 +1722,7 @@ fn monitor_compiled_world(
                 for placement in world.placements {
                     let scene = asset_server
                         .load(GltfAssetLabel::Scene(0).from_asset(placement.asset_path));
-                    let mut entity =
-                        parent.spawn((WorldAssetRoot(scene), placement.transform));
+                    let mut entity = parent.spawn((WorldAssetRoot(scene), placement.transform));
                     if placement.role == "foliage" {
                         entity.insert(FoliageInstance { id: placement.id });
                     }
@@ -1774,17 +1780,22 @@ fn load_crop_library(config: &ViewerConfig, signature: u64) -> Result<CropLibrar
             .context("a crop has no name")?
             .to_owned();
         crops.push(CropEntry {
-            asset_path: config.asset_relative(&config.artifact(
-                record
-                    .get("asset")
-                    .and_then(Value::as_str)
-                    .context("a crop has no asset")?,
-            ))?,
+            asset_path: config.asset_relative(
+                &config.artifact(
+                    record
+                        .get("asset")
+                        .and_then(Value::as_str)
+                        .context("a crop has no asset")?,
+                ),
+            )?,
             footprint_m: record
                 .get("footprint_m")
                 .and_then(Value::as_f64)
                 .unwrap_or(100.0) as f32,
-            relief_m: record.get("relief_m").and_then(Value::as_f64).unwrap_or(0.0) as f32,
+            relief_m: record
+                .get("relief_m")
+                .and_then(Value::as_f64)
+                .unwrap_or(0.0) as f32,
             triangles: record.get("triangles").and_then(Value::as_u64).unwrap_or(0),
             name,
         });
@@ -2172,9 +2183,8 @@ fn load_compiled_world(config: &ViewerConfig, signature: u64) -> Result<Compiled
                     "/terrain_materials/{layer}/albedo_mean_linear_luminance"
                 ))
                 .and_then(Value::as_f64)
-                .with_context(|| {
-                    format!("terrain material {layer} has no mean albedo luminance")
-                })? as f32,
+                .with_context(|| format!("terrain material {layer} has no mean albedo luminance"))?
+                as f32,
         );
     }
     let material_textures: [String; 4] = material_textures
@@ -2195,8 +2205,7 @@ fn load_compiled_world(config: &ViewerConfig, signature: u64) -> Result<Compiled
         manifest
             .pointer("/terrain_materials/wetland/albedo_mean_linear_luminance")
             .and_then(Value::as_f64)
-            .context("terrain material wetland has no mean albedo luminance")?
-            as f32,
+            .context("terrain material wetland has no mean albedo luminance")? as f32,
         0.0,
         0.0,
     );
@@ -2225,53 +2234,47 @@ fn load_compiled_world(config: &ViewerConfig, signature: u64) -> Result<Compiled
         None
     } else {
         match fs::read(config.artifact("boundary_plan.json")) {
-        Ok(bytes) => {
-            let plan: Value =
-                serde_json::from_slice(&bytes).context("cannot parse boundary plan")?;
-            let extent = plan
-                .pointer("/apron/extent_m")
-                .and_then(Value::as_f64)
-                .context("boundary plan declares no apron extent")? as f32;
-            let depth = plan
-                .pointer("/apron/falloff_depth_m")
-                .and_then(Value::as_f64)
-                .context("boundary plan declares no apron falloff depth")?
-                as f32;
-            let rock = manifest
-                .pointer("/style_palette_srgb/rock")
-                .and_then(Value::as_array)
-                .map(|channels| {
-                    let component = |index: usize| {
-                        channels
-                            .get(index)
-                            .and_then(Value::as_f64)
-                            .unwrap_or(0.2) as f32
-                    };
-                    // Deliberately darker than the palette: the apron should
-                    // read as distance, and should never be mistaken in a
-                    // capture for ground a player could reach.
-                    Color::srgb(
-                        component(0) * 0.7,
-                        component(1) * 0.7,
-                        component(2) * 0.75,
-                    )
+            Ok(bytes) => {
+                let plan: Value =
+                    serde_json::from_slice(&bytes).context("cannot parse boundary plan")?;
+                let extent = plan
+                    .pointer("/apron/extent_m")
+                    .and_then(Value::as_f64)
+                    .context("boundary plan declares no apron extent")?
+                    as f32;
+                let depth = plan
+                    .pointer("/apron/falloff_depth_m")
+                    .and_then(Value::as_f64)
+                    .context("boundary plan declares no apron falloff depth")?
+                    as f32;
+                let rock = manifest
+                    .pointer("/style_palette_srgb/rock")
+                    .and_then(Value::as_array)
+                    .map(|channels| {
+                        let component = |index: usize| {
+                            channels.get(index).and_then(Value::as_f64).unwrap_or(0.2) as f32
+                        };
+                        // Deliberately darker than the palette: the apron should
+                        // read as distance, and should never be mistaken in a
+                        // capture for ground a player could reach.
+                        Color::srgb(component(0) * 0.7, component(1) * 0.7, component(2) * 0.75)
+                    })
+                    .unwrap_or(Color::srgb(0.11, 0.12, 0.14));
+                Some(Apron {
+                    mesh: build_apron_mesh(&heights, resolution, width, length, extent, depth)?,
+                    colour: rock,
                 })
-                .unwrap_or(Color::srgb(0.11, 0.12, 0.14));
-            Some(Apron {
-                mesh: build_apron_mesh(&heights, resolution, width, length, extent, depth)?,
-                colour: rock,
-            })
-        }
-        Err(_) => {
-            // An older batch predating roadmap 1.2. Say so rather than
-            // silently rendering the cliff that this exists to remove.
-            eprintln!(
-                "boundary_plan.json is absent: rendering without an apron, so the \
+            }
+            Err(_) => {
+                // An older batch predating roadmap 1.2. Say so rather than
+                // silently rendering the cliff that this exists to remove.
+                eprintln!(
+                    "boundary_plan.json is absent: rendering without an apron, so the \
                  world edge will drop into void. Rebuild the batch to emit it."
-            );
-            None
+                );
+                None
+            }
         }
-       }
     };
 
     // `--surround` wins, then the batch's own declaration. A world that is
@@ -2301,9 +2304,11 @@ fn load_compiled_world(config: &ViewerConfig, signature: u64) -> Result<Compiled
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("terrain material repeat contract is incomplete"))?,
         ),
-        material_mean_luma: Vec4::from_array(material_mean_luma.try_into().map_err(|_| {
-            anyhow::anyhow!("terrain material luminance contract is incomplete")
-        })?),
+        material_mean_luma: Vec4::from_array(
+            material_mean_luma.try_into().map_err(|_| {
+                anyhow::anyhow!("terrain material luminance contract is incomplete")
+            })?,
+        ),
         terrain_size_m: Vec2::new(width, length),
         placements,
         corridors,
@@ -2441,10 +2446,8 @@ fn inspection_camera(
         // points into the map, which is why the border cliff was found by
         // flying the free camera and never by a capture: the automated
         // evidence had no view of the defect it was supposed to catch.
-        "border" => Transform::from_xyz(0.0, eye_y, length * 0.20).looking_at(
-            Vec3::new(0.0, height_min, length * 0.95),
-            Vec3::Y,
-        ),
+        "border" => Transform::from_xyz(0.0, eye_y, length * 0.20)
+            .looking_at(Vec3::new(0.0, height_min, length * 0.95), Vec3::Y),
         "player" => Transform::from_xyz(0.0, eye_y, length * 0.34).looking_at(
             Vec3::new(0.0, height_min + relief * 0.18, -length * 0.28),
             Vec3::Y,
@@ -2486,7 +2489,7 @@ fn decode_heightfield(bytes: &[u8], resolution: usize) -> Result<Vec<f32>> {
 }
 
 fn build_terrain_mesh(heights: &[f32], resolution: usize, width: f32, length: f32) -> Result<Mesh> {
-    if resolution < 2 || (resolution - 1) % TERRAIN_STRIDE != 0 {
+    if resolution < 2 || !(resolution - 1).is_multiple_of(TERRAIN_STRIDE) {
         bail!("resolution {resolution} is incompatible with stride {TERRAIN_STRIDE}");
     }
     let grid = (resolution - 1) / TERRAIN_STRIDE + 1;
@@ -2582,7 +2585,7 @@ fn build_apron_mesh(
     if !extent.is_finite() || extent <= 0.0 {
         bail!("apron extent must be positive, got {extent}");
     }
-    if (resolution - 1) % TERRAIN_STRIDE != 0 {
+    if !(resolution - 1).is_multiple_of(TERRAIN_STRIDE) {
         bail!("resolution {resolution} is incompatible with stride {TERRAIN_STRIDE}");
     }
     let inner = (resolution - 1) / TERRAIN_STRIDE + 1;
@@ -2597,12 +2600,12 @@ fn build_apron_mesh(
     };
 
     let height_at = |x: f32, z: f32| -> f32 {
-        let outside = (x.abs() - half_width)
-            .max(z.abs() - half_length)
-            .max(0.0);
+        let outside = (x.abs() - half_width).max(z.abs() - half_length).max(0.0);
         let amount = (outside / extent).clamp(0.0, 1.0);
-        sampler.sample(x.clamp(-half_width, half_width), z.clamp(-half_length, half_length))
-            - depth * amount
+        sampler.sample(
+            x.clamp(-half_width, half_width),
+            z.clamp(-half_length, half_length),
+        ) - depth * amount
     };
 
     let mut positions = Vec::with_capacity(xs.len() * zs.len());
@@ -2954,10 +2957,10 @@ fn update_world_picker_text(
             Display::None
         };
     }
-    if picker.open {
-        if let Ok(mut text) = text.single_mut() {
-            text.0 = picker.render(&config.batch);
-        }
+    if picker.open
+        && let Ok(mut text) = text.single_mut()
+    {
+        text.0 = picker.render(&config.batch);
     }
 }
 
@@ -3027,7 +3030,10 @@ mod tests {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .join("../../../../Game Projects/Codeweald/godot_renderer")
             });
-        let Ok(batch) = content_root.join("concept_batches/caledonia_v1").canonicalize() else {
+        let Ok(batch) = content_root
+            .join("concept_batches/caledonia_v1")
+            .canonicalize()
+        else {
             // Skip loudly rather than pass quietly: a suite that silently shrinks
             // when its fixtures move is the same failure mode as a gate that
             // cannot fail.
@@ -3050,8 +3056,8 @@ mod tests {
             // it keeps the test pinned to the seven-artifact path.
             mode: WorldMode::Certified,
         };
-        let error =
-            source_signature(&config).expect_err("an incomplete batch must not produce a stable signature");
+        let error = source_signature(&config)
+            .expect_err("an incomplete batch must not produce a stable signature");
         let message = format!("{error:#}");
         assert!(
             message.contains("placement_plan.json"),
@@ -3146,7 +3152,10 @@ mod tests {
             .filter(|position| position[0].abs() <= 4.0 + 1e-4 && position[2].abs() <= 4.0 + 1e-4)
             .map(|position| position[1])
             .fold(f32::INFINITY, f32::min);
-        assert!((edge_lowest - lowest - 4.0).abs() < 1e-3, "{edge_lowest} {lowest}");
+        assert!(
+            (edge_lowest - lowest - 4.0).abs() < 1e-3,
+            "{edge_lowest} {lowest}"
+        );
     }
 
     #[test]
@@ -3241,7 +3250,10 @@ mod tests {
             serde_json::json!({"resolution": 5, "zone_spec_sha256": "abc"}),
             5,
         );
-        assert!(matches!(WorldMode::detect(&directory), WorldMode::Certified));
+        assert!(matches!(
+            WorldMode::detect(&directory),
+            WorldMode::Certified
+        ));
 
         let empty = temporary_directory("empty");
         assert!(matches!(WorldMode::detect(&empty), WorldMode::Certified));
@@ -3290,7 +3302,10 @@ mod tests {
             panic!("a contradictory manifest must not load");
         };
         let error = error.to_string();
-        assert!(error.contains("both a preview and bound to a ZoneSpec"), "{error}");
+        assert!(
+            error.contains("both a preview and bound to a ZoneSpec"),
+            "{error}"
+        );
         fs::remove_dir_all(&directory).unwrap();
     }
 
@@ -3346,9 +3361,13 @@ mod tests {
         write_batch(&root, "gaea_preview", true);
         fs::create_dir_all(root.join("not_a_world")).unwrap();
 
-        let entries = WorldPicker::scan(&[root.clone()]);
+        let entries = WorldPicker::scan(std::slice::from_ref(&root));
         assert_eq!(2, entries.len());
-        assert!(entries.iter().any(|entry| entry.zone_id == "compiled_world"));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.zone_id == "compiled_world")
+        );
         assert!(entries.iter().any(|entry| entry.zone_id == "gaea_preview"));
         fs::remove_dir_all(&root).unwrap();
     }
@@ -3360,7 +3379,7 @@ mod tests {
         write_batch(&root, "a_preview", true);
         write_batch(&root, "z_compiled", false);
 
-        let entries = WorldPicker::scan(&[root.clone()]);
+        let entries = WorldPicker::scan(std::slice::from_ref(&root));
         assert!(!entries[0].preview, "certified world must come first");
         assert!(entries[1].preview);
         fs::remove_dir_all(&root).unwrap();
@@ -3381,7 +3400,7 @@ mod tests {
         write_batch(&root, "first", false);
         write_batch(&root, "second", true);
 
-        let entries = WorldPicker::scan(&[root.clone()]);
+        let entries = WorldPicker::scan(std::slice::from_ref(&root));
         let loaded = entries[1].batch.clone();
         let picker = WorldPicker {
             open: true,
@@ -3390,7 +3409,10 @@ mod tests {
         };
         let rendered = picker.render(&loaded);
         assert!(rendered.contains("-- Certified worlds --"), "{rendered}");
-        assert!(rendered.contains("-- Heightfield previews --"), "{rendered}");
+        assert!(
+            rendered.contains("-- Heightfield previews --"),
+            "{rendered}"
+        );
         assert!(rendered.contains("> first"), "{rendered}");
         assert!(rendered.contains("(loaded)"), "{rendered}");
         fs::remove_dir_all(&root).unwrap();
@@ -3405,7 +3427,7 @@ mod tests {
         let root = temporary_directory("picker_incomplete");
         write_batch(&root, "legacy", false);
 
-        let entries = WorldPicker::scan(&[root.clone()]);
+        let entries = WorldPicker::scan(std::slice::from_ref(&root));
         assert_eq!(1, entries.len());
         let missing = entries[0]
             .missing
@@ -3418,7 +3440,11 @@ mod tests {
             entries,
             selected: 0,
         };
-        assert!(picker.render(Path::new("/nowhere")).contains("incomplete, no "));
+        assert!(
+            picker
+                .render(Path::new("/nowhere"))
+                .contains("incomplete, no ")
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -3428,17 +3454,24 @@ mod tests {
         let batch = root.join("preview_alpine");
         preview_batch(&batch, preview_manifest(5), 5);
 
-        let entries = WorldPicker::scan(&[root.clone()]);
+        let entries = WorldPicker::scan(std::slice::from_ref(&root));
         assert_eq!(1, entries.len());
         assert!(entries[0].preview);
-        assert_eq!(None, entries[0].missing, "a preview needs only its two files");
+        assert_eq!(
+            None, entries[0].missing,
+            "a preview needs only its two files"
+        );
         fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
     fn an_empty_picker_says_so_instead_of_rendering_nothing() {
         let picker = WorldPicker::default();
-        assert!(picker.render(Path::new("/nowhere")).contains("nothing found"));
+        assert!(
+            picker
+                .render(Path::new("/nowhere"))
+                .contains("nothing found")
+        );
     }
 
     #[test]

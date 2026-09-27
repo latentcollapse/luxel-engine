@@ -1,0 +1,23 @@
+{
+  "schema_version": "wge.source-bundle/v1",
+  "request_id": "fixture-run-2026-09-27-01",
+  "source_bundle_id": "source-bundle:sha256:46a2eef8867d52498570c3de55044c336d589c28e0c8b9be29f37e2502a8f39d",
+  "sources": [
+    {
+      "source_id": "source:sha256:aba25c8bb187edb794b310b49579b62ee59038e599174f9a6328bea3c2170f95",
+      "kind": "concept_art",
+      "content_sha256": "sha256:86ce6e1d71c8281fb5272c5186e23de5fd64ed78d4ef5493750463bd484d2cb7",
+      "byte_length": 227,
+      "media_type": "image/svg+xml",
+      "provenance": {"origin":"user_supplied","origin_ref":"authoring:vertical-slice-concept","provider_id":null,"provider_version":null}
+    },
+    {
+      "source_id": "source:sha256:c2ad14413c6ad75d8667af1b4d5b508bfe784abf430375e90c423465a3d57b23",
+      "kind": "brief",
+      "content_sha256": "sha256:0f2f8d47080ddbf4ba37fd13e90100af293d508aaac18f49f3ceb1a8c98b120a",
+      "byte_length": 116,
+      "media_type": "text/plain",
+      "provenance": {"origin":"user_supplied","origin_ref":"authoring:vertical-slice-brief","provider_id":null,"provider_version":null}
+    }
+  ]
+}

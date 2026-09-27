@@ -616,7 +616,6 @@ pub fn validate_terrain_analysis_value(
 #[derive(Debug, Clone, Copy)]
 struct GradeSummary {
     maximum_grade: f64,
-    steep_edge_fraction: f64,
     steep_edge_world_fraction: f64,
 }
 
@@ -690,7 +689,6 @@ fn validate_grade_summary(
     }
     Ok(GradeSummary {
         maximum_grade,
-        steep_edge_fraction,
         steep_edge_world_fraction,
     })
 }

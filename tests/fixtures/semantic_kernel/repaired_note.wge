@@ -1,0 +1,5 @@
+from wge.world import lane, place
+from wge.geometry import rect
+# same world
+central_lane = lane(id="central", footprint=rect(x0=0, y0=40, x1=100, y1=60))
+blocked_keep = place(id="keep", footprint=rect(x0=40, y0=0, x1=70, y1=20))

@@ -1,0 +1,30 @@
+{
+  "schema_version": "wge.source-bundle-draft/v1",
+  "request_id": "fixture-run-2026-09-27-01",
+  "sources": [
+    {
+      "source_ref": "brief",
+      "kind": "brief",
+      "content_sha256": "sha256:0f2f8d47080ddbf4ba37fd13e90100af293d508aaac18f49f3ceb1a8c98b120a",
+      "media_type": "text/plain",
+      "provenance": {
+        "origin": "user_supplied",
+        "origin_ref": "authoring:vertical-slice-brief",
+        "provider_id": null,
+        "provider_version": null
+      }
+    },
+    {
+      "source_ref": "concept",
+      "kind": "concept_art",
+      "content_sha256": "sha256:86ce6e1d71c8281fb5272c5186e23de5fd64ed78d4ef5493750463bd484d2cb7",
+      "media_type": "image/svg+xml",
+      "provenance": {
+        "origin": "user_supplied",
+        "origin_ref": "authoring:vertical-slice-concept",
+        "provider_id": null,
+        "provider_version": null
+      }
+    }
+  ]
+}

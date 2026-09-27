@@ -1,0 +1,20 @@
+[package]
+name = "wge-certification-authority"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+authors = ["Codeweald contributors"]
+rust-version = "1.95"
+description = "Independent Rust receipt registry and engine-neutral WGE certification authority"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+wge-gameplay-contract = { path = "../gameplay_contract" }
+wge-intake-repair-contract = { path = "../intake_repair_contract" }
+wge-reference-runtime = { path = "../reference_runtime" }
+
+[[bin]]
+name = "wge-certification-authority"
+path = "src/main.rs"

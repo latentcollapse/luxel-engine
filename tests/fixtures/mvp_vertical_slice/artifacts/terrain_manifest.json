@@ -1,0 +1,10 @@
+{
+  "schema_version": "wge.terrain-manifest/v1",
+  "world_id": "gate-run",
+  "dimensions_m": [64.0, 64.0],
+  "heightfield": "flat-fixture",
+  "heightfield_sha256": "sha256:fixture-terrain-heightfield",
+  "resolution": 33,
+  "world_bounds_m": {"width": 64.0, "length": 64.0},
+  "spawn_surface_y_m": 0.0
+}

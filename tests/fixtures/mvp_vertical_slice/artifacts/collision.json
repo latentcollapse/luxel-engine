@@ -1,0 +1,9 @@
+{
+  "schema_version": "wge.collision-plan/v1",
+  "world_id": "gate-run",
+  "terrain_collision": {"kind": "heightfield", "source": "terrain"},
+  "colliders": [
+    {"id": "warden", "shape": "capsule", "radius_m": 0.45, "height_m": 1.8, "blocking": true},
+    {"id": "objective", "shape": "box", "size_m": [1.2, 2.0, 1.2], "blocking": false}
+  ]
+}

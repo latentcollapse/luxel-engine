@@ -1,0 +1,51 @@
+{
+  "schema_version": "wge.provider-interpretation/v1",
+  "source_bundle_id": "source-bundle:sha256:46a2eef8867d52498570c3de55044c336d589c28e0c8b9be29f37e2502a8f39d",
+  "claims": [
+    {
+      "claim_ref": "marker",
+      "epistemic_kind": "observation",
+      "domain": "visual",
+      "statement": "A gold circular marker appears in the right side of the concept image.",
+      "confidence": 0.96,
+      "evidence": [{"source_id":"source:sha256:aba25c8bb187edb794b310b49579b62ee59038e599174f9a6328bea3c2170f95","region":{"kind":"image_rect","x_min":0.66,"y_min":0.4,"x_max":0.86,"y_max":0.6}}]
+    },
+    {
+      "claim_ref": "objective",
+      "epistemic_kind": "observation",
+      "domain": "gameplay",
+      "statement": "The brief names the eastern relay as the objective.",
+      "confidence": 1.0,
+      "evidence": [{"source_id":"source:sha256:c2ad14413c6ad75d8667af1b4d5b508bfe784abf430375e90c423465a3d57b23","region":{"kind":"text_span","start_byte":32,"end_byte":45}}]
+    },
+    {
+      "claim_ref": "spawn_requirement",
+      "epistemic_kind": "observation",
+      "domain": "constraint",
+      "statement": "The brief requires one safe spawn and a readable route.",
+      "confidence": 1.0,
+      "evidence": [{"source_id":"source:sha256:c2ad14413c6ad75d8667af1b4d5b508bfe784abf430375e90c423465a3d57b23","region":{"kind":"text_span","start_byte":73,"end_byte":114}}]
+    },
+    {
+      "claim_ref": "marker_intent",
+      "epistemic_kind": "inference",
+      "domain": "interaction",
+      "statement": "The gold marker may denote the relay interaction point.",
+      "confidence": 0.82,
+      "evidence": [
+        {"source_id":"source:sha256:aba25c8bb187edb794b310b49579b62ee59038e599174f9a6328bea3c2170f95","region":{"kind":"image_rect","x_min":0.66,"y_min":0.4,"x_max":0.86,"y_max":0.6}},
+        {"source_id":"source:sha256:c2ad14413c6ad75d8667af1b4d5b508bfe784abf430375e90c423465a3d57b23","region":{"kind":"text_span","start_byte":40,"end_byte":45}}
+      ]
+    }
+  ],
+  "conflicts": [],
+  "assumptions": [
+    {
+      "assumption_ref": "spawn_side",
+      "statement": "Place the safe spawn west of the objective route.",
+      "rationale": "The brief requires a safe spawn but does not specify its side.",
+      "confidence": 0.58,
+      "related_claim_refs": ["spawn_requirement", "objective"]
+    }
+  ]
+}

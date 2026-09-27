@@ -17,3 +17,14 @@ missing or unimportable source remains in the import report rather than being
 replaced with a primitive. This adapter has source-level test coverage through
 the zone build, but must still be exercised in an installed Unity Editor before
 it can be called runtime-validated.
+
+## WGE MVP handoff
+
+The project-ledger vertical slice emits `wge.unity-mvp-import/v1` beside a
+certified `project_snapshot.json`. In Unity use **Tools > Codeweald > WGE MVP >
+Import Certified Snapshot**. The importer verifies the declared SHA-256 for
+every source relative to the handoff, rejects path escapes and duplicate
+identities, and writes `wge_mvp_import_report.json`. Import success is not a
+runtime receipt: the playthrough gate remains pending until the target game
+actually runs and records its deterministic outcome through the runtime
+receipt component.

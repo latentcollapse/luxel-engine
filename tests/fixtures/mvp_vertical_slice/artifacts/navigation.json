@@ -1,0 +1,15 @@
+{
+  "schema_version": "wge.navigation-plan/v1",
+  "world_id": "gate-run",
+  "agent_radius_m": 0.45,
+  "max_climb_m": 0.35,
+  "start_node": "spawn",
+  "objective_node": "relay",
+  "route": [
+    {"node": "spawn", "position_xz_m": [-24.0, 0.0], "neighbors": ["bridge"]},
+    {"node": "bridge", "position_xz_m": [-8.0, 0.0], "neighbors": ["spawn", "arena"]},
+    {"node": "arena", "position_xz_m": [8.0, 0.0], "neighbors": ["bridge", "relay"]},
+    {"node": "relay", "position_xz_m": [24.0, 0.0], "neighbors": ["arena"]}
+  ],
+  "connected_components": 1
+}

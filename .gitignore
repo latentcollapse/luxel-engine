@@ -4,8 +4,9 @@
 # compiles. Those belong to whichever game is using it (Codeweald today), which
 # is why nothing asset-shaped is expected in this tree at all.
 
-# Rust build output (12 GB)
-world_core/target/
+# Rust build output (workspace and per-crate invocations)
+**/target/
+world_core/crates/*/Cargo.lock
 
 # Python
 __pycache__/
@@ -26,3 +27,6 @@ terrain_lab/Manifest.toml
 
 .DS_Store
 *.log
+
+# Generated repository graph; source and reports remain in the tree.
+graphify-out/

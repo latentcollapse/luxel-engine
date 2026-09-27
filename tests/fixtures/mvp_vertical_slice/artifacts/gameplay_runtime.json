@@ -1,0 +1,9 @@
+{
+  "schema_version": "wge.gameplay-runtime/v1",
+  "runtime_id": "gate-run-gameplay",
+  "objective_id": "obelisk",
+  "start_entity_id": "player",
+  "ability_id": "arc_bolt",
+  "input_trace_id": "gate-run-input",
+  "determinism": "fixed_tick_60hz"
+}

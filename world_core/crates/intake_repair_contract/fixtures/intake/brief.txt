@@ -1,0 +1,1 @@
+Build a compact arena where the eastern relay is the objective. Keep the route readable and provide one safe spawn.

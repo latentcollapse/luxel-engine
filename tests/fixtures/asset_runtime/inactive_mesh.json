@@ -1,0 +1,11 @@
+{
+  "schema_version": "wge.asset-runtime-test-fixture/v1",
+  "copy_request_from": "good_character",
+  "source": {
+    "animation_clips": ["idle", "locomotion", "attack"],
+    "inject_out_of_range_joint": false,
+    "inactive_skinned_mesh": true
+  },
+  "expected_status": "rejected",
+  "expected_findings": ["inactive_skinned_mesh"]
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": "wge.input-trace/v1",
+  "trace_id": "gate-run-input",
+  "ticks": [
+    {"tick": 0, "input": "move_east"},
+    {"tick": 60, "input": "move_east"},
+    {"tick": 120, "input": "ability_arc_bolt"},
+    {"tick": 180, "input": "move_east"},
+    {"tick": 240, "input": "claim_objective"}
+  ]
+}

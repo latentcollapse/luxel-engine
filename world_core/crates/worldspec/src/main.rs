@@ -5,6 +5,16 @@ use codeweald_worldspec::{
     validate_render_plan_value, validate_terrain_analysis_value,
 };
 
+type RenderPlanInputs = (
+    serde_json::Value,
+    serde_json::Value,
+    serde_json::Value,
+    serde_json::Value,
+    Vec<u8>,
+    Vec<u8>,
+    serde_json::Value,
+);
+
 fn main() -> ExitCode {
     let mut arguments = env::args().skip(1);
     let command = arguments.next().unwrap_or_default();
@@ -110,18 +120,7 @@ fn render_plan(command: &str, paths: &[String]) -> ExitCode {
     // arm and a new wildcard row for every input added -- and a mis-typed
     // wildcard row binds the wrong error while still compiling. `?` cannot
     // mis-wire an argument.
-    let load = || -> Result<
-        (
-            serde_json::Value,
-            serde_json::Value,
-            serde_json::Value,
-            serde_json::Value,
-            Vec<u8>,
-            Vec<u8>,
-            serde_json::Value,
-        ),
-        String,
-    > {
+    let load = || -> Result<RenderPlanInputs, String> {
         Ok((
             read_json(&paths[0])?,
             read_json(&paths[1])?,

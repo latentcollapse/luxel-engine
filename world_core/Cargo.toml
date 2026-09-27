@@ -1,5 +1,15 @@
 [workspace]
-members = ["apps/world_viewer", "crates/worldspec"]
+members = [
+    "apps/world_viewer",
+    "crates/worldspec",
+    "crates/semantic_kernel",
+    "crates/asset_contract",
+    "crates/gameplay_contract",
+    "crates/project_ledger",
+    "crates/reference_runtime",
+    "crates/intake_repair_contract",
+    "crates/certification_authority",
+]
 resolver = "3"
 
 [workspace.package]

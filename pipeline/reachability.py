@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -355,16 +356,20 @@ def module_reachability(
         own_path = pipeline_dir / f"{module}.py"
         source = texts.get(own_path, "")
         is_entry_point = "__main__" in source
+        module_name = re.escape(module)
+        import_pattern = re.compile(
+            rf"\bimport\s+(?:[A-Za-z_]\w*\.)*{module_name}(?:\b|$)"
+        )
+        from_pattern = re.compile(
+            rf"\bfrom\s+(?:[A-Za-z_]\w*\.)*{module_name}\s+import\b"
+        )
 
         imported_by: list[str] = []
         referenced_by: list[str] = []
         for path, text in texts.items():
             if path == own_path:
                 continue
-            if (
-                f"import {module}" in text
-                or f"from {module} import" in text
-            ):
+            if import_pattern.search(text) or from_pattern.search(text):
                 imported_by.append(path.name)
             elif f"{module}.py" in text:
                 referenced_by.append(path.name)
