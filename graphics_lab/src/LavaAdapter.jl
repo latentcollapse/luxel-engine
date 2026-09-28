@@ -46,14 +46,28 @@ struct OverlayResources
     vertex_count::Int
 end
 
-struct MeshResources
-    packet_sha256::String
+struct MeshBatchResources
     positions::Lava.LavaArray{Vec4f,1}
     normals::Lava.LavaArray{Vec4f,1}
+    translations::Lava.LavaArray{Vec4f,1}
+    rotations::Lava.LavaArray{Vec4f,1}
+    scales::Lava.LavaArray{Vec4f,1}
     colors::Lava.LavaArray{Vec4f,1}
     material_parameters::Lava.LavaArray{Vec4f,1}
-    world_positions::Lava.LavaArray{Vec4f,1}
     vertex_count::Int
+    instance_count::Int
+end
+
+struct MeshResources
+    packet_sha256::String
+    batches::Vector{MeshBatchResources}
+    instance_count::Int
+    visible_instance_count::Int
+    culled_instance_count::Int
+    vertex_count::Int
+end
+
+struct MeshVisibility
     instance_count::Int
     visible_instance_count::Int
     culled_instance_count::Int
@@ -457,9 +471,13 @@ end
 function _mesh_vertex(
     positions::Lava.LavaDeviceArray{Vec4f,1},
     normals::Lava.LavaDeviceArray{Vec4f,1},
+    translations::Lava.LavaDeviceArray{Vec4f,1},
+    rotations::Lava.LavaDeviceArray{Vec4f,1},
+    scales::Lava.LavaDeviceArray{Vec4f,1},
     colors::Lava.LavaDeviceArray{Vec4f,1},
     material_parameters::Lava.LavaDeviceArray{Vec4f,1},
-    world_positions::Lava.LavaDeviceArray{Vec4f,1},
+    span_m::Float32,
+    aspect::Float32,
     light_direction::Vec4f,
     light_color::Vec4f,
     light_intensity::Float32,
@@ -471,12 +489,32 @@ function _mesh_vertex(
     texture_enabled::Float32,
 )
     vertex_id = Lava.vertex_index()
-    position = positions[vertex_id]
-    normal = normals[vertex_id]
-    base_color = colors[vertex_id]
-    material = material_parameters[vertex_id]
-    world_position = world_positions[vertex_id]
-    Lava.set_position!(position)
+    instance_id = Lava.instance_index()
+    local_position = positions[vertex_id]
+    local_normal = normals[vertex_id]
+    translation = translations[instance_id]
+    rotation = rotations[instance_id]
+    scale = scales[instance_id]
+    base_color = colors[instance_id]
+    material = material_parameters[instance_id]
+    scaled_position = Vec4f(
+        local_position[1] * scale[1],
+        local_position[2] * scale[2],
+        local_position[3] * scale[3],
+        0.0f0,
+    )
+    rotated_position = _rotate_vector(rotation, scaled_position)
+    world_position = Vec4f(
+        rotated_position[1] + translation[1],
+        rotated_position[2] + translation[2],
+        rotated_position[3] + translation[3],
+        1.0f0,
+    )
+    normal = _rotate_vector(rotation, local_normal)
+    ndc_x = world_position[1] / (span_m * aspect * 0.5f0)
+    ndc_y = -world_position[3] / (span_m * 0.5f0)
+    depth = 0.5f0 - world_position[2] * 0.001f0
+    Lava.set_position!(Vec4f(ndc_x, ndc_y, depth, 1.0f0))
     uv = Vec2f(
         clamp(world_position[1] * 0.02f0 + 0.5f0, 0.0f0, 1.0f0),
         clamp(0.5f0 - world_position[3] * 0.02f0, 0.0f0, 1.0f0),
@@ -1016,40 +1054,26 @@ function _material(packet::WGEGraphics.GraphicsScenePacket, material_id::String)
     throw(AdapterError("provenance", "mesh references an absent material"))
 end
 
-function _rotate_vector(rotation::NTuple{4,Float32}, vector::NTuple{3,Float32})
-    x, y, z, w = rotation
-    norm_squared = x * x + y * y + z * z + w * w
-    norm_squared > eps(Float32) || throw(AdapterError("malformed_packet", "instance rotation is degenerate"))
-    inverse_norm = inv(sqrt(norm_squared))
-    x *= inverse_norm
-    y *= inverse_norm
-    z *= inverse_norm
-    w *= inverse_norm
-    vx, vy, vz = vector
-    tx = 2.0f0 * (y * vz - z * vy)
-    ty = 2.0f0 * (z * vx - x * vz)
-    tz = 2.0f0 * (x * vy - y * vx)
-    return (
-        vx + w * tx + (y * tz - z * ty),
-        vy + w * ty + (z * tx - x * tz),
-        vz + w * tz + (x * ty - y * tx),
+function _rotate_vector(rotation::Vec4f, vector::Vec4f)::Vec4f
+    norm_squared =
+        rotation[1] * rotation[1] +
+            rotation[2] * rotation[2] +
+            rotation[3] * rotation[3] +
+            rotation[4] * rotation[4]
+    inverse_norm = inv(sqrt(max(norm_squared, 1.0f-8)))
+    x = rotation[1] * inverse_norm
+    y = rotation[2] * inverse_norm
+    z = rotation[3] * inverse_norm
+    w = rotation[4] * inverse_norm
+    tx = 2.0f0 * (y * vector[3] - z * vector[2])
+    ty = 2.0f0 * (z * vector[1] - x * vector[3])
+    tz = 2.0f0 * (x * vector[2] - y * vector[1])
+    return Vec4f(
+        vector[1] + w * tx + (y * tz - z * ty),
+        vector[2] + w * ty + (z * tx - x * tz),
+        vector[3] + w * tz + (x * ty - y * tx),
+        vector[4],
     )
-end
-
-function _transform_position(
-    transform::WGEGraphics.TransformPacket,
-    position::NTuple{3,Float32},
-)
-    scaled = ntuple(index -> position[index] * transform.scale_xyz[index], 3)
-    rotated = _rotate_vector(transform.rotation_xyzw, scaled)
-    return ntuple(index -> rotated[index] + transform.translation_xyz_m[index], 3)
-end
-
-function _transform_normal(
-    transform::WGEGraphics.TransformPacket,
-    normal::NTuple{3,Float32},
-)
-    return _rotate_vector(transform.rotation_xyzw, normal)
 end
 
 function _terrain_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)
@@ -1173,70 +1197,97 @@ function _instance_visible(
         -1.0f0 - margin_y <= center[2] <= 1.0f0 + margin_y
 end
 
-function _mesh_visibility(packet::WGEGraphics.GraphicsScenePacket)
+function _mesh_visibility(packet::WGEGraphics.GraphicsScenePacket)::MeshVisibility
     instance_count = length(packet.instances)
     visible_instance_count = count(
         instance -> _instance_visible(packet, instance),
         packet.instances,
     )
-    return (
-        instance_count=instance_count,
-        visible_instance_count=visible_instance_count,
-        culled_instance_count=instance_count - visible_instance_count,
+    return MeshVisibility(
+        instance_count,
+        visible_instance_count,
+        instance_count - visible_instance_count,
     )
 end
 
 function _mesh_resources!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
-    visibility::NamedTuple=_mesh_visibility(packet),
-)
+    visibility::MeshVisibility=_mesh_visibility(packet),
+)::Union{Nothing,MeshResources}
     current = state.mesh_resources
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
-    positions = Vec4f[]
-    normals = Vec4f[]
-    colors = Vec4f[]
-    material_parameters = Vec4f[]
-    world_positions = Vec4f[]
+    groups = Dict{Tuple{String,String},Vector{WGEGraphics.InstancePacket}}()
     for instance in packet.instances
         _instance_visible(packet, instance) || continue
-        mesh = findfirst(mesh -> mesh.mesh_id == instance.mesh_id, packet.meshes)
-        mesh === nothing && throw(AdapterError("provenance", "instance references an absent mesh"))
-        mesh_packet = packet.meshes[mesh]
-        material = _material(packet, instance.material_id)
+        key = (instance.mesh_id, instance.material_id)
+        instances = get!(groups, key) do
+            WGEGraphics.InstancePacket[]
+        end
+        push!(instances, instance)
+    end
+    isempty(groups) && return nothing
+
+    batches = MeshBatchResources[]
+    total_vertices = 0
+    for (mesh_id, material_id) in sort!(collect(keys(groups)))
+        mesh_index = findfirst(mesh -> mesh.mesh_id == mesh_id, packet.meshes)
+        mesh_index === nothing && throw(AdapterError("provenance", "instance references an absent mesh"))
+        mesh_packet = packet.meshes[mesh_index]
+        material = _material(packet, material_id)
+        positions = Vec4f[]
+        normals = Vec4f[]
         for index in mesh_packet.indices
             vertex = Int(index) + 1
-            world_position = _transform_position(instance.transform, mesh_packet.positions_m[vertex])
-            world_normal = _transform_normal(instance.transform, mesh_packet.normals[vertex])
-            push!(positions, _project_point(packet.camera, world_position))
-            push!(normals, Vec4f(world_normal..., 0.0f0))
-            push!(colors, Vec4f(material.base_color_rgba...))
-            push!(material_parameters, Vec4f(material.metallic, material.roughness, 0.0f0, 0.0f0))
-            push!(world_positions, Vec4f(world_position..., 1.0f0))
+            push!(positions, Vec4f(mesh_packet.positions_m[vertex]..., 0.0f0))
+            push!(normals, Vec4f(mesh_packet.normals[vertex]..., 0.0f0))
         end
+        batch_instances = groups[(mesh_id, material_id)]
+        translations = Vec4f[
+            Vec4f(instance.transform.translation_xyz_m..., 0.0f0) for instance in batch_instances
+        ]
+        rotations = Vec4f[Vec4f(instance.transform.rotation_xyzw...) for instance in batch_instances]
+        scales = Vec4f[Vec4f(instance.transform.scale_xyz..., 0.0f0) for instance in batch_instances]
+        colors = Vec4f[Vec4f(material.base_color_rgba...) for _ in batch_instances]
+        material_parameters = Vec4f[
+            Vec4f(material.metallic, material.roughness, 0.0f0, 0.0f0) for _ in batch_instances
+        ]
+        gpu_positions = Lava.LavaArray{Vec4f,1}(positions; bq=state.queue)
+        gpu_normals = Lava.LavaArray{Vec4f,1}(normals; bq=state.queue)
+        gpu_translations = Lava.LavaArray{Vec4f,1}(translations; bq=state.queue)
+        gpu_rotations = Lava.LavaArray{Vec4f,1}(rotations; bq=state.queue)
+        gpu_scales = Lava.LavaArray{Vec4f,1}(scales; bq=state.queue)
+        gpu_colors = Lava.LavaArray{Vec4f,1}(colors; bq=state.queue)
+        gpu_material_parameters = Lava.LavaArray{Vec4f,1}(material_parameters; bq=state.queue)
+        state.upload_bytes += UInt64(
+            sizeof(Vec4f) *
+                (length(positions) + length(normals) + length(translations) +
+                length(rotations) + length(scales) + length(colors) +
+                length(material_parameters)),
+        )
+        push!(
+            batches,
+            MeshBatchResources(
+                gpu_positions,
+                gpu_normals,
+                gpu_translations,
+                gpu_rotations,
+                gpu_scales,
+                gpu_colors,
+                gpu_material_parameters,
+                length(positions),
+                length(batch_instances),
+            ),
+        )
+        total_vertices += length(positions)
     end
-    isempty(positions) && return nothing
-    gpu_positions = Lava.LavaArray{Vec4f,1}(positions; bq=state.queue)
-    gpu_normals = Lava.LavaArray{Vec4f,1}(normals; bq=state.queue)
-    gpu_colors = Lava.LavaArray{Vec4f,1}(colors; bq=state.queue)
-    gpu_material_parameters = Lava.LavaArray{Vec4f,1}(material_parameters; bq=state.queue)
-    gpu_world_positions = Lava.LavaArray{Vec4f,1}(world_positions; bq=state.queue)
-    state.upload_bytes += UInt64(
-        sizeof(Vec4f) *
-            (length(positions) + length(normals) + length(colors) +
-            length(material_parameters) + length(world_positions)),
-    )
     created = MeshResources(
         packet.packet_sha256,
-        gpu_positions,
-        gpu_normals,
-        gpu_colors,
-        gpu_material_parameters,
-        gpu_world_positions,
-        length(positions),
+        batches,
         visibility.instance_count,
         visibility.visible_instance_count,
         visibility.culled_instance_count,
+        total_vertices,
     )
     state.mesh_resources = created
     return created
@@ -1371,36 +1422,43 @@ function render_scene(
         state.pipeline_compilations += 1
     end
     if mesh_resources !== nothing
-        draw!(
-            state.queue,
-            state.mesh_pipeline,
-            target,
-            mesh_resources.vertex_count;
-            args=(
-                mesh_resources.positions,
-                mesh_resources.normals,
-                mesh_resources.colors,
-                mesh_resources.material_parameters,
-                mesh_resources.world_positions,
-                lighting.direction,
-                lighting.color,
-                Float32(lighting.intensity),
-                ambient_color,
-                Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
-                packet.environment.fog_density,
-                camera_position,
-                packet.environment.exposure,
-                texture_enabled,
-            ),
-            descriptor_set_layout=texture_resources.bindings.layout,
-            descriptor_set=texture_resources.bindings.set,
-            clear_color=nothing,
-            depth_clear=nothing,
-        )
-        state.draw_calls += 1
-        if !state.mesh_compiled
-            state.mesh_compiled = true
-            state.pipeline_compilations += 1
+        for batch in mesh_resources.batches
+            draw!(
+                state.queue,
+                state.mesh_pipeline,
+                target,
+                batch.vertex_count;
+                args=(
+                    batch.positions,
+                    batch.normals,
+                    batch.translations,
+                    batch.rotations,
+                    batch.scales,
+                    batch.colors,
+                    batch.material_parameters,
+                    span,
+                    aspect,
+                    lighting.direction,
+                    lighting.color,
+                    Float32(lighting.intensity),
+                    ambient_color,
+                    Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
+                    packet.environment.fog_density,
+                    camera_position,
+                    packet.environment.exposure,
+                    texture_enabled,
+                ),
+                instances=batch.instance_count,
+                descriptor_set_layout=texture_resources.bindings.layout,
+                descriptor_set=texture_resources.bindings.set,
+                clear_color=nothing,
+                depth_clear=nothing,
+            )
+            state.draw_calls += 1
+            if !state.mesh_compiled
+                state.mesh_compiled = true
+                state.pipeline_compilations += 1
+            end
         end
     end
     if overlay_resources !== nothing

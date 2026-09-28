@@ -279,7 +279,12 @@ messages. Rust rejects flat/black captures, insufficient RGB diversity, and
 missing pixels for any semantic marker role present in the packet; producer
 measurements are compared against Rust’s independent recomputation. Frame
 telemetry now carries packet-checked instance visibility and terrain/mesh
-submission counts, exposing a measurable culling/performance surface.
+submission counts, exposing a measurable culling/performance surface. Visible
+mesh/material groups are submitted with Lava instancing: base triangle data is
+uploaded once per deterministic batch and transforms/material parameters are
+indexed per instance on the GPU. The integration fixture duplicates an
+obstacle and verifies that submitted mesh vertices remain at the base-mesh
+count.
 The inspected frame is intentionally only a coarse diagnostic slice: terrain
 shading derives finite-difference normals from the certified height field and
 uses slope/region tinting, overlays are line primitives, and the path does not

@@ -4,8 +4,8 @@ use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 use wge_native_graphics_contract::{
-    GraphicsReady, GraphicsWorkerSupervisor, lower_reference_world, validate_frame_receipt,
-    validate_ready, validate_scene_packet,
+    GraphicsReady, GraphicsWorkerSupervisor, lower_reference_world, seal_scene_packet,
+    validate_frame_receipt, validate_ready, validate_scene_packet,
 };
 use wge_reference_runtime::build_from_layout_path;
 
@@ -175,6 +175,22 @@ fn rust_packet_renders_through_the_pinned_lava_worker() {
     let build = build_from_layout_path(&input, &julia_executable(), &terrain_lab)
         .expect("reference world builds");
     let packet = lower_reference_world(&build.world).expect("world lowers to graphics packet");
+    let mut body = packet.body.clone();
+    let mut duplicate = body
+        .instances
+        .first()
+        .cloned()
+        .expect("reference scene has an instanced obstacle");
+    duplicate.instance_id = "obstacle-duplicate".into();
+    duplicate.transform.translation_xyz_m[0] += 2.0;
+    body.instances.push(duplicate);
+    let base_mesh_vertex_count = body
+        .meshes
+        .first()
+        .expect("reference scene has a mesh")
+        .indices
+        .len() as u64;
+    let packet = seal_scene_packet(body).expect("instanced packet seals");
     fs::write(
         &packet_path,
         serde_json::to_vec(&packet).expect("packet serializes"),
@@ -246,6 +262,10 @@ println(JSON3.write(response["frame"]))
     );
     assert!(frame["telemetry"]["terrain_vertex_count"].as_u64().unwrap() > 0);
     assert!(frame["telemetry"]["mesh_vertex_count"].as_u64().unwrap() > 0);
+    assert_eq!(
+        frame["telemetry"]["mesh_vertex_count"].as_u64().unwrap(),
+        base_mesh_vertex_count
+    );
 
     fs::remove_dir_all(output_dir).expect("test output directory is removed");
 }

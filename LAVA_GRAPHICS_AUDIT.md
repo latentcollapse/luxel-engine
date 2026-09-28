@@ -290,8 +290,11 @@ not packed into the draw argument buffer; the adapter therefore forwards
 scene constants through explicit varyings and keeps fragment argument tuples
 empty. Color-space transfer, mip generation/streaming, and multiple material
 texture roles remain quality-gap work. The adapter also emits deterministic
-instance visibility and submitted-vertex telemetry; Rust checks the counts
-against the packet rather than treating them as decorative stats.
+instance visibility and submitted-vertex telemetry; mesh/material groups use
+Lava's real instanced draw path, uploading base geometry once and indexing
+per-instance transforms and material parameters with `instance_index()`.
+Rust checks the counts against the packet rather than treating them as
+decorative stats.
 
 Rust now supervises the persistent worker, checks the exact audited Lava and
 adapter revisions, validates the typed ready payload, binds the frame to the
