@@ -50,6 +50,7 @@ struct MeshBatchResources
     material_id::String
     positions::Lava.LavaArray{Vec4f,1}
     normals::Lava.LavaArray{Vec4f,1}
+    uvs::Lava.LavaArray{Vec2f,1}
     translations::Lava.LavaArray{Vec4f,1}
     rotations::Lava.LavaArray{Vec4f,1}
     scales::Lava.LavaArray{Vec4f,1}
@@ -692,6 +693,7 @@ end
 function _mesh_vertex(
     positions::Lava.LavaDeviceArray{Vec4f,1},
     normals::Lava.LavaDeviceArray{Vec4f,1},
+    uvs::Lava.LavaDeviceArray{Vec2f,1},
     translations::Lava.LavaDeviceArray{Vec4f,1},
     rotations::Lava.LavaDeviceArray{Vec4f,1},
     scales::Lava.LavaDeviceArray{Vec4f,1},
@@ -755,10 +757,7 @@ function _mesh_vertex(
             camera_mode,
         ),
     )
-    uv = Vec2f(
-        clamp(world_position[1] * 0.02f0 + 0.5f0, 0.0f0, 1.0f0),
-        clamp(0.5f0 - world_position[3] * 0.02f0, 0.0f0, 1.0f0),
-    )
+    uv = uvs[vertex_id]
     Lava.gfx_output(0, base_color)
     Lava.gfx_output(1, normal)
     Lava.gfx_output(2, world_position)
@@ -2109,10 +2108,12 @@ function _mesh_resources!(
         material = _material(packet, material_id)
         positions = Vec4f[]
         normals = Vec4f[]
+        uvs = Vec2f[]
         for index in mesh_packet.indices
             vertex = Int(index) + 1
             push!(positions, Vec4f(mesh_packet.positions_m[vertex]..., 0.0f0))
             push!(normals, Vec4f(mesh_packet.normals[vertex]..., 0.0f0))
+            push!(uvs, Vec2f(mesh_packet.uv0[vertex]...))
         end
         batch_instances = groups[(mesh_id, material_id)]
         translations = Vec4f[
@@ -2129,6 +2130,7 @@ function _mesh_resources!(
         ]
         gpu_positions = Lava.LavaArray{Vec4f,1}(positions; bq=state.queue)
         gpu_normals = Lava.LavaArray{Vec4f,1}(normals; bq=state.queue)
+        gpu_uvs = Lava.LavaArray{Vec2f,1}(uvs; bq=state.queue)
         gpu_translations = Lava.LavaArray{Vec4f,1}(translations; bq=state.queue)
         gpu_rotations = Lava.LavaArray{Vec4f,1}(rotations; bq=state.queue)
         gpu_scales = Lava.LavaArray{Vec4f,1}(scales; bq=state.queue)
@@ -2141,12 +2143,14 @@ function _mesh_resources!(
                 length(rotations) + length(scales) + length(colors) +
                 length(material_parameters) + length(emissive_parameters)),
         )
+        state.upload_bytes += UInt64(sizeof(Vec2f) * length(uvs))
         push!(
             batches,
             MeshBatchResources(
                 material.material_id,
                 gpu_positions,
                 gpu_normals,
+                gpu_uvs,
                 gpu_translations,
                 gpu_rotations,
                 gpu_scales,
@@ -2472,6 +2476,7 @@ function _render_scene(
                 args=(
                     batch.positions,
                     batch.normals,
+                    batch.uvs,
                     batch.translations,
                     batch.rotations,
                     batch.scales,

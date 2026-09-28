@@ -63,7 +63,7 @@ set.
 
 ## Typed packet boundary
 
-The current Rust contract is `wge.graphics-scene-packet/v4`. It is a closed,
+The current Rust contract is `wge.graphics-scene-packet/v5`. It is a closed,
 `deny_unknown_fields` structure with a canonical body digest. Its shape is:
 
 ```text
@@ -85,6 +85,12 @@ and color-space meaning where applicable. The initial vertical slice may use
 inline numeric fields for small fixtures; the contract already has the same
 identity fields needed to move large buffers into candidate artifacts without
 changing semantic meaning.
+
+Mesh packets also carry an authored, finite `uv0` channel with one coordinate
+pair per position/normal vertex. Rust validates its cardinality and numeric
+domain before promotion; the Lava adapter uploads it as a typed `Vec2f`
+buffer. Texture lookup therefore depends on explicit asset geometry rather than
+an implicit world-position projection.
 
 The packet is a lowering of a validated `WorldArtifact`, never a replacement
 for it. Its validator must check:
@@ -150,7 +156,8 @@ The first native frame is intentionally bounded:
 
 1. certified terrain heightfield and semantic region colors/material layers;
 2. deterministic terrain mesh and normals;
-3. one canonical terrain material family with explicit color space;
+3. deterministic authored mesh UV0 channels and one canonical terrain material
+   family with explicit color space;
 4. deterministic opaque background foliage cross-mesh instances using the
    semantic-importance/culling path;
 5. certified route, player/opponent spawn, encounter, and objective markers;

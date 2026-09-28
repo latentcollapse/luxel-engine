@@ -31,12 +31,13 @@ visual bar.
 7. GPU scene scalability is unmeasured. There are no meshlets, GPU-driven
    indirect draws, residency/streaming policy, occlusion hierarchy, or dense
    scene stress benchmark.
-8. Cold startup is currently expensive: the measured native CLI run took
-   105.97 seconds and about 1.91 GiB maximum RSS. A persistent worker reached
-   a 20.285 ms second frame. The formal 30-frame supervisor benchmark reached
-   254.137 ms wall-time p95 and 60.030 ms adapter-frame p95. Its graphics-pass
-   GPU interval was 52 µs at p50, 410 µs at p95, and 862 µs at p99 for this
-   13-draw diagnostic scene; this is not yet a dense-scene frame budget.
+8. Cold startup is currently expensive: the current cold CLI sample took
+   111.67 seconds and reached 2,008,324 KiB maximum RSS, including the
+   Rust/Cargo boundary. The formal 30-frame supervisor benchmark took 27.299
+   seconds for its cold wall sample. The warm distribution reached 309.788 ms
+   wall-time p95 and 71.326 ms adapter-frame p95. Its graphics-pass GPU interval
+   was 722 µs at p50, 1,277 µs at p95, and 1,278 µs at p99 for this 13-draw
+   diagnostic scene; this is not yet a dense-scene frame budget.
 9. The native capture path renders a validated gameplay/world snapshot. The
    Rust reference runtime completes the 78-step traversal and wins gameplay,
    but Lava is not yet the renderer attached to a live native input/update

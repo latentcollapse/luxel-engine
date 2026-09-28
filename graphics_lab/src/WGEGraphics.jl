@@ -6,7 +6,7 @@ using SHA
 
 export GraphicsScenePacket, ProtocolError, validate_scene_packet, packet_summary
 
-const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v4"
+const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v5"
 const MAX_PACKET_ELEMENTS = 16 * 1024 * 1024
 const MAX_CAPTURE_DIMENSION = 8192
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
@@ -84,6 +84,7 @@ struct MeshPacket
     mesh_id::String
     positions_m::Vector{NTuple{3,Float32}}
     normals::Vector{NTuple{3,Float32}}
+    uv0::Vector{NTuple{2,Float32}}
     indices::Vector{UInt32}
     material_id::String
 end
@@ -600,7 +601,7 @@ function _parse_meshes(value::JSON3.Array, material_ids::Set{String})::Vector{Me
         object = _object(mesh, "mesh")
         _exact_keys(
             object,
-            Set(("mesh_id", "positions_m", "normals", "indices", "material_id")),
+            Set(("mesh_id", "positions_m", "normals", "uv0", "indices", "material_id")),
             "mesh",
         )
         id = _string(object["mesh_id"], "mesh.mesh_id")
@@ -615,8 +616,12 @@ function _parse_meshes(value::JSON3.Array, material_ids::Set{String})::Vector{Me
             _tuple(normal, Val(3), "mesh.normals") for
             normal in _array(object["normals"], "mesh.normals")
         ]
-        !isempty(positions) && length(positions) == length(normals) ||
-            throw(ProtocolError("malformed_packet", "mesh position and normal counts differ"))
+        uv0 = NTuple{2,Float32}[
+            _tuple(uv, Val(2), "mesh.uv0") for
+            uv in _array(object["uv0"], "mesh.uv0")
+        ]
+        !isempty(positions) && length(positions) == length(normals) == length(uv0) ||
+            throw(ProtocolError("malformed_packet", "mesh position, normal, and uv0 counts differ"))
         indices = UInt32[
             _uint32(index, "mesh.indices") for index in _array(object["indices"], "mesh.indices")
         ]
@@ -629,7 +634,7 @@ function _parse_meshes(value::JSON3.Array, material_ids::Set{String})::Vector{Me
         _valid_id(material_id, "mesh.material_id")
         material_id in material_ids ||
             throw(ProtocolError("provenance", "mesh references unknown material $material_id"))
-        push!(meshes, MeshPacket(id, positions, normals, indices, material_id))
+        push!(meshes, MeshPacket(id, positions, normals, uv0, indices, material_id))
     end
     return meshes
 end

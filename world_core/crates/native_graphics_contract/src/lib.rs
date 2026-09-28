@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
 
-pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v4";
+pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v5";
 pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
 pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
 pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v2";
@@ -301,6 +301,7 @@ pub struct MeshPacket {
     pub mesh_id: String,
     pub positions_m: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
+    pub uv0: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
     pub material_id: String,
 }
@@ -1012,10 +1013,12 @@ pub fn validate_ready(ready: &GraphicsReady) -> Result<(), GraphicsContractError
 fn obstacle_mesh() -> MeshPacket {
     let mut positions = Vec::with_capacity(24);
     let mut normals = Vec::with_capacity(24);
+    let mut uv0 = Vec::with_capacity(24);
     let mut indices = Vec::with_capacity(36);
     append_mesh_face(
         &mut positions,
         &mut normals,
+        &mut uv0,
         &mut indices,
         [
             [-1.0, 0.0, -1.0],
@@ -1028,6 +1031,7 @@ fn obstacle_mesh() -> MeshPacket {
     append_mesh_face(
         &mut positions,
         &mut normals,
+        &mut uv0,
         &mut indices,
         [
             [-1.0, 1.0, 1.0],
@@ -1040,6 +1044,7 @@ fn obstacle_mesh() -> MeshPacket {
     append_mesh_face(
         &mut positions,
         &mut normals,
+        &mut uv0,
         &mut indices,
         [
             [-1.0, 0.0, -1.0],
@@ -1052,6 +1057,7 @@ fn obstacle_mesh() -> MeshPacket {
     append_mesh_face(
         &mut positions,
         &mut normals,
+        &mut uv0,
         &mut indices,
         [
             [1.0, 0.0, -1.0],
@@ -1064,6 +1070,7 @@ fn obstacle_mesh() -> MeshPacket {
     append_mesh_face(
         &mut positions,
         &mut normals,
+        &mut uv0,
         &mut indices,
         [
             [1.0, 0.0, 1.0],
@@ -1076,6 +1083,7 @@ fn obstacle_mesh() -> MeshPacket {
     append_mesh_face(
         &mut positions,
         &mut normals,
+        &mut uv0,
         &mut indices,
         [
             [-1.0, 0.0, 1.0],
@@ -1089,6 +1097,7 @@ fn obstacle_mesh() -> MeshPacket {
         mesh_id: "obstacle-prism".into(),
         positions_m: positions,
         normals,
+        uv0,
         indices,
         material_id: "obstacle-default".into(),
     }
@@ -1097,10 +1106,12 @@ fn obstacle_mesh() -> MeshPacket {
 fn foliage_mesh() -> MeshPacket {
     let mut positions = Vec::with_capacity(8);
     let mut normals = Vec::with_capacity(8);
+    let mut uv0 = Vec::with_capacity(8);
     let mut indices = Vec::with_capacity(12);
     append_mesh_face(
         &mut positions,
         &mut normals,
+        &mut uv0,
         &mut indices,
         [
             [-0.55, 0.0, 0.0],
@@ -1113,6 +1124,7 @@ fn foliage_mesh() -> MeshPacket {
     append_mesh_face(
         &mut positions,
         &mut normals,
+        &mut uv0,
         &mut indices,
         [
             [0.0, 0.0, -0.55],
@@ -1126,6 +1138,7 @@ fn foliage_mesh() -> MeshPacket {
         mesh_id: "foliage-cross".into(),
         positions_m: positions,
         normals,
+        uv0,
         indices,
         material_id: "foliage-default".into(),
     }
@@ -1195,6 +1208,7 @@ fn deterministic_foliage_instances(
 fn append_mesh_face(
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
+    uv0: &mut Vec<[f32; 2]>,
     indices: &mut Vec<u32>,
     face: [[f32; 3]; 4],
     normal: [f32; 3],
@@ -1202,6 +1216,7 @@ fn append_mesh_face(
     let first = positions.len() as u32;
     positions.extend(face);
     normals.extend([normal; 4]);
+    uv0.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
     indices.extend([first, first + 1, first + 2, first, first + 2, first + 3]);
 }
 
@@ -1904,9 +1919,12 @@ fn validate_mesh(
     material_ids: &BTreeSet<&str>,
 ) -> Result<(), GraphicsContractError> {
     valid_id(&mesh.mesh_id, "mesh_id")?;
-    if mesh.positions_m.is_empty() || mesh.positions_m.len() != mesh.normals.len() {
+    if mesh.positions_m.is_empty()
+        || mesh.positions_m.len() != mesh.normals.len()
+        || mesh.positions_m.len() != mesh.uv0.len()
+    {
         return Err(GraphicsContractError::malformed(format!(
-            "mesh {} needs matching non-empty position and normal arrays",
+            "mesh {} needs matching non-empty position, normal, and uv0 arrays",
             mesh.mesh_id
         )));
     }
@@ -1931,6 +1949,9 @@ fn validate_mesh(
     }
     for normal in &mesh.normals {
         finite_values(normal, "mesh normal")?;
+    }
+    for uv in &mesh.uv0 {
+        finite_values(uv, "mesh uv0")?;
     }
     if !material_ids.contains(mesh.material_id.as_str()) {
         return Err(GraphicsContractError::provenance(format!(
@@ -2459,6 +2480,34 @@ mod tests {
         let mut packet = packet();
         packet.body.materials[0].normal_texture_id = Some("missing-normal".into());
         assert!(validate_scene_packet(&packet).is_err());
+    }
+
+    #[test]
+    fn authored_mesh_uv0_is_required_and_finite() {
+        let mut body = packet().body;
+        body.meshes = vec![MeshPacket {
+            mesh_id: "mesh".into(),
+            positions_m: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            normals: vec![[0.0, 1.0, 0.0]; 3],
+            uv0: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            indices: vec![0, 1, 2],
+            material_id: "terrain".into(),
+        }];
+        seal_scene_packet(body.clone()).expect("authored UV channel validates");
+
+        body.meshes[0].uv0.pop();
+        assert!(seal_scene_packet(body).is_err());
+
+        let mut body = packet().body;
+        body.meshes = vec![MeshPacket {
+            mesh_id: "mesh".into(),
+            positions_m: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            normals: vec![[0.0, 1.0, 0.0]; 3],
+            uv0: vec![[0.0, 0.0], [f32::NAN, 0.0], [0.0, 1.0]],
+            indices: vec![0, 1, 2],
+            material_id: "terrain".into(),
+        }];
+        assert!(seal_scene_packet(body).is_err());
     }
 
     #[test]
