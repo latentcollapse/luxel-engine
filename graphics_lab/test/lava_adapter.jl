@@ -65,6 +65,15 @@ end
     @test ground[1:3] == lighting.ground[1:3]
 end
 
+@testset "semantic importance dispatch" begin
+    background = WGEGraphics.BackgroundImportance()
+    landmark = WGEGraphics.LandmarkImportance()
+    critical = WGEGraphics.GameplayCriticalImportance()
+    @test LavaAdapter._importance_margin(background) == 0.0f0
+    @test LavaAdapter._importance_margin(background) < LavaAdapter._importance_margin(landmark)
+    @test LavaAdapter._importance_margin(landmark) < LavaAdapter._importance_margin(critical)
+end
+
 @testset "capture-domain measurements" begin
     @test LavaAdapter._pixel_luminance((UInt8(255), UInt8(255), UInt8(255), UInt8(255))) ≈ 1.0 atol = 1.0f-6
     @test LavaAdapter._pixel_luminance((1.0f0, 1.0f0, 1.0f0, 1.0f0)) ≈ 1.0 atol = 1.0f-6

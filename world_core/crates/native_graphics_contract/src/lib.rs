@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
 
-pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v2";
+pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v3";
 pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
 pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
 pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v1";
@@ -300,7 +300,16 @@ pub struct InstancePacket {
     pub instance_id: String,
     pub mesh_id: String,
     pub material_id: String,
+    pub importance: InstanceImportance,
     pub transform: Transform3d,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceImportance {
+    Background,
+    Landmark,
+    GameplayCritical,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -482,6 +491,12 @@ pub struct GraphicsTelemetry {
     pub instance_count: usize,
     pub visible_instance_count: usize,
     pub culled_instance_count: usize,
+    pub background_visible_instance_count: usize,
+    pub background_culled_instance_count: usize,
+    pub landmark_visible_instance_count: usize,
+    pub landmark_culled_instance_count: usize,
+    pub gameplay_critical_visible_instance_count: usize,
+    pub gameplay_critical_culled_instance_count: usize,
     pub terrain_vertex_count: usize,
     pub mesh_vertex_count: usize,
     pub frame_time_us: u64,
@@ -1140,6 +1155,7 @@ pub fn lower_reference_world(
                 instance_id: obstacle.obstacle_id.clone(),
                 mesh_id: "obstacle-prism".into(),
                 material_id: "obstacle-default".into(),
+                importance: InstanceImportance::GameplayCritical,
                 transform: Transform3d {
                     translation_xyz_m: [
                         finite_f32(x, "obstacle x")?,
@@ -1783,6 +1799,30 @@ fn validate_telemetry(telemetry: &GraphicsTelemetry) -> Result<(), GraphicsContr
         (telemetry.instance_count, "instance_count"),
         (telemetry.visible_instance_count, "visible_instance_count"),
         (telemetry.culled_instance_count, "culled_instance_count"),
+        (
+            telemetry.background_visible_instance_count,
+            "background_visible_instance_count",
+        ),
+        (
+            telemetry.background_culled_instance_count,
+            "background_culled_instance_count",
+        ),
+        (
+            telemetry.landmark_visible_instance_count,
+            "landmark_visible_instance_count",
+        ),
+        (
+            telemetry.landmark_culled_instance_count,
+            "landmark_culled_instance_count",
+        ),
+        (
+            telemetry.gameplay_critical_visible_instance_count,
+            "gameplay_critical_visible_instance_count",
+        ),
+        (
+            telemetry.gameplay_critical_culled_instance_count,
+            "gameplay_critical_culled_instance_count",
+        ),
         (telemetry.terrain_vertex_count, "terrain_vertex_count"),
         (telemetry.mesh_vertex_count, "mesh_vertex_count"),
     ] {
@@ -2078,6 +2118,12 @@ mod tests {
                 instance_count: 0,
                 visible_instance_count: 0,
                 culled_instance_count: 0,
+                background_visible_instance_count: 0,
+                background_culled_instance_count: 0,
+                landmark_visible_instance_count: 0,
+                landmark_culled_instance_count: 0,
+                gameplay_critical_visible_instance_count: 0,
+                gameplay_critical_culled_instance_count: 0,
                 terrain_vertex_count: 1,
                 mesh_vertex_count: 0,
                 frame_time_us: 1,

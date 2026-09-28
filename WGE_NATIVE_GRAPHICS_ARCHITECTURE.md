@@ -63,7 +63,7 @@ set.
 
 ## Typed packet boundary
 
-The first Rust contract is `wge.graphics-scene-packet/v2`. It is a closed,
+The first Rust contract is `wge.graphics-scene-packet/v3`. It is a closed,
 `deny_unknown_fields` structure with a canonical body digest. Its shape is:
 
 ```text
@@ -74,7 +74,7 @@ GraphicsScenePacket
 ├── terrain field/region/material inputs
 ├── mesh and texture buffer references
 ├── material intent
-├── instance transforms and semantic roles
+├── instance transforms and closed semantic importance hints
 ├── light and sky/horizon/ground environment intent
 └── gameplay-visible markers (route, spawns, encounters, objective)
 ```
@@ -269,7 +269,10 @@ The supported scene profile is intentionally fail-closed while quality systems
 are being built: the Lava adapter accepts one directional light, opaque
 material intents with one shared, content-addressed inline RGBA8
 albedo payload, orthographic and perspective native terrain projections, and typed
-sky/horizon/ground/fog/exposure intent. The payload is dimension-checked and digest-checked in
+sky/horizon/ground/fog/exposure intent. Instances also carry closed
+`background`, `landmark`, or `gameplay_critical` importance, which controls a
+typed culling margin and is independently balanced in the promoted telemetry.
+The payload is dimension-checked and digest-checked in
 both Rust and Julia before Lava creates a sampler binding. Point lights,
 multiple texture sets, and blend/mask materials are typed and
 validated at the boundary but rejected by the adapter until their semantics
@@ -297,8 +300,9 @@ and a renderer-identity digest over the validated capability and worker-ready
 messages. Rust rejects flat/black captures, insufficient RGB diversity, and
 missing pixels for any semantic marker role present in the packet; producer
 measurements are compared against Rust’s independent recomputation. Frame
-telemetry now carries packet-checked instance visibility and terrain/mesh
-submission counts, exposing a measurable culling/performance surface. Visible
+telemetry now carries packet-checked total and per-importance instance visibility
+and terrain/mesh submission counts, exposing a measurable semantic-culling/
+performance surface. Visible
 mesh/material groups are submitted with Lava instancing: base triangle data is
 uploaded once per deterministic batch and transforms/material parameters are
 indexed per instance on the GPU. The integration fixture duplicates an

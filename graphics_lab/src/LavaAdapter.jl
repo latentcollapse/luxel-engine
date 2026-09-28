@@ -71,6 +71,12 @@ struct MeshVisibility
     instance_count::Int
     visible_instance_count::Int
     culled_instance_count::Int
+    background_visible_count::Int
+    background_culled_count::Int
+    landmark_visible_count::Int
+    landmark_culled_count::Int
+    gameplay_critical_visible_count::Int
+    gameplay_critical_culled_count::Int
 end
 
 struct TextureProbeResources
@@ -1769,7 +1775,7 @@ function _instance_visible(
     instance::WGEGraphics.InstancePacket,
 )
     center = _project_point(frame, instance.transform.translation_xyz_m)
-    radius = max(instance.transform.scale_xyz...)
+    radius = max(instance.transform.scale_xyz...) + _importance_margin(instance.importance)
     relative = Vec4f(
         instance.transform.translation_xyz_m[1] - frame.position[1],
         instance.transform.translation_xyz_m[2] - frame.position[2],
@@ -1786,19 +1792,47 @@ function _instance_visible(
         -1.0f0 - margin_y <= center[2] <= 1.0f0 + margin_y
 end
 
+_importance_margin(::WGEGraphics.BackgroundImportance)::Float32 = 0.0f0
+
+_importance_margin(::WGEGraphics.LandmarkImportance)::Float32 = 0.75f0
+
+_importance_margin(::WGEGraphics.GameplayCriticalImportance)::Float32 = 1.5f0
+
 function _mesh_visibility(
     packet::WGEGraphics.GraphicsScenePacket,
     frame::CameraFrame,
 )::MeshVisibility
     instance_count = length(packet.instances)
-    visible_instance_count = count(
-        instance -> _instance_visible(frame, instance),
-        packet.instances,
-    )
+    visible_instance_count = 0
+    background_visible_count = 0
+    background_culled_count = 0
+    landmark_visible_count = 0
+    landmark_culled_count = 0
+    gameplay_critical_visible_count = 0
+    gameplay_critical_culled_count = 0
+    for instance in packet.instances
+        visible = _instance_visible(frame, instance)
+        visible && (visible_instance_count += 1)
+        if instance.importance isa WGEGraphics.BackgroundImportance
+            visible ? (background_visible_count += 1) : (background_culled_count += 1)
+        elseif instance.importance isa WGEGraphics.LandmarkImportance
+            visible ? (landmark_visible_count += 1) : (landmark_culled_count += 1)
+        elseif instance.importance isa WGEGraphics.GameplayCriticalImportance
+            visible ? (gameplay_critical_visible_count += 1) : (gameplay_critical_culled_count += 1)
+        else
+            throw(AdapterError("unsupported_importance", "instance importance is unsupported"))
+        end
+    end
     return MeshVisibility(
         instance_count,
         visible_instance_count,
         instance_count - visible_instance_count,
+        background_visible_count,
+        background_culled_count,
+        landmark_visible_count,
+        landmark_culled_count,
+        gameplay_critical_visible_count,
+        gameplay_critical_culled_count,
     )
 end
 
@@ -2268,6 +2302,12 @@ function render_scene(
             instance_count=visibility.instance_count,
             visible_instance_count=visibility.visible_instance_count,
             culled_instance_count=visibility.culled_instance_count,
+            background_visible_instance_count=visibility.background_visible_count,
+            background_culled_instance_count=visibility.background_culled_count,
+            landmark_visible_instance_count=visibility.landmark_visible_count,
+            landmark_culled_instance_count=visibility.landmark_culled_count,
+            gameplay_critical_visible_instance_count=visibility.gameplay_critical_visible_count,
+            gameplay_critical_culled_instance_count=visibility.gameplay_critical_culled_count,
             terrain_vertex_count=terrain_vertices,
             mesh_vertex_count=mesh_resources === nothing ? 0 : mesh_resources.vertex_count,
             frame_time_us=Int(cld(time_ns() - started_ns, UInt64(1_000))),

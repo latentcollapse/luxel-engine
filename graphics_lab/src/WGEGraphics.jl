@@ -6,7 +6,7 @@ using SHA
 
 export GraphicsScenePacket, ProtocolError, validate_scene_packet, packet_summary
 
-const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v2"
+const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v3"
 const MAX_PACKET_ELEMENTS = 16 * 1024 * 1024
 const MAX_CAPTURE_DIMENSION = 8192
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
@@ -87,10 +87,25 @@ struct TransformPacket
     scale_xyz::NTuple{3,Float32}
 end
 
+abstract type InstanceImportance end
+
+struct BackgroundImportance <: InstanceImportance end
+
+struct LandmarkImportance <: InstanceImportance end
+
+struct GameplayCriticalImportance <: InstanceImportance end
+
+const InstanceImportanceValue = Union{
+    BackgroundImportance,
+    LandmarkImportance,
+    GameplayCriticalImportance,
+}
+
 struct InstancePacket
     instance_id::String
     mesh_id::String
     material_id::String
+    importance::InstanceImportanceValue
     transform::TransformPacket
 end
 
@@ -567,7 +582,7 @@ function _parse_instances(
     sizehint!(instances, length(array))
     for instance in array
         object = _object(instance, "instance")
-        _exact_keys(object, Set(("instance_id", "mesh_id", "material_id", "transform")), "instance")
+        _exact_keys(object, Set(("instance_id", "mesh_id", "material_id", "importance", "transform")), "instance")
         id = _string(object["instance_id"], "instance.instance_id")
         _valid_id(id, "instance_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate instance $id"))
@@ -580,6 +595,7 @@ function _parse_instances(
             throw(ProtocolError("provenance", "instance references unknown mesh $mesh_id"))
         material_id in material_ids ||
             throw(ProtocolError("provenance", "instance references unknown material $material_id"))
+        importance = _parse_instance_importance(_string(object["importance"], "instance.importance"))
         transform = _object(object["transform"], "instance.transform")
         _exact_keys(transform, Set(("translation_xyz_m", "rotation_xyzw", "scale_xyz")), "instance.transform")
         translation = _tuple(transform["translation_xyz_m"], Val(3), "instance.transform.translation_xyz_m")
@@ -589,9 +605,23 @@ function _parse_instances(
             throw(ProtocolError("malformed_packet", "instance rotation is degenerate"))
         all(value -> value > 0.0f0, scale) ||
             throw(ProtocolError("malformed_packet", "instance scale must be positive"))
-        push!(instances, InstancePacket(id, mesh_id, material_id, TransformPacket(translation, rotation, scale)))
+        push!(instances, InstancePacket(id, mesh_id, material_id, importance, TransformPacket(translation, rotation, scale)))
     end
     return instances
+end
+
+function _parse_instance_importance(value::String)::InstanceImportanceValue
+    return _parse_instance_importance(Val(Symbol(value)))
+end
+
+_parse_instance_importance(::Val{:background}) = BackgroundImportance()
+
+_parse_instance_importance(::Val{:landmark}) = LandmarkImportance()
+
+_parse_instance_importance(::Val{:gameplay_critical}) = GameplayCriticalImportance()
+
+function _parse_instance_importance(::Val{kind}) where {kind}
+    throw(ProtocolError("unsupported", "instance importance $(kind) is unsupported"))
 end
 
 function _parse_lights(value::JSON3.Array)::Vector{LightPacket}

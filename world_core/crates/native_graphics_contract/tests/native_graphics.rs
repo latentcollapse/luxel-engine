@@ -286,6 +286,30 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
             .unwrap(),
         0
     );
+    assert_eq!(
+        frame["telemetry"]["gameplay_critical_visible_instance_count"]
+            .as_u64()
+            .unwrap(),
+        packet.body.instances.len() as u64
+    );
+    assert_eq!(
+        frame["telemetry"]["gameplay_critical_culled_instance_count"]
+            .as_u64()
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        frame["telemetry"]["background_visible_instance_count"]
+            .as_u64()
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        frame["telemetry"]["landmark_visible_instance_count"]
+            .as_u64()
+            .unwrap(),
+        0
+    );
     assert!(frame["telemetry"]["terrain_vertex_count"].as_u64().unwrap() > 0);
     assert!(frame["telemetry"]["mesh_vertex_count"].as_u64().unwrap() > 0);
     assert_eq!(

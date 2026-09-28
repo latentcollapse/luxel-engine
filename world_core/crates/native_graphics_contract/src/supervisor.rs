@@ -484,6 +484,54 @@ fn validate_frame_telemetry(
             "frame instance visibility telemetry does not balance",
         ));
     }
+    let mut expected_importance_totals = [0usize; 3];
+    for instance in &packet.body.instances {
+        let index = match instance.importance {
+            crate::InstanceImportance::Background => 0,
+            crate::InstanceImportance::Landmark => 1,
+            crate::InstanceImportance::GameplayCritical => 2,
+        };
+        expected_importance_totals[index] += 1;
+    }
+    let reported_importance = [
+        (
+            telemetry.background_visible_instance_count,
+            telemetry.background_culled_instance_count,
+        ),
+        (
+            telemetry.landmark_visible_instance_count,
+            telemetry.landmark_culled_instance_count,
+        ),
+        (
+            telemetry.gameplay_critical_visible_instance_count,
+            telemetry.gameplay_critical_culled_instance_count,
+        ),
+    ];
+    let mut importance_visible = 0usize;
+    let mut importance_culled = 0usize;
+    for (index, (visible, culled)) in reported_importance.into_iter().enumerate() {
+        let total = visible.checked_add(culled).ok_or_else(|| {
+            GraphicsWorkerError::provenance("frame importance telemetry overflows")
+        })?;
+        if total != expected_importance_totals[index] {
+            return Err(GraphicsWorkerError::provenance(
+                "frame importance telemetry does not match packet classes",
+            ));
+        }
+        importance_visible = importance_visible.checked_add(visible).ok_or_else(|| {
+            GraphicsWorkerError::provenance("frame importance visibility overflows")
+        })?;
+        importance_culled = importance_culled
+            .checked_add(culled)
+            .ok_or_else(|| GraphicsWorkerError::provenance("frame importance culling overflows"))?;
+    }
+    if importance_visible != telemetry.visible_instance_count
+        || importance_culled != telemetry.culled_instance_count
+    {
+        return Err(GraphicsWorkerError::provenance(
+            "frame importance visibility does not balance total visibility",
+        ));
+    }
     if packet.body.instances.is_empty() && telemetry.mesh_vertex_count != 0 {
         return Err(GraphicsWorkerError::provenance(
             "frame reports mesh vertices for a packet without instances",
