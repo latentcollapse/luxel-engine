@@ -2,9 +2,48 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Instant;
 
+use serde::Serialize;
 use wge_native_graphics_contract::{GraphicsWorkerSupervisor, lower_reference_world};
 use wge_reference_runtime::build_from_layout_path;
+
+const BENCHMARK_SCHEMA: &str = "wge.native-graphics-benchmark/v1";
+const DEFAULT_WARM_FRAMES: usize = 30;
+const MAX_WARM_FRAMES: usize = 256;
+
+#[derive(Clone, Debug, Serialize)]
+struct BenchmarkSample {
+    wall_time_us: u64,
+    renderer_frame_time_us: u64,
+    capture_sha256: String,
+    draw_calls: usize,
+    pipeline_compilations: usize,
+    upload_bytes: usize,
+    readback_bytes: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct TimingSummary {
+    sample_count: usize,
+    min_us: u64,
+    p50_us: u64,
+    p95_us: u64,
+    p99_us: u64,
+    max_us: u64,
+    mean_us: u64,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BenchmarkReport {
+    schema: &'static str,
+    packet_sha256: String,
+    cold: BenchmarkSample,
+    warm_wall_time: TimingSummary,
+    warm_renderer_frame_time: TimingSummary,
+    warm_capture_sha256: String,
+    deterministic_capture: bool,
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -127,10 +166,160 @@ fn run() -> Result<(), String> {
             );
             Ok(())
         }
+        Some("benchmark-layout") => {
+            let layout = canonical_path(
+                PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "benchmark-layout requires LAYOUT PATH".to_owned())?,
+                ),
+                "layout",
+            )?;
+            let julia = PathBuf::from(
+                arguments
+                    .next()
+                    .ok_or_else(|| "benchmark-layout requires JULIA PATH".to_owned())?,
+            );
+            let terrain_lab = canonical_path(
+                PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "benchmark-layout requires TERRAIN_LAB PATH".to_owned())?,
+                ),
+                "terrain lab",
+            )?;
+            let graphics_project = canonical_path(
+                PathBuf::from(
+                    arguments.next().ok_or_else(|| {
+                        "benchmark-layout requires GRAPHICS PROJECT PATH".to_owned()
+                    })?,
+                ),
+                "graphics project",
+            )?;
+            let worker = canonical_path(
+                PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "benchmark-layout requires WORKER PATH".to_owned())?,
+                ),
+                "graphics worker",
+            )?;
+            let warm_frames = arguments
+                .next()
+                .map(|raw| {
+                    raw.parse::<usize>()
+                        .map_err(|error| format!("warm frame count is not an integer: {error}"))
+                })
+                .transpose()?
+                .unwrap_or(DEFAULT_WARM_FRAMES);
+            if !(1..=MAX_WARM_FRAMES).contains(&warm_frames) {
+                return Err(format!(
+                    "warm frame count must be between 1 and {MAX_WARM_FRAMES}"
+                ));
+            }
+            if arguments.next().is_some() {
+                return Err(
+                    "benchmark-layout accepts LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]"
+                        .into(),
+                );
+            }
+
+            let world = build_from_layout_path(&layout, &julia, &terrain_lab)
+                .map_err(|error| error.to_string())?;
+            let packet = lower_reference_world(&world.world).map_err(|error| error.to_string())?;
+            let mut supervisor = GraphicsWorkerSupervisor::start(&julia, &graphics_project, &worker)
+                .map_err(|error| error.to_string())?;
+            supervisor.capabilities().map_err(|error| error.to_string())?;
+            let (cold, cold_capture) = measure_frame(&mut supervisor, &packet)?;
+            let mut warm_samples = Vec::with_capacity(warm_frames);
+            let mut warm_captures = Vec::with_capacity(warm_frames);
+            for _ in 0..warm_frames {
+                let (sample, capture) = measure_frame(&mut supervisor, &packet)?;
+                warm_samples.push(sample);
+                warm_captures.push(capture);
+            }
+            let warm_capture_sha256 = warm_captures
+                .first()
+                .cloned()
+                .ok_or_else(|| "benchmark produced no warm capture".to_owned())?;
+            let deterministic_capture = cold_capture == warm_capture_sha256
+                && warm_captures.iter().all(|capture| capture == &warm_capture_sha256);
+            let report = BenchmarkReport {
+                schema: BENCHMARK_SCHEMA,
+                packet_sha256: packet.packet_sha256.clone(),
+                cold,
+                warm_wall_time: summarize(
+                    &warm_samples
+                        .iter()
+                        .map(|sample| sample.wall_time_us)
+                        .collect::<Vec<_>>(),
+                )?,
+                warm_renderer_frame_time: summarize(
+                    &warm_samples
+                        .iter()
+                        .map(|sample| sample.renderer_frame_time_us)
+                        .collect::<Vec<_>>(),
+                )?,
+                warm_capture_sha256,
+                deterministic_capture,
+            };
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
+            );
+            if !report.deterministic_capture {
+                return Err("benchmark captures were not deterministic".into());
+            }
+            Ok(())
+        }
         _ => {
-            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT".into())
+            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]".into())
         }
     }
+}
+
+fn measure_frame(
+    supervisor: &mut GraphicsWorkerSupervisor,
+    packet: &wge_native_graphics_contract::GraphicsScenePacket,
+) -> Result<(BenchmarkSample, String), String> {
+    let started = Instant::now();
+    let promoted = supervisor
+        .render_and_promote(packet)
+        .map_err(|error| error.to_string())?;
+    let telemetry = &promoted.receipt.body.telemetry;
+    let sample = BenchmarkSample {
+        wall_time_us: started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
+        renderer_frame_time_us: telemetry.frame_time_us,
+        capture_sha256: promoted.frame.capture_sha256.clone(),
+        draw_calls: telemetry.draw_calls,
+        pipeline_compilations: telemetry.pipeline_compilations,
+        upload_bytes: telemetry.upload_bytes,
+        readback_bytes: telemetry.readback_bytes,
+    };
+    Ok((sample, promoted.frame.capture_sha256))
+}
+
+fn summarize(values: &[u64]) -> Result<TimingSummary, String> {
+    if values.is_empty() {
+        return Err("benchmark timing samples must not be empty".into());
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_unstable();
+    let sum = sorted.iter().map(|value| u128::from(*value)).sum::<u128>();
+    Ok(TimingSummary {
+        sample_count: sorted.len(),
+        min_us: sorted[0],
+        p50_us: nearest_rank(&sorted, 1, 2),
+        p95_us: nearest_rank(&sorted, 19, 20),
+        p99_us: nearest_rank(&sorted, 99, 100),
+        max_us: *sorted.last().expect("non-empty timing samples"),
+        mean_us: (sum / sorted.len() as u128).min(u128::from(u64::MAX)) as u64,
+    })
+}
+
+fn nearest_rank(sorted: &[u64], numerator: usize, denominator: usize) -> u64 {
+    let rank = (sorted.len() * numerator).div_ceil(denominator).max(1);
+    sorted[rank - 1]
 }
 
 fn canonical_path(path: PathBuf, label: &str) -> Result<PathBuf, String> {
@@ -161,4 +350,27 @@ fn rgba8_to_ppm(bytes: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String
         ppm.extend_from_slice(&pixel[..3]);
     }
     Ok(ppm)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{nearest_rank, summarize};
+
+    #[test]
+    fn benchmark_percentiles_use_nearest_rank() {
+        let values = [10, 20, 30, 40, 50];
+        assert_eq!(nearest_rank(&values, 1, 2), 30);
+        assert_eq!(nearest_rank(&values, 19, 20), 50);
+        assert_eq!(nearest_rank(&values, 99, 100), 50);
+    }
+
+    #[test]
+    fn benchmark_summary_is_sorted_and_integer_stable() {
+        let summary = summarize(&[40, 10, 20, 30]).expect("samples are non-empty");
+        assert_eq!(summary.sample_count, 4);
+        assert_eq!(summary.min_us, 10);
+        assert_eq!(summary.p50_us, 20);
+        assert_eq!(summary.p95_us, 40);
+        assert_eq!(summary.mean_us, 25);
+    }
 }

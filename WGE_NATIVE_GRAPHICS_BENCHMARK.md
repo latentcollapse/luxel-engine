@@ -35,6 +35,7 @@ intentionally not part of this checkpoint.
 | Native Lava `render-layout` (cold CLI) | 105.97 s | 1,905,076 KiB | passed | Rust lowered, supervised, rendered, measured, and promoted the v4 receipt |
 | Persistent Lava worker, first frame | 55.049 s frame time | 1,927,676 KiB process | passed | lazy device/pipeline/scene initialization |
 | Persistent Lava worker, second frame | 20.285 ms frame time | same process | passed | byte-identical capture digest; seven pipelines, no new compilation |
+| Formal persistent benchmark (1 cold + 30 warm) | 23.482 s cold wall; 255.717 ms warm p50 | — | passed | Rust promotion round trip; warm wall p95 309.555 ms, p99 456.335 ms; deterministic captures |
 | Bevy native inspection capture (cold) | 155.52 s | 6,104,240 KiB | provenance passed | artifact revalidated; visual representation remains coarse and is not used as Lava parity evidence |
 
 The persistent-worker values are deliberately separated from the cold CLI
@@ -57,6 +58,20 @@ The native Rust receipt for the promoted Riverwatch frame reported:
 - visual measurements: luminance standard deviation `0.0822154355`, 2,631
   distinct colors, route pixels 290, player pixels 7, opponent pixels 6,
   encounter pixels 69, objective pixels 7.
+
+The formal persistent benchmark uses the full supervisor round trip and Rust
+promotion for every frame. Across 30 warm frames it reported:
+
+- wall time: p50 `255.717 ms`, p95 `309.555 ms`, p99 `456.335 ms`, mean
+  `263.017 ms`;
+- renderer-reported frame time (including Lava readback): p50 `48.025 ms`,
+  p95 `72.853 ms`, p99 `94.758 ms`, mean `48.955 ms`;
+- every warm capture matched the cold capture digest.
+
+These are CPU/round-trip and adapter frame measurements, not Vulkan GPU
+timestamps. The current Lava profiling API timestamps compute dispatches but
+does not instrument the graphics `draw!` path; that remains an explicit
+instrumentation gap.
 
 These numbers are evidence of a real deterministic path, not a quality score.
 The current scene is intentionally small and diagnostic; the quality-gap
@@ -81,6 +96,14 @@ cargo run -q -p wge-native-graphics-contract -- render-layout \
   "/mnt/d/Code Projects/WGE/graphics_lab" \
   "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
   /tmp/wge-riverwatch-native.ppm
+
+cargo run -q -p wge-native-graphics-contract -- benchmark-layout \
+  crates/reference_runtime/examples/riverwatch.layout.json \
+  /home/mattc/.juliaup/bin/julia \
+  "/mnt/d/Code Projects/WGE/terrain_lab" \
+  "/mnt/d/Code Projects/WGE/graphics_lab" \
+  "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
+  30
 ```
 
 For the Bevy inspection path, use the certified world artifact produced by the
@@ -110,10 +133,9 @@ failure in these runs.
 
 ## Interpretation and next benchmark improvements
 
-This checkpoint establishes a repeatable native path and a meaningful warm
-frame measurement. It does not yet establish a production frame budget. The
-next benchmark slice should add GPU timestamp queries, at least 30 warm frames
-with p50/p95/p99 reporting, a denser authored scene, a second material class,
-and separate upload, compilation, render, readback, and promotion timings.
-Quartz should be rerun after the foliage pass so both current reference scenes
-share the same graphics revision.
+This checkpoint establishes a repeatable native path and a measured 30-frame
+warm distribution. It does not yet establish a production frame budget. The
+next benchmark slice should add graphics-pass GPU timestamp queries, a denser
+authored scene, and separate upload, compilation, render, readback, and
+promotion timings. Quartz should be rerun after the foliage pass so both
+current reference scenes share the same graphics revision.
