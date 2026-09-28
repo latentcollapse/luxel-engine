@@ -174,18 +174,29 @@ The first native frame is intentionally bounded:
 9. capture, readback, Rust measurement, and repeatability evidence.
 
 This proves the entire authority and process path without pretending that a
-single triangle is an Elden Ring renderer. PBR breadth beyond the bounded
-material path, shadow quality beyond one fixed directional map, prefiltered IBL,
-temporal techniques beyond the deterministic spatial resolve, production foliage
-systems beyond the opaque diagnostic cross-mesh, particles, water,
-post-processing, and optional RT come only after this path has real evidence and
-a quality-gap report.
+single triangle is an Elden Ring renderer. A separate
+`render-showcase-layout` profile now derives a deterministic shrine composition
+from the same objective anchor. It exercises typed stone, metal, normal,
+roughness, occlusion, emissive, instancing, directional-shadow, perspective,
+and HDR-resolve behavior without changing world authority or semantic overlays.
+It is a visual-quality probe, not imported-asset parity or new gameplay state.
+PBR breadth beyond the bounded material path, shadow quality beyond one fixed
+directional map, prefiltered IBL, temporal techniques beyond the deterministic
+spatial resolve, production foliage systems beyond the opaque diagnostic
+cross-mesh, particles, water, post-processing, and optional RT come only after
+this path has real evidence and a quality-gap report.
 
 `render-close-layout` derives a second, deterministic perspective packet from
 the same certified world and packet identities. It removes gameplay overlays
 for material inspection, while the overview packet remains the gameplay and
 semantic-visibility gate. This is an inspection profile, not a second semantic
 world or a claim of imported hero-asset parity.
+
+`render-showcase-layout` is the stronger visual inspection profile. Rust seals
+its extra geometry and material identities, binds them to the source world and
+spatial-field digests, and independently revalidates the resulting capture.
+The frozen evidence and remaining quality limits are recorded in
+[`WGE_NATIVE_SHOWCASE.md`](WGE_NATIVE_SHOWCASE.md).
 
 ## Capability and fallback policy
 

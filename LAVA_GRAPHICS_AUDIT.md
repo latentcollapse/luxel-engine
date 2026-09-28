@@ -326,8 +326,11 @@ worker script digest, and a digest of the validated capability/worker identity.
 The inspected `render-layout` capture is deliberately recorded as a quality
 gap, not a success-by-appearance claim: it is a coarse height/slope terrain
 diagnostic with line-based semantic overlays and one fixed 512² directional
-shadow map. Cascades, contact/soft shadows, prefiltered IBL, production foliage density/alpha/LOD,
-particle, water,
-post-processing, and asset-rich quality work remain downstream of this
+shadow map. The separate `render-showcase-layout` probe now demonstrates a
+deterministic typed stone/metal/emissive composition through the same native
+authority boundary; it is recorded in `WGE_NATIVE_SHOWCASE.md` and is not
+claimed as imported hero-asset parity. Cascades, contact/production soft
+shadows, prefiltered IBL, production foliage density/alpha/LOD, particles,
+water, post-processing, and asset-rich quality work remain downstream of this
 certified substrate. No rigging, Unity, Bevy canonicalization, or broad
 text-to-3D work was used to close this checkpoint.

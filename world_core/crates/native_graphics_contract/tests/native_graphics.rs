@@ -5,8 +5,8 @@ use std::sync::{Mutex, OnceLock};
 
 use wge_native_graphics_contract::{
     GraphicsReady, GraphicsWorkerSupervisor, lower_dense_benchmark_packet,
-    lower_objective_close_packet, lower_reference_world, seal_scene_packet, validate_frame_receipt,
-    validate_ready, validate_scene_packet,
+    lower_objective_close_packet, lower_reference_world, lower_showcase_packet, seal_scene_packet,
+    validate_frame_receipt, validate_ready, validate_scene_packet,
 };
 use wge_reference_runtime::build_from_layout_path;
 
@@ -105,6 +105,44 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
     assert!(packet.body.overlays.len() >= 4);
     assert_eq!(packet.body.terrain.heights_m.count, 49 * 49);
     assert_eq!(packet.body.terrain.region_codes.count, 49 * 49);
+
+    let showcase = lower_showcase_packet(&packet).expect("showcase packet seals");
+    validate_scene_packet(&showcase).expect("showcase packet validates");
+    assert_eq!(
+        showcase.body.world_artifact_id,
+        packet.body.world_artifact_id
+    );
+    assert_eq!(
+        showcase.body.spatial_fields_sha256,
+        packet.body.spatial_fields_sha256
+    );
+    assert_eq!(showcase.body.camera.camera_id, "native-showcase");
+    assert_eq!(showcase.body.camera.width_px, 640);
+    assert_eq!(showcase.body.camera.height_px, 480);
+    assert!(showcase.body.overlays.is_empty());
+    assert!(
+        showcase
+            .body
+            .meshes
+            .iter()
+            .any(|mesh| mesh.mesh_id == "showcase-halo")
+    );
+    assert!(
+        showcase
+            .body
+            .meshes
+            .iter()
+            .any(|mesh| mesh.mesh_id == "showcase-beacon-inlay")
+    );
+    assert_eq!(
+        showcase
+            .body
+            .instances
+            .iter()
+            .filter(|instance| instance.instance_id.starts_with("showcase-"))
+            .count(),
+        8
+    );
 
     let dense = lower_dense_benchmark_packet(&packet, 128).expect("dense benchmark packet seals");
     assert_eq!(

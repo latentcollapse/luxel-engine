@@ -343,8 +343,12 @@ function _perturbed_normal(
         max(normal_sample[3] * 2.0f0 - 1.0f0, 0.05f0),
         0.0f0,
     )
-    reference = abs(surface_normal[3]) < 0.9f0 ?
-        Vec4f(0.0f0, 0.0f0, 1.0f0, 0.0f0) :
+    # Pick a stable world-space reference axis from the actual surface normal.
+    # The previous check used the unused w component, so every face selected
+    # the z axis.  That made z-facing faces degenerate (zero tangent and
+    # bitangent) and silently collapsed their normal-map response.
+    reference = abs(surface_normal[2]) < 0.9f0 ?
+        Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0) :
         Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)
     tangent = _normalize_vector(_cross_vector(reference, surface_normal))
     bitangent = _normalize_vector(_cross_vector(surface_normal, tangent))
@@ -2328,7 +2332,10 @@ function _shadow_resources!(
     light_frame = _shadow_frame(packet, lighting)
     framebuffer = _framebuffer!(state, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, true, :shadow)
     texture = _framebuffer_texture(framebuffer, state)
-    sampler = Lava.LavaSampler(ctx=state.context, filter=:nearest, wrap=:clamp)
+    # Linear depth filtering softens the bounded PCF taps without changing
+    # the typed shadow contract. Nearest filtering made hero-scale shadows
+    # visibly stair-stepped in the native showcase.
+    sampler = Lava.LavaSampler(ctx=state.context, filter=:linear, wrap=:clamp)
     created = ShadowResources(packet.packet_sha256, framebuffer, texture, sampler, light_frame)
     terrain = _terrain_resources!(state, packet)
     visibility = _mesh_visibility(packet, light_frame)

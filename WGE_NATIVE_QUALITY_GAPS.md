@@ -2,25 +2,26 @@
 
 Status: measured gap register, 2026-09-28
 
-The native path is now real and supervised, but the current frame is a
-diagnostic vertical slice rather than an Elden Ring-level presentation. This
-document prevents the substrate milestone from being mistaken for the final
-visual bar.
+The native path is now real and supervised. The canonical overview remains a
+diagnostic vertical slice, while the separate `render-showcase-layout` profile
+now provides a deterministic, materially varied shrine composition for visual
+quality inspection. This document prevents either profile from being mistaken
+for an Elden Ring-level presentation.
 
 ## Measured or directly observed gaps
 
-1. The Riverwatch Lava capture is still visually coarse: a small terrain field,
-   a bounded octagonal objective beacon, simple obstacle geometry, diagnostic
-   gameplay markers, and opaque crossed foliage. The beacon’s close-range
-   profile proves typed mesh/material/emissive inspection, but luminance and
-   color-diversity gates do not establish imported hero-asset richness,
-   silhouette quality, or composition.
+1. The canonical Riverwatch overview is still visually coarse: a small terrain
+   field, simple obstacle geometry, diagnostic gameplay markers, and opaque
+   crossed foliage. The new showcase profile demonstrates composition,
+   procedural stone/metal/emissive roles, normal response, and shadowed
+   perspective rendering, but it is still a bounded authored probe rather than
+   imported hero-asset richness or production environment breadth.
 2. The canonical material contract now has digest-bound albedo, normal,
    roughness, occlusion, and emissive roles plus scalar controls. Alpha,
    clearcoat, transmission, texture transforms, mip policy, and material-graph
    identity are not yet represented.
 3. Lighting uses one directional shadow map with fixed resolution and PCF.
-   Cascades, contact shadows, soft-shadow filtering, many-light clustering,
+   Cascades, contact shadows, richer soft-shadow filtering, many-light clustering,
    prefiltered image-based lighting, reflection probes, and robust atmospheric
    scattering remain absent.
 4. The HDR resolve is deterministic and linear, but it is a spatial 2x resolve,
@@ -38,13 +39,13 @@ visual bar.
    meshlets, GPU-driven indirect draws, residency/streaming policy, or an
    occlusion hierarchy.
 8. Cold startup is currently expensive: the current cold CLI sample took
-   124.01 seconds and reached 1,722,324 KiB maximum RSS, including the
+   116.17 seconds and reached 1,693,752 KiB maximum RSS, including the
    Rust/Cargo boundary. The current formal 30-frame supervisor benchmark took
-   26.960 seconds for its cold wall sample. The warm distribution reached
-   322.104 ms wall-time p95 and 61.962 ms adapter-frame p95 under the current
-   pass-instrumented adapter. Its graphics-pass GPU interval was 405 µs at p50,
-   619 µs at p95, and 928 µs at p99 for this 15-draw diagnostic scene. Named
-   pass timestamps add synchronization overhead, so this is not yet a
+   28.965 seconds for its cold wall sample. The warm distribution reached
+   289.520 ms wall-time p95 and 69.898 ms adapter-frame p95 under the current
+   pass-instrumented adapter. Its graphics-pass GPU interval was 724 µs at p50,
+   1,323 µs at p95, and 1,694 µs at p99 for this 15-draw diagnostic scene.
+   Named pass timestamps add synchronization overhead, so this is not yet a
    production or dense-scene frame budget.
 9. The native capture path renders a validated gameplay/world snapshot. The
    Rust reference runtime completes the 78-step traversal and wins gameplay,
@@ -68,10 +69,10 @@ may promote them based on a world snapshot or a status-only receipt.
 
 ## Priority order for closing gaps
 
-1. Replace the bounded procedural beacon with a real authored/imported hero
-   asset/material packet with normal, occlusion, and emissive roles, then
-   validate a textured close-range capture. The supplied bad GLB remains a
-   rejection control and is not promoted by this step.
+1. Replace or augment the bounded showcase composition with a real
+   authored/imported hero asset/material packet with normal, occlusion, and
+   emissive roles, then validate a textured close-range capture. The supplied
+   bad GLB remains a rejection control and is not promoted by this step.
 2. Replace the synthetic stress population with a denser authored scene or
    camera-cut profile, and separate instrumented timing from uninstrumented
    production timing before optimizing cold startup or choosing a frame budget.

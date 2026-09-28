@@ -7,7 +7,7 @@ use std::time::Instant;
 use serde::Serialize;
 use wge_native_graphics_contract::{
     GraphicsWorkerSupervisor, lower_dense_benchmark_packet, lower_objective_close_packet,
-    lower_reference_world,
+    lower_reference_world, lower_showcase_packet,
 };
 use wge_reference_runtime::build_from_layout_path;
 
@@ -134,8 +134,9 @@ fn run() -> Result<(), String> {
             );
             Ok(())
         }
-        Some("render-layout") | Some("render-close-layout") => {
+        Some("render-layout") | Some("render-close-layout") | Some("render-showcase-layout") => {
             let close_view = command.as_deref() == Some("render-close-layout");
+            let showcase_view = command.as_deref() == Some("render-showcase-layout");
             let layout = canonical_path(
                 PathBuf::from(
                     arguments
@@ -187,7 +188,9 @@ fn run() -> Result<(), String> {
             let world = build_from_layout_path(&layout, &julia, &terrain_lab)
                 .map_err(|error| error.to_string())?;
             let packet = lower_reference_world(&world.world).map_err(|error| error.to_string())?;
-            let packet = if close_view {
+            let packet = if showcase_view {
+                lower_showcase_packet(&packet).map_err(|error| error.to_string())?
+            } else if close_view {
                 lower_objective_close_packet(&packet).map_err(|error| error.to_string())?
             } else {
                 packet
@@ -350,7 +353,7 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         _ => {
-            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]\n       wge-native-graphics-contract benchmark-dense-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES] DENSE_BACKGROUND_INSTANCES".into())
+            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]\n       wge-native-graphics-contract benchmark-dense-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES] DENSE_BACKGROUND_INSTANCES".into())
         }
     }
 }

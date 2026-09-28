@@ -1123,6 +1123,13 @@ fn obstacle_mesh() -> MeshPacket {
     }
 }
 
+fn block_mesh(mesh_id: &str, material_id: &str) -> MeshPacket {
+    let mut mesh = obstacle_mesh();
+    mesh.mesh_id = mesh_id.into();
+    mesh.material_id = material_id.into();
+    mesh
+}
+
 fn foliage_mesh() -> MeshPacket {
     let mut positions = Vec::with_capacity(8);
     let mut normals = Vec::with_capacity(8);
@@ -1174,13 +1181,89 @@ fn objective_beacon_mesh() -> MeshPacket {
     mesh.append_cap(4.35, 0.9, true);
     mesh.append_cap(0.0, 1.8, false);
 
+    mesh.into_mesh("objective-beacon", "objective-beacon")
+}
+
+fn radial_mesh(
+    mesh_id: &str,
+    material_id: &str,
+    segments: usize,
+    bands: &[(f32, f32, f32, f32)],
+    bottom_cap: Option<f32>,
+    top_cap: Option<f32>,
+) -> MeshPacket {
+    let mut mesh = BeaconMeshBuffers::with_capacity(segments);
+    for &(lower_y, upper_y, lower_radius, upper_radius) in bands {
+        mesh.append_band(lower_y, upper_y, lower_radius, upper_radius);
+    }
+    if let Some(radius) = top_cap {
+        let y = bands
+            .last()
+            .map(|(_, upper_y, _, _)| *upper_y)
+            .unwrap_or(0.0);
+        mesh.append_cap(y, radius, true);
+    }
+    if let Some(radius) = bottom_cap {
+        let y = bands
+            .first()
+            .map(|(lower_y, _, _, _)| *lower_y)
+            .unwrap_or(0.0);
+        mesh.append_cap(y, radius, false);
+    }
+    mesh.into_mesh(mesh_id, material_id)
+}
+
+fn torus_mesh(
+    mesh_id: &str,
+    material_id: &str,
+    major_radius: f32,
+    minor_radius: f32,
+    major_segments: usize,
+    minor_segments: usize,
+) -> MeshPacket {
+    let mut positions = Vec::with_capacity(major_segments * minor_segments);
+    let mut normals = Vec::with_capacity(major_segments * minor_segments);
+    let mut uv0 = Vec::with_capacity(major_segments * minor_segments);
+    let mut indices = Vec::with_capacity(major_segments * minor_segments * 6);
+    for major in 0..major_segments {
+        let major_angle = std::f32::consts::TAU * major as f32 / major_segments as f32;
+        let major_cos = major_angle.cos();
+        let major_sin = major_angle.sin();
+        for minor in 0..minor_segments {
+            let minor_angle = std::f32::consts::TAU * minor as f32 / minor_segments as f32;
+            let minor_cos = minor_angle.cos();
+            let minor_sin = minor_angle.sin();
+            let radius = major_radius + minor_radius * minor_cos;
+            positions.push([
+                radius * major_cos,
+                radius * major_sin,
+                minor_radius * minor_sin,
+            ]);
+            normals.push([minor_cos * major_cos, minor_cos * major_sin, minor_sin]);
+            uv0.push([
+                major as f32 / major_segments as f32,
+                minor as f32 / minor_segments as f32,
+            ]);
+        }
+    }
+    for major in 0..major_segments {
+        let next_major = (major + 1) % major_segments;
+        for minor in 0..minor_segments {
+            let next_minor = (minor + 1) % minor_segments;
+            let first = (major * minor_segments + minor) as u32;
+            let second = (next_major * minor_segments + minor) as u32;
+            let third = (next_major * minor_segments + next_minor) as u32;
+            let fourth = (major * minor_segments + next_minor) as u32;
+            indices.extend([first, second, third, first, third, fourth]);
+        }
+    }
     MeshPacket {
-        mesh_id: "objective-beacon".into(),
-        positions_m: mesh.positions,
-        normals: mesh.normals,
-        uv0: mesh.uv0,
-        indices: mesh.indices,
-        material_id: "objective-beacon".into(),
+        mesh_id: mesh_id.into(),
+        positions_m: positions,
+        normals,
+        uv0,
+        indices,
+        material_id: material_id.into(),
     }
 }
 
@@ -1276,6 +1359,17 @@ impl BeaconMeshBuffers {
             uv0: Vec::with_capacity(segments * 4 * 3 + segments * 6),
             indices: Vec::with_capacity(segments * 6 * 4),
             segments,
+        }
+    }
+
+    fn into_mesh(self, mesh_id: &str, material_id: &str) -> MeshPacket {
+        MeshPacket {
+            mesh_id: mesh_id.into(),
+            positions_m: self.positions,
+            normals: self.normals,
+            uv0: self.uv0,
+            indices: self.indices,
+            material_id: material_id.into(),
         }
     }
 
@@ -1463,6 +1557,58 @@ fn procedural_beacon_albedo_texture() -> TextureReference {
         "procedural-riverwatch-beacon-albedo-v1",
         [72, 86, 96],
         [132, 116, 78],
+    )
+}
+
+fn procedural_showcase_stone_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "riverwatch-showcase-stone-albedo",
+        "procedural-riverwatch-showcase-stone-albedo-v1",
+        [150, 162, 172],
+        [220, 230, 236],
+    )
+}
+
+fn procedural_showcase_metal_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "riverwatch-showcase-metal-albedo",
+        "procedural-riverwatch-showcase-metal-albedo-v1",
+        [172, 84, 25],
+        [240, 170, 70],
+    )
+}
+
+fn procedural_showcase_glow_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "riverwatch-showcase-glow-albedo",
+        "procedural-riverwatch-showcase-glow-albedo-v1",
+        [30, 110, 145],
+        [75, 210, 228],
+    )
+}
+
+fn procedural_showcase_emissive_texture() -> TextureReference {
+    let width = 16;
+    let height = 16;
+    let mut bytes = Vec::with_capacity(width * height * 4);
+    for row in 0..height {
+        for column in 0..width {
+            let seam = row % 8 == 0 || column % 8 == 0;
+            let diagonal = (row + column) % 11 == 0;
+            bytes.extend(if seam || diagonal {
+                [42, 188, 226, 255]
+            } else {
+                [0, 0, 0, 255]
+            });
+        }
+    }
+    procedural_texture(
+        "riverwatch-showcase-emissive",
+        "procedural-riverwatch-showcase-emissive-v1",
+        TextureColorSpace::Srgb,
+        width as u32,
+        height as u32,
+        bytes,
     )
 }
 
@@ -1919,6 +2065,327 @@ pub fn lower_objective_close_packet(
     body.overlays.clear();
     body.capture.capture_id = format!("{}-objective-close", body.capture.capture_id);
     body.capture.camera_id = body.camera.camera_id.clone();
+    seal_scene_packet(body)
+}
+
+fn normalize_vector3(vector: [f32; 3], label: &str) -> Result<[f32; 3], GraphicsContractError> {
+    let length_squared = vector.iter().map(|value| value * value).sum::<f32>();
+    if !length_squared.is_finite() || length_squared <= f32::EPSILON {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} is degenerate"
+        )));
+    }
+    let inverse_length = length_squared.sqrt().recip();
+    Ok([
+        vector[0] * inverse_length,
+        vector[1] * inverse_length,
+        vector[2] * inverse_length,
+    ])
+}
+
+fn cross_vector3(first: [f32; 3], second: [f32; 3]) -> [f32; 3] {
+    [
+        first[1] * second[2] - first[2] * second[1],
+        first[2] * second[0] - first[0] * second[2],
+        first[0] * second[1] - first[1] * second[0],
+    ]
+}
+
+/// Derive a deterministic authored showcase composition from a validated
+/// semantic packet.  The extra geometry is a visual-quality probe, not new
+/// gameplay/world authority: world identity, spatial fields, and the source
+/// packet remain bound to the same artifact.
+pub fn lower_showcase_packet(
+    packet: &GraphicsScenePacket,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    validate_scene_packet(packet)?;
+    let beacon = packet
+        .body
+        .instances
+        .iter()
+        .find(|instance| instance.instance_id == "objective-beacon")
+        .ok_or_else(|| {
+            GraphicsContractError::provenance(
+                "showcase view requires the lowered objective beacon instance",
+            )
+        })?;
+    let [beacon_x, beacon_y, beacon_z] = beacon.transform.translation_xyz_m;
+    let target = [beacon_x, beacon_y + 2.5, beacon_z];
+    let position = [beacon_x + 4.0, beacon_y + 7.5, beacon_z + 7.0];
+    let forward = normalize_vector3(
+        [
+            target[0] - position[0],
+            target[1] - position[1],
+            target[2] - position[2],
+        ],
+        "showcase camera forward",
+    )?;
+    let right = normalize_vector3(
+        cross_vector3(forward, [0.0, 1.0, 0.0]),
+        "showcase camera right",
+    )?;
+    let up = normalize_vector3(cross_vector3(right, forward), "showcase camera up")?;
+
+    let mut body = packet.body.clone();
+    body.packet_id = format!("{}-showcase", body.packet_id);
+    body.camera = GraphicsCamera {
+        camera_id: "native-showcase".into(),
+        projection: CameraProjection::Perspective {
+            fov_y_degrees: 58.0,
+        },
+        position_xyz_m: position,
+        forward_xyz: forward,
+        up_xyz: up,
+        near_plane_m: 0.1,
+        far_plane_m: 256.0,
+        width_px: 640,
+        height_px: 480,
+    };
+    body.capture.capture_id = format!("{}-showcase", body.capture.capture_id);
+    body.capture.camera_id = body.camera.camera_id.clone();
+    body.capture.width_px = body.camera.width_px;
+    body.capture.height_px = body.camera.height_px;
+    body.overlays.clear();
+    body.instances
+        .retain(|instance| instance.instance_id == "objective-beacon");
+
+    let showcase_stone_texture = procedural_showcase_stone_albedo_texture();
+    let showcase_metal_texture = procedural_showcase_metal_albedo_texture();
+    let showcase_glow_texture = procedural_showcase_glow_albedo_texture();
+    let showcase_emissive_texture = procedural_showcase_emissive_texture();
+    body.textures.extend([
+        showcase_stone_texture.clone(),
+        showcase_metal_texture.clone(),
+        showcase_glow_texture.clone(),
+        showcase_emissive_texture.clone(),
+    ]);
+    let common_normal = Some("riverwatch-normal".to_owned());
+    let common_roughness = Some("riverwatch-roughness".to_owned());
+    let common_occlusion = Some("riverwatch-occlusion".to_owned());
+    if !body
+        .textures
+        .iter()
+        .any(|texture| texture.texture_id == "riverwatch-normal")
+        || !body
+            .textures
+            .iter()
+            .any(|texture| texture.texture_id == "riverwatch-roughness")
+        || !body
+            .textures
+            .iter()
+            .any(|texture| texture.texture_id == "riverwatch-occlusion")
+    {
+        return Err(GraphicsContractError::provenance(
+            "showcase requires the canonical normal, roughness, and occlusion textures",
+        ));
+    }
+    body.materials.extend([
+        MaterialIntent {
+            material_id: "showcase-stone".into(),
+            base_color_rgba: [0.80, 0.84, 0.88, 1.0],
+            metallic: 0.08,
+            roughness: 0.58,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![showcase_stone_texture.texture_id.clone()],
+            normal_texture_id: common_normal.clone(),
+            roughness_texture_id: common_roughness.clone(),
+            occlusion_texture_id: common_occlusion.clone(),
+            emissive_texture_id: None,
+            normal_scale: 0.7,
+            occlusion_strength: 0.82,
+            emissive_factor_rgb: [0.0, 0.0, 0.0],
+        },
+        MaterialIntent {
+            material_id: "showcase-metal".into(),
+            base_color_rgba: [0.82, 0.38, 0.08, 1.0],
+            metallic: 0.92,
+            roughness: 0.22,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![showcase_metal_texture.texture_id.clone()],
+            normal_texture_id: common_normal.clone(),
+            roughness_texture_id: common_roughness.clone(),
+            occlusion_texture_id: common_occlusion.clone(),
+            emissive_texture_id: None,
+            normal_scale: 0.35,
+            occlusion_strength: 0.66,
+            emissive_factor_rgb: [0.0, 0.0, 0.0],
+        },
+        MaterialIntent {
+            material_id: "showcase-glow".into(),
+            base_color_rgba: [0.30, 0.72, 0.85, 1.0],
+            metallic: 0.28,
+            roughness: 0.30,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![showcase_glow_texture.texture_id.clone()],
+            normal_texture_id: common_normal,
+            roughness_texture_id: common_roughness,
+            occlusion_texture_id: common_occlusion,
+            emissive_texture_id: Some(showcase_emissive_texture.texture_id.clone()),
+            normal_scale: 0.45,
+            occlusion_strength: 0.55,
+            emissive_factor_rgb: [0.04, 0.32, 0.55],
+        },
+    ]);
+    body.meshes.extend([
+        radial_mesh(
+            "showcase-plinth",
+            "showcase-stone",
+            12,
+            &[
+                (0.0, 0.18, 3.8, 3.8),
+                (0.18, 0.34, 3.8, 3.35),
+                (0.34, 0.55, 3.35, 3.25),
+                (0.55, 0.72, 3.25, 2.75),
+                (0.72, 0.92, 2.75, 2.62),
+            ],
+            Some(3.8),
+            Some(2.62),
+        ),
+        radial_mesh(
+            "showcase-column",
+            "showcase-stone",
+            8,
+            &[
+                (0.0, 0.22, 0.92, 0.92),
+                (0.22, 0.42, 0.92, 0.70),
+                (0.42, 4.85, 0.70, 0.70),
+                (4.85, 5.08, 0.70, 0.92),
+            ],
+            Some(0.92),
+            Some(0.92),
+        ),
+        torus_mesh("showcase-halo", "showcase-metal", 2.95, 0.20, 32, 10),
+        torus_mesh("showcase-rune-ring", "showcase-glow", 2.22, 0.085, 32, 8),
+        block_mesh("showcase-lintel", "showcase-stone"),
+        block_mesh("showcase-beacon-inlay", "showcase-glow"),
+        radial_mesh(
+            "showcase-collar",
+            "showcase-metal",
+            12,
+            &[(0.0, 0.18, 1.48, 1.55), (0.18, 0.36, 1.55, 1.38)],
+            Some(1.48),
+            Some(1.38),
+        ),
+    ]);
+
+    let identity = [0.0, 0.0, 0.0, 1.0];
+    let landmark = InstanceImportance::Landmark;
+    body.instances.extend([
+        InstancePacket {
+            instance_id: "showcase-plinth".into(),
+            mesh_id: "showcase-plinth".into(),
+            material_id: "showcase-stone".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x, beacon_y, beacon_z],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "showcase-column-left".into(),
+            mesh_id: "showcase-column".into(),
+            material_id: "showcase-stone".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x - 3.0, beacon_y, beacon_z - 0.55],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "showcase-column-right".into(),
+            mesh_id: "showcase-column".into(),
+            material_id: "showcase-stone".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x + 3.0, beacon_y, beacon_z - 0.55],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "showcase-lintel".into(),
+            mesh_id: "showcase-lintel".into(),
+            material_id: "showcase-stone".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x, beacon_y + 4.92, beacon_z - 0.55],
+                rotation_xyzw: identity,
+                scale_xyz: [3.3, 0.34, 0.55],
+            },
+        },
+        InstancePacket {
+            instance_id: "showcase-halo".into(),
+            mesh_id: "showcase-halo".into(),
+            material_id: "showcase-metal".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x, beacon_y + 4.65, beacon_z - 0.70],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "showcase-rune-ring".into(),
+            mesh_id: "showcase-rune-ring".into(),
+            material_id: "showcase-glow".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x, beacon_y + 0.95, beacon_z],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "showcase-collar".into(),
+            mesh_id: "showcase-collar".into(),
+            material_id: "showcase-metal".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x, beacon_y + 0.35, beacon_z],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "showcase-beacon-inlay".into(),
+            mesh_id: "showcase-beacon-inlay".into(),
+            material_id: "showcase-glow".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x, beacon_y + 1.42, beacon_z + 0.73],
+                rotation_xyzw: identity,
+                scale_xyz: [0.12, 1.25, 0.035],
+            },
+        },
+    ]);
+    if let Some(beacon_material) = body
+        .materials
+        .iter_mut()
+        .find(|material| material.material_id == "objective-beacon")
+    {
+        beacon_material.base_color_rgba = [0.62, 0.52, 0.28, 1.0];
+        beacon_material.texture_ids = vec![showcase_metal_texture.texture_id.clone()];
+        beacon_material.metallic = 0.68;
+        beacon_material.roughness = 0.32;
+        beacon_material.emissive_factor_rgb = [0.30, 0.07, 0.008];
+    }
+    if let Some(light) = body.lights.first_mut() {
+        light.intensity = 3.2;
+        light.color_rgb = [1.0, 0.94, 0.86];
+        if let LightKind::Directional { direction_xyz } = &mut light.kind {
+            *direction_xyz = [0.20, -1.0, -0.25];
+        }
+    }
+    body.environment = EnvironmentIntent {
+        sky_top_rgb: [0.025, 0.055, 0.12],
+        sky_horizon_rgb: [0.18, 0.28, 0.40],
+        ground_rgb: [0.045, 0.060, 0.085],
+        fog_color_rgb: [0.070, 0.105, 0.150],
+        fog_density: 0.0008,
+        exposure: 1.12,
+    };
     seal_scene_packet(body)
 }
 
