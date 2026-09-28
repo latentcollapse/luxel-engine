@@ -7,6 +7,7 @@
 
 use std::collections::BTreeSet;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
@@ -264,6 +265,14 @@ pub struct TextureReference {
     pub height_px: u32,
     pub mip_levels: u32,
     pub color_space: TextureColorSpace,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<TexturePayload>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "encoding", content = "base64", rename_all = "snake_case")]
+pub enum TexturePayload {
+    Rgba8(String),
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1029,6 +1038,31 @@ fn append_mesh_face(
     indices.extend([first, first + 1, first + 2, first, first + 2, first + 3]);
 }
 
+fn procedural_albedo_texture() -> TextureReference {
+    let mut bytes = Vec::with_capacity(4 * 4 * 4);
+    for row in 0..4 {
+        for column in 0..4 {
+            let bright = (row + column) % 2 == 0;
+            let color = if bright {
+                [214, 196, 156, 255]
+            } else {
+                [92, 112, 78, 255]
+            };
+            bytes.extend(color);
+        }
+    }
+    TextureReference {
+        texture_id: "riverwatch-albedo".into(),
+        source_artifact_id: "procedural-riverwatch-albedo".into(),
+        sha256: sha256_prefixed(&bytes),
+        width_px: 4,
+        height_px: 4,
+        mip_levels: 1,
+        color_space: TextureColorSpace::Srgb,
+        payload: Some(TexturePayload::Rgba8(STANDARD.encode(bytes))),
+    }
+}
+
 pub fn lower_reference_world(
     world: &WorldArtifact,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
@@ -1063,13 +1097,14 @@ pub fn lower_reference_world(
     };
 
     let mut overlays = Vec::new();
+    let albedo_texture = procedural_albedo_texture();
     let mut materials = vec![MaterialIntent {
         material_id: "terrain-default".into(),
         base_color_rgba: [0.29, 0.38, 0.28, 1.0],
         metallic: 0.0,
         roughness: 0.92,
         alpha_mode: AlphaMode::Opaque,
-        texture_ids: Vec::new(),
+        texture_ids: vec![albedo_texture.texture_id.clone()],
     }];
     let mut meshes = Vec::new();
     let mut instances = Vec::new();
@@ -1080,7 +1115,7 @@ pub fn lower_reference_world(
             metallic: 0.0,
             roughness: 0.78,
             alpha_mode: AlphaMode::Opaque,
-            texture_ids: Vec::new(),
+            texture_ids: vec![albedo_texture.texture_id.clone()],
         });
         meshes.push(obstacle_mesh());
         for obstacle in &layout.obstacles {
@@ -1219,7 +1254,7 @@ pub fn lower_reference_world(
             ),
         },
         materials,
-        textures: Vec::new(),
+        textures: vec![albedo_texture],
         meshes,
         instances,
         lights: vec![LightIntent {
@@ -1430,6 +1465,47 @@ fn validate_texture(texture: &TextureReference) -> Result<(), GraphicsContractEr
         return Err(GraphicsContractError::malformed(
             "texture dimensions or mip count are invalid",
         ));
+    }
+    if let Some(payload) = &texture.payload {
+        if texture.mip_levels != 1 {
+            return Err(GraphicsContractError::unsupported(
+                "inline native texture payloads currently require one mip level",
+            ));
+        }
+        let bytes = match payload {
+            TexturePayload::Rgba8(encoded) => STANDARD.decode(encoded).map_err(|error| {
+                GraphicsContractError::malformed(format!(
+                    "texture {} payload is not valid base64: {error}",
+                    texture.texture_id
+                ))
+            })?,
+        };
+        let expected_bytes = usize::try_from(texture.width_px)
+            .ok()
+            .and_then(|width| {
+                usize::try_from(texture.height_px)
+                    .ok()
+                    .and_then(|height| width.checked_mul(height)?.checked_mul(4))
+            })
+            .ok_or_else(|| {
+                GraphicsContractError::malformed(format!(
+                    "texture {} dimensions overflow payload length",
+                    texture.texture_id
+                ))
+            })?;
+        if bytes.len() != expected_bytes {
+            return Err(GraphicsContractError::provenance(format!(
+                "texture {} payload has {} bytes, expected {expected_bytes}",
+                texture.texture_id,
+                bytes.len()
+            )));
+        }
+        if texture.sha256 != sha256_prefixed(&bytes) {
+            return Err(GraphicsContractError::provenance(format!(
+                "texture {} payload digest does not match its metadata",
+                texture.texture_id
+            )));
+        }
     }
     Ok(())
 }
@@ -1914,6 +1990,38 @@ mod tests {
         if let BufferPayload::F32(values) = &mut packet.body.terrain.heights_m.payload {
             values[0] = 1.0;
         }
+        assert!(validate_scene_packet(&packet).is_err());
+    }
+
+    #[test]
+    fn inline_texture_payload_is_digest_bound() {
+        let bytes = vec![
+            255, 0, 0, 255, // red
+            0, 255, 0, 255, // green
+            0, 0, 255, 255, // blue
+            255, 255, 255, 255, // white
+        ];
+        let texture = TextureReference {
+            texture_id: "texture".into(),
+            source_artifact_id: "source".into(),
+            sha256: sha256_prefixed(&bytes),
+            width_px: 2,
+            height_px: 2,
+            mip_levels: 1,
+            color_space: TextureColorSpace::Srgb,
+            payload: Some(TexturePayload::Rgba8(STANDARD.encode(&bytes))),
+        };
+        let mut packet = packet();
+        packet.body.materials[0].texture_ids = vec![texture.texture_id.clone()];
+        packet.body.textures = vec![texture];
+        packet = seal_scene_packet(packet.body).expect("texture packet seals");
+        validate_scene_packet(&packet).expect("matching texture payload validates");
+
+        let TexturePayload::Rgba8(encoded) = packet.body.textures[0]
+            .payload
+            .as_mut()
+            .expect("texture payload exists");
+        encoded.replace_range(..4, "AAAA");
         assert!(validate_scene_packet(&packet).is_err());
     }
 

@@ -1,5 +1,6 @@
 module WGEGraphics
 
+using Base64
 using JSON3
 using SHA
 
@@ -69,6 +70,7 @@ struct TexturePacket
     height_px::UInt32
     mip_levels::UInt32
     color_space::Symbol
+    payload::Union{Nothing, Vector{UInt8}}
 end
 
 struct MeshPacket
@@ -444,11 +446,19 @@ function _parse_textures(value::JSON3.Array)::Vector{TexturePacket}
     sizehint!(textures, length(array))
     for texture in array
         object = _object(texture, "texture")
-        _exact_keys(
-            object,
-            Set(("texture_id", "source_artifact_id", "sha256", "width_px", "height_px", "mip_levels", "color_space")),
-            "texture",
-        )
+        required_keys = Set((
+            "texture_id",
+            "source_artifact_id",
+            "sha256",
+            "width_px",
+            "height_px",
+            "mip_levels",
+            "color_space",
+        ))
+        actual_keys = Set(String(key) for key in keys(object))
+        actual_keys == required_keys ||
+            actual_keys == union(required_keys, Set(("payload",))) ||
+            throw(ProtocolError("malformed_packet", "texture has an unexpected or missing field"))
         id = _string(object["texture_id"], "texture.texture_id")
         _valid_id(id, "texture_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate texture $id"))
@@ -465,9 +475,28 @@ function _parse_textures(value::JSON3.Array)::Vector{TexturePacket}
         color_space = Symbol(_string(object["color_space"], "texture.color_space"))
         color_space in (:srgb, :linear, :normal_map, :data) ||
             throw(ProtocolError("unsupported", "texture color space is unsupported"))
+        payload = nothing
+        if haskey(object, "payload")
+            payload_object = _object(object["payload"], "texture.payload")
+            _exact_keys(payload_object, Set(("encoding", "base64")), "texture.payload")
+            _string(payload_object["encoding"], "texture.payload.encoding") == "rgba8" ||
+                throw(ProtocolError("unsupported", "texture payload encoding is unsupported"))
+            encoded = _string(payload_object["base64"], "texture.payload.base64")
+            payload = try
+                base64decode(encoded)
+            catch error
+                throw(ProtocolError("malformed_packet", "texture payload is not valid base64: $(sprint(showerror, error))"))
+            end
+            length(payload) == Int(width) * Int(height) * 4 ||
+                throw(ProtocolError("provenance", "texture payload byte length does not match dimensions"))
+            _sha256(payload) == sha256 ||
+                throw(ProtocolError("provenance", "texture payload digest does not match metadata"))
+            mip_levels == 1 ||
+                throw(ProtocolError("unsupported", "inline texture payloads require one mip level"))
+        end
         push!(
             textures,
-            TexturePacket(id, source_artifact_id, sha256, width, height, mip_levels, color_space),
+            TexturePacket(id, source_artifact_id, sha256, width, height, mip_levels, color_space, payload),
         )
     end
     return textures

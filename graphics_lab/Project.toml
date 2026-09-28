@@ -3,6 +3,7 @@ uuid = "8d7c4a7e-7f0f-4d31-9b80-2d63df2a5b31"
 version = "0.1.0"
 
 [deps]
+Base64 = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 ConstructionBase = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
 GeometryBasics = "5c1252a2-5f33-56bf-86c9-59e7332b4326"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"

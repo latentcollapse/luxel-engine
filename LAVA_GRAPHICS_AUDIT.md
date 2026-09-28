@@ -1,7 +1,8 @@
 # WGE Lava Graphics Audit
 
 Status: Phase 0 audit complete; supervised native Lava adapter checkpoint
-implemented and independently verified.
+implemented and independently verified, including the first content-addressed
+scene-texture binding.
 
 Date: 2026-09-28
 
@@ -272,11 +273,15 @@ variants use dispatch on typed values rather than property probing; payload
 hashing dispatches on the decoded buffer element type and preserves the Rust
 little-endian identity; and parser/worker helpers have bounded concrete
 signatures. The adapter rejects material features it does not yet implement
-(scene textures, non-opaque alpha modes, and metallic shading) instead of
-silently discarding those intents. The current supported render profile is
-therefore explicit: one opaque, non-metallic material family, one directional
-light, typed sky/fog/exposure intent, orthographic terrain projection,
-depth-tested raster, and line-based semantic overlays. The adapter also emits
+(multiple texture sets, non-opaque alpha modes, and metallic shading) instead
+of silently discarding those intents. The current supported render profile is
+therefore explicit: one opaque, non-metallic material family, one shared
+content-addressed inline RGBA8 albedo payload, one directional light, typed
+sky/fog/exposure intent, orthographic terrain projection, depth-tested raster,
+and line-based semantic overlays. Texture dimensions and payload digests are
+validated in Rust and Julia, and the same typed descriptor binding is used by
+terrain and mesh draws. Color-space transfer, mip generation/streaming, and
+multiple material texture roles remain quality-gap work. The adapter also emits
 deterministic instance visibility and submitted-vertex telemetry; Rust checks
 the counts against the packet rather than treating them as decorative stats.
 

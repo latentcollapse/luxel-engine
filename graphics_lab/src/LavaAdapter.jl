@@ -1,7 +1,7 @@
 module LavaAdapter
 
 using Base64
-using GeometryBasics: Vec4f
+using GeometryBasics: Vec2f, Vec4f
 using Lava
 using SHA
 using Statistics
@@ -65,6 +65,13 @@ struct TextureProbeResources
     bindings::Lava.TextureBindings
 end
 
+struct MaterialTextureResources
+    packet_sha256::String
+    texture::Lava.LavaTexture2D{NTuple{4, Float32}}
+    sampler::Lava.LavaSampler
+    bindings::Lava.TextureBindings
+end
+
 mutable struct LavaBackend{C, Q, PP, SP, TP, OP, MP, TXP, DP}
     context::C
     queue::Q
@@ -80,6 +87,7 @@ mutable struct LavaBackend{C, Q, PP, SP, TP, OP, MP, TXP, DP}
     overlay_resources::Union{Nothing, OverlayResources}
     mesh_resources::Union{Nothing, MeshResources}
     texture_resources::Union{Nothing, TextureProbeResources}
+    material_texture_resources::Union{Nothing, MaterialTextureResources}
     upload_bytes::UInt64
     draw_calls::UInt64
     readback_bytes::UInt64
@@ -343,6 +351,7 @@ function _terrain_vertex(
         0,
         _apply_fog(lit_color, fog_color, sqrt(world_x * world_x + world_z * world_z), fog_density),
     )
+    Lava.gfx_output(1, Vec2f(normalized_x, normalized_z))
     return nothing
 end
 
@@ -385,11 +394,33 @@ function _mesh_vertex(
             fog_density,
         ),
     )
+    Lava.gfx_output(
+        1,
+        Vec2f(
+            clamp(world_position[1] * 0.02f0 + 0.5f0, 0.0f0, 1.0f0),
+            clamp(0.5f0 - world_position[3] * 0.02f0, 0.0f0, 1.0f0),
+        ),
+    )
     return nothing
 end
 
-function _terrain_fragment()
-    Lava.gfx_output(0, Lava.gfx_input(Vec4f, 0))
+function _terrain_fragment(texture_enabled::Float32)
+    color = Lava.gfx_input(Vec4f, 0)
+    uv = Lava.gfx_input(Vec2f, 1)
+    red = Lava.sample_texture_2d(UInt32(0), uv[1], uv[2], UInt32(0))
+    green = Lava.sample_texture_2d(UInt32(0), uv[1], uv[2], UInt32(1))
+    blue = Lava.sample_texture_2d(UInt32(0), uv[1], uv[2], UInt32(2))
+    alpha = Lava.sample_texture_2d(UInt32(0), uv[1], uv[2], UInt32(3))
+    enabled = clamp(texture_enabled, 0.0f0, 1.0f0)
+    Lava.gfx_output(
+        0,
+        Vec4f(
+            color[1] * (1.0f0 - enabled + enabled * red),
+            color[2] * (1.0f0 - enabled + enabled * green),
+            color[3] * (1.0f0 - enabled + enabled * blue),
+            color[4] * (1.0f0 - enabled + enabled * alpha),
+        ),
+    )
     return nothing
 end
 
@@ -482,6 +513,7 @@ function backend()::LavaBackend
             texture_pipeline,
             depth_pipeline,
             Dict{Tuple{Int, Int, Bool}, Lava.LavaFramebuffer}(),
+            nothing,
             nothing,
             nothing,
             nothing,
@@ -692,6 +724,73 @@ function _texture_resources!(state::LavaBackend)
     return created
 end
 
+function _texture_matrix(bytes::Vector{UInt8}, width::UInt32, height::UInt32)
+    width_int = Int(width)
+    height_int = Int(height)
+    data = Matrix{NTuple{4, Float32}}(undef, height_int, width_int)
+    offset = 1
+    for row in 1:height_int, column in 1:width_int
+        data[row, column] = ntuple(index -> Float32(bytes[offset + index - 1]) / 255.0f0, 4)
+        offset += 4
+    end
+    return data
+end
+
+function _material_texture_resources!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+)
+    current = state.material_texture_resources
+    current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
+    texture_ids = Set(
+        texture_id for material in packet.materials for texture_id in material.texture_ids
+    )
+    length(texture_ids) <= 1 ||
+        throw(AdapterError("unsupported_material", "native path currently supports one shared albedo texture"))
+    shared_texture_id = isempty(texture_ids) ? nothing : only(texture_ids)
+    expected_ids = shared_texture_id === nothing ? String[] : String[shared_texture_id]
+    for material in packet.materials
+        material.texture_ids == expected_ids ||
+            throw(AdapterError(
+                "unsupported_material",
+                "native path requires every material to use the same albedo texture profile",
+            ))
+    end
+
+    if isempty(texture_ids)
+        bytes = UInt8[255, 255, 255, 255]
+        width = UInt32(1)
+        height = UInt32(1)
+    else
+        texture_id = only(texture_ids)
+        texture_index = findfirst(texture -> texture.texture_id == texture_id, packet.textures)
+        texture_index === nothing &&
+            throw(AdapterError("provenance", "material texture is absent from the packet"))
+        texture = packet.textures[texture_index]
+        texture.color_space in (:srgb, :linear) ||
+            throw(AdapterError("unsupported_texture", "native path requires color albedo textures"))
+        texture.payload === nothing &&
+            throw(AdapterError("unsupported_texture", "native path requires an inline texture payload"))
+        bytes = texture.payload::Vector{UInt8}
+        width = texture.width_px
+        height = texture.height_px
+    end
+    data = _texture_matrix(bytes, width, height)
+    gpu_texture = Lava.LavaTexture2D(data; ctx=state.context, filter=:linear, wrap=:clamp)
+    sampler = Lava.LavaSampler(ctx=state.context, filter=:linear, wrap=:clamp)
+    bindings = Lava.bind_textures([gpu_texture * sampler])
+    created = MaterialTextureResources(packet.packet_sha256, gpu_texture, sampler, bindings)
+    state.material_texture_resources = created
+    state.upload_bytes += UInt64(length(bytes))
+    return created
+end
+
+function _material_texture_enabled(material::WGEGraphics.MaterialPacket)::Float32
+    length(material.texture_ids) <= 1 ||
+        throw(AdapterError("unsupported_material", "native path supports one texture per material"))
+    return isempty(material.texture_ids) ? 0.0f0 : 1.0f0
+end
+
 function render_texture_probe(state::LavaBackend=backend())
     resource = _texture_resources!(state)
     width, height = (16, 16)
@@ -773,8 +872,6 @@ end
 function _material(packet::WGEGraphics.GraphicsScenePacket, material_id::String)::WGEGraphics.MaterialPacket
     for material in packet.materials
         if material.material_id == material_id
-            isempty(material.texture_ids) ||
-                throw(AdapterError("unsupported_material", "native path does not yet sample scene textures"))
             material.alpha_mode == :opaque ||
                 throw(AdapterError("unsupported_material", "native path requires opaque materials"))
             iszero(material.metallic) ||
@@ -1074,6 +1171,7 @@ function render_scene(
     framebuffer = _framebuffer!(state, width, height, true)
     target = OffscreenTarget(framebuffer)
     material = _terrain_material(packet)
+    texture_resources = _material_texture_resources!(state, packet)
     lighting = _lighting(packet)
     span = _orthographic_span(packet.camera)
     aspect = Float32(width) / Float32(height)
@@ -1122,6 +1220,9 @@ function render_scene(
             Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
             packet.environment.fog_density,
         ),
+        frag_args=(_material_texture_enabled(material),),
+        descriptor_set_layout=texture_resources.bindings.layout,
+        descriptor_set=texture_resources.bindings.set,
         clear_color=nothing,
     )
     state.draw_calls += 1
@@ -1148,6 +1249,9 @@ function render_scene(
                 Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
                 packet.environment.fog_density,
             ),
+            frag_args=(_material_texture_enabled(material),),
+            descriptor_set_layout=texture_resources.bindings.layout,
+            descriptor_set=texture_resources.bindings.set,
             clear_color=nothing,
             depth_clear=nothing,
         )

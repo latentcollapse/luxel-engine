@@ -258,13 +258,15 @@ independently recomputed visual measurements before promoting a receipt.
 
 The supported scene profile is intentionally fail-closed while quality systems
 are being built: the Lava adapter accepts one directional light, opaque
-non-metallic material intents without scene-texture bindings, an orthographic
-native terrain projection, and typed sky/fog/exposure intent. Perspective
-cameras, point lights,
-textured materials, blend/mask materials, and metallic materials are typed and
-validated at the boundary but rejected by the adapter until their semantics
-are implemented. This keeps the packet extensible without silently rendering
-less than the model requested.
+non-metallic material intents with one shared, content-addressed inline RGBA8
+albedo payload, an orthographic native terrain projection, and typed
+sky/fog/exposure intent. The payload is dimension-checked and digest-checked in
+both Rust and Julia before Lava creates a sampler binding. Perspective cameras,
+point lights, multiple texture sets, blend/mask materials, and metallic
+materials are typed and validated at the boundary but rejected by the adapter
+until their semantics are implemented. This keeps the packet extensible
+without silently rendering less than the model requested; color-management
+transfer and richer material graphs remain explicit quality-gap work.
 
 The supervised integration test also restarts Julia and proves the same packet
 produces byte-identical RGBA8 capture bytes after a clean GPU-context rebuild.
