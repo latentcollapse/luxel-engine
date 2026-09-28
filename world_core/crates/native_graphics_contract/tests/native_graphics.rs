@@ -259,16 +259,16 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
             .unwrap()
             > 0
     );
-    // One frame includes a directional shadow-map terrain pass, a shadow-map
-    // mesh pass, and the sky/terrain/mesh/overlay main passes.
-    assert!(frame["telemetry"]["draw_calls"].as_u64().unwrap() >= 6);
-    // The same lower bound proves both shadow pipelines compiled in addition
-    // to the four main scene pipelines.
+    // One frame includes shadow terrain/mesh passes, sky/terrain/mesh scene
+    // passes, a linear-HDR resolve, and the post-resolve overlay pass.
+    assert!(frame["telemetry"]["draw_calls"].as_u64().unwrap() >= 7);
+    // The same lower bound proves both shadow pipelines and the resolve
+    // pipeline compiled in addition to the four main scene pipelines.
     assert!(
         frame["telemetry"]["pipeline_compilations"]
             .as_u64()
             .unwrap()
-            >= 6
+            >= 7
     );
     assert_eq!(
         frame["telemetry"]["instance_count"].as_u64().unwrap(),

@@ -109,7 +109,15 @@ struct ShadowResources
     light_frame::CameraFrame
 end
 
-mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP}
+struct ResolveResources
+    source_size::Tuple{Int,Int}
+    framebuffer::Lava.LavaFramebuffer
+    texture::Lava.LavaTexture2D{NTuple{4,Float32}}
+    sampler::Lava.LavaSampler
+    bindings::Lava.TextureBindings
+end
+
+mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
     context::C
     queue::Q
     probe_pipeline::PP
@@ -121,12 +129,14 @@ mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP}
     depth_pipeline::DP
     terrain_shadow_pipeline::TSP
     mesh_shadow_pipeline::MSP
+    resolve_pipeline::RP
     framebuffers::Dict{Tuple{Int,Int,Bool,Symbol},Lava.LavaFramebuffer}
     terrain_resources::Union{Nothing,TerrainResources}
     overlay_resources::Union{Nothing,OverlayResources}
     mesh_resources::Union{Nothing,MeshResources}
     shadow_mesh_resources::Union{Nothing,MeshResources}
     shadow_resources::Union{Nothing,ShadowResources}
+    resolve_resources::Union{Nothing,ResolveResources}
     texture_resources::Union{Nothing,TextureProbeResources}
     material_texture_resources::Union{Nothing,MaterialTextureResources}
     upload_bytes::UInt64
@@ -142,6 +152,7 @@ mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP}
     depth_compiled::Bool
     terrain_shadow_compiled::Bool
     mesh_shadow_compiled::Bool
+    resolve_compiled::Bool
 end
 
 const BACKEND_REF = Ref{Union{Nothing,LavaBackend}}(nothing)
@@ -200,14 +211,11 @@ function _sky_vertex(
     atmosphere = 0.08f0 * max(exposure, 0.01f0)
     Lava.gfx_output(
         0,
-        _tone_map(
-            Vec4f(
-                sky_color[1] + fog_color[1] * atmosphere,
-                sky_color[2] + fog_color[2] * atmosphere,
-                sky_color[3] + fog_color[3] * atmosphere,
-                1.0f0,
-            ),
-            exposure,
+        Vec4f(
+            sky_color[1] + fog_color[1] * atmosphere,
+            sky_color[2] + fog_color[2] * atmosphere,
+            sky_color[3] + fog_color[3] * atmosphere,
+            1.0f0,
         ),
     )
     return nothing
@@ -765,6 +773,45 @@ function _shadow_visibility(light_space::Vec4f)::Float32
     return 0.25f0 + 0.75f0 * (visible * 0.25f0)
 end
 
+function _resolve_vertex(texel_size::Vec2f, exposure::Float32)
+    vertex_id = Lava.vertex_index() - Int32(1)
+    x = Float32(Int32(vertex_id & Int32(1)) * 4 - 1)
+    y = Float32(Int32((vertex_id >> Int32(1)) & Int32(1)) * 4 - 1)
+    Lava.set_position!(Vec4f(x, y, 0.5f0, 1.0f0))
+    Lava.gfx_output(0, Vec2f((x + 1.0f0) * 0.5f0, (y + 1.0f0) * 0.5f0))
+    Lava.gfx_output(1, texel_size)
+    Lava.gfx_output(2, Vec4f(exposure, 0.0f0, 0.0f0, 0.0f0))
+    return nothing
+end
+
+function _resolve_sample(u::Float32, v::Float32)::Vec4f
+    return Vec4f(
+        Lava.sample_texture_2d(UInt32(0), u, v, UInt32(0)),
+        Lava.sample_texture_2d(UInt32(0), u, v, UInt32(1)),
+        Lava.sample_texture_2d(UInt32(0), u, v, UInt32(2)),
+        Lava.sample_texture_2d(UInt32(0), u, v, UInt32(3)),
+    )
+end
+
+function _resolve_fragment()
+    uv = Lava.gfx_input(Vec2f, 0)
+    texel_size = Lava.gfx_input(Vec2f, 1)
+    exposure = Lava.gfx_input(Vec4f, 2)[1]
+    offset = 0.5f0 * texel_size
+    first = _resolve_sample(uv[1] - offset[1], uv[2] - offset[2])
+    second = _resolve_sample(uv[1] + offset[1], uv[2] - offset[2])
+    third = _resolve_sample(uv[1] - offset[1], uv[2] + offset[2])
+    fourth = _resolve_sample(uv[1] + offset[1], uv[2] + offset[2])
+    hdr = Vec4f(
+        0.25f0 * (first[1] + second[1] + third[1] + fourth[1]),
+        0.25f0 * (first[2] + second[2] + third[2] + fourth[2]),
+        0.25f0 * (first[3] + second[3] + third[3] + fourth[3]),
+        0.25f0 * (first[4] + second[4] + third[4] + fourth[4]),
+    )
+    Lava.gfx_output(0, _tone_map(hdr, exposure))
+    return nothing
+end
+
 function _terrain_fragment()
     base_color = Lava.gfx_input(Vec4f, 0)
     normal = Lava.gfx_input(Vec4f, 1)
@@ -806,7 +853,7 @@ function _terrain_fragment()
         sqrt(world_position[1] * world_position[1] + world_position[3] * world_position[3]),
         fog_density,
     )
-    Lava.gfx_output(0, _tone_map(fogged_color, exposure))
+    Lava.gfx_output(0, fogged_color)
     return nothing
 end
 
@@ -904,6 +951,14 @@ function backend()::LavaBackend
             cull=NoCull(),
             depth=DepthLess(),
         )
+        resolve_pipeline = GraphicsPipeline(
+            ;
+            vertex=_resolve_vertex,
+            fragment=_resolve_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthOff(),
+        )
         created = LavaBackend(
             context,
             context.default_bq,
@@ -916,6 +971,7 @@ function backend()::LavaBackend
             depth_pipeline,
             terrain_shadow_pipeline,
             mesh_shadow_pipeline,
+            resolve_pipeline,
             Dict{Tuple{Int,Int,Bool,Symbol},Lava.LavaFramebuffer}(),
             nothing,
             nothing,
@@ -924,10 +980,12 @@ function backend()::LavaBackend
             nothing,
             nothing,
             nothing,
+            nothing,
             UInt64(0),
             UInt64(0),
             UInt64(0),
             UInt64(0),
+            false,
             false,
             false,
             false,
@@ -1431,7 +1489,7 @@ function _transition_color_to_sampled!(state::LavaBackend, framebuffer::Lava.Lav
     return nothing
 end
 
-function _shadow_texture(framebuffer::Lava.LavaFramebuffer, state::LavaBackend)
+function _framebuffer_texture(framebuffer::Lava.LavaFramebuffer, state::LavaBackend)
     return Lava.LavaTexture2D{NTuple{4,Float32}}(
         framebuffer.color_image,
         framebuffer.color_memory,
@@ -1441,6 +1499,21 @@ function _shadow_texture(framebuffer::Lava.LavaFramebuffer, state::LavaBackend)
         framebuffer.color_format,
         state.context,
     )
+end
+
+function _resolve_resources!(
+    state::LavaBackend,
+    framebuffer::Lava.LavaFramebuffer,
+)::ResolveResources
+    source_size = (framebuffer.width, framebuffer.height)
+    current = state.resolve_resources
+    current !== nothing && current.source_size == source_size && return current
+    texture = _framebuffer_texture(framebuffer, state)
+    sampler = Lava.LavaSampler(ctx=state.context, filter=:linear, wrap=:clamp)
+    bindings = Lava.bind_textures([texture * sampler])
+    created = ResolveResources(source_size, framebuffer, texture, sampler, bindings)
+    state.resolve_resources = created
+    return created
 end
 
 function _project_point(frame::CameraFrame, point::NTuple{3,<:Real})::Vec4f
@@ -1835,7 +1908,7 @@ function _shadow_resources!(
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
     light_frame = _shadow_frame(packet, lighting)
     framebuffer = _framebuffer!(state, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, true, :shadow)
-    texture = _shadow_texture(framebuffer, state)
+    texture = _framebuffer_texture(framebuffer, state)
     sampler = Lava.LavaSampler(ctx=state.context, filter=:nearest, wrap=:clamp)
     created = ShadowResources(packet.packet_sha256, framebuffer, texture, sampler, light_frame)
     terrain = _terrain_resources!(state, packet)
@@ -1949,13 +2022,15 @@ function render_scene(
     visibility = _mesh_visibility(packet, camera_frame)
     mesh_resources = _mesh_resources!(state, packet, camera_frame, visibility)
     overlay_resources = _overlay_resources!(state, packet, camera_frame)
-    framebuffer = _framebuffer!(state, width, height, true)
-    target = OffscreenTarget(framebuffer)
+    render_width = 2 * width
+    render_height = 2 * height
+    scene_framebuffer = _framebuffer!(state, render_width, render_height, true, :scene_hdr)
+    scene_target = OffscreenTarget(scene_framebuffer)
     terrain_vertices = 6 * (packet.terrain.resolution - 1)^2
     draw!(
         state.queue,
         state.sky_pipeline,
-        target,
+        scene_target,
         3;
         args=(
             Vec4f(packet.environment.sky_top_rgb..., 1.0f0),
@@ -1973,7 +2048,7 @@ function render_scene(
     draw!(
         state.queue,
         state.terrain_pipeline,
-        target,
+        scene_target,
         terrain_vertices;
         args=(
             resources.heights,
@@ -2020,7 +2095,7 @@ function render_scene(
             draw!(
                 state.queue,
                 state.mesh_pipeline,
-                target,
+                scene_target,
                 batch.vertex_count;
                 args=(
                     batch.positions,
@@ -2064,11 +2139,33 @@ function render_scene(
             end
         end
     end
+    _transition_color_to_sampled!(state, scene_framebuffer)
+    capture_framebuffer = _framebuffer!(state, width, height, false, :capture)
+    capture_target = OffscreenTarget(capture_framebuffer)
+    resolve_resources = _resolve_resources!(state, scene_framebuffer)
+    draw!(
+        state.queue,
+        state.resolve_pipeline,
+        capture_target,
+        3;
+        args=(
+            Vec2f(1.0f0 / Float32(render_width), 1.0f0 / Float32(render_height)),
+            packet.environment.exposure,
+        ),
+        descriptor_set_layout=resolve_resources.bindings.layout,
+        descriptor_set=resolve_resources.bindings.set,
+        clear_color=(0.0f0, 0.0f0, 0.0f0, 1.0f0),
+    )
+    state.draw_calls += 1
+    if !state.resolve_compiled
+        state.resolve_compiled = true
+        state.pipeline_compilations += 1
+    end
     if overlay_resources !== nothing
         draw!(
             state.queue,
             state.overlay_pipeline,
-            target,
+            capture_target,
             overlay_resources.vertex_count;
             args=(overlay_resources.positions, overlay_resources.colors),
             clear_color=nothing,
@@ -2080,7 +2177,7 @@ function render_scene(
         end
     end
     Lava.vk_flush!(state.context)
-    pixels = readback_framebuffer(framebuffer)
+    pixels = readback_framebuffer(capture_framebuffer)
     capture_bytes = _capture_bytes(pixels)
     state.readback_bytes += length(capture_bytes)
     return (
