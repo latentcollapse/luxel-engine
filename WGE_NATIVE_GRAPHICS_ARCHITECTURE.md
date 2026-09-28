@@ -150,13 +150,15 @@ The first native frame is intentionally bounded:
 3. one canonical terrain material family with explicit color space;
 4. certified route, player/opponent spawn, encounter, and objective markers;
 5. fixed camera and deterministic offscreen color/depth target;
-6. one directional/ambient light intent and depth-tested opaque raster path;
+6. one directional/ambient light intent, deterministic directional shadow map,
+   and depth-tested opaque raster path;
 7. capture, readback, Rust measurement, and repeatability evidence.
 
 This proves the entire authority and process path without pretending that a
-single triangle is an Elden Ring renderer. PBR breadth, shadow quality, IBL,
-temporal techniques, foliage, particles, water, post-processing, and optional
-RT come only after this path has real evidence and a quality-gap report.
+single triangle is an Elden Ring renderer. PBR breadth beyond the bounded
+material path, shadow quality beyond one fixed directional map, IBL, temporal
+techniques, foliage, particles, water, post-processing, and optional RT come
+only after this path has real evidence and a quality-gap report.
 
 ## Capability and fallback policy
 
@@ -269,7 +271,11 @@ both Rust and Julia before Lava creates a sampler binding. Point lights,
 multiple texture sets, and blend/mask materials are typed and
 validated at the boundary but rejected by the adapter until their semantics
 are implemented. Metallic/roughness response is supported by the bounded
-material path, but it is not yet a complete production PBR graph. This keeps
+material path, but it is not yet a complete production PBR graph. The current
+directional profile renders a deterministic 512² shadow map from terrain and
+light-frustum-visible instanced meshes, then applies four-tap percentage-closer
+visibility in the main pass. Cascades, contact refinement, soft shadows, and
+many-light shadow budgets remain quality gaps. This keeps
 the packet extensible
 without silently rendering less than the model requested; color-management
 transfer and richer material graphs remain explicit quality-gap work.
@@ -289,9 +295,11 @@ uploaded once per deterministic batch and transforms/material parameters are
 indexed per instance on the GPU. The integration fixture duplicates an
 obstacle and verifies that submitted mesh vertices remain at the base-mesh
 count.
-The inspected frame is intentionally only a coarse diagnostic slice: terrain
-shading derives finite-difference normals from the certified height field and
-uses slope/region tinting, overlays are line primitives, and the path does not
-yet claim production PBR, shadows, IBL, foliage, particles, post-processing,
-or Elden-Ring-level visual quality. Those are quality-gap work behind this
-native authority boundary, not reasons to weaken the current evidence gate.
+The inspected frame is intentionally still only a coarse diagnostic slice:
+terrain shading derives finite-difference normals from the certified height
+field and uses slope/region tinting, overlays are line primitives, and the
+shadow profile is one fixed directional map with four-tap percentage-closer
+sampling. Cascades, contact/soft shadows, IBL, foliage, particles,
+post-processing, and Elden-Ring-level visual quality remain quality-gap work
+behind this native authority boundary, not reasons to weaken the current
+evidence gate.

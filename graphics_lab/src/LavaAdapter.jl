@@ -101,7 +101,15 @@ struct CameraFrame
     mode::Float32
 end
 
-mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP}
+struct ShadowResources
+    packet_sha256::String
+    framebuffer::Lava.LavaFramebuffer
+    texture::Lava.LavaTexture2D{NTuple{4,Float32}}
+    sampler::Lava.LavaSampler
+    light_frame::CameraFrame
+end
+
+mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP}
     context::C
     queue::Q
     probe_pipeline::PP
@@ -111,10 +119,14 @@ mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP}
     mesh_pipeline::MP
     texture_pipeline::TXP
     depth_pipeline::DP
-    framebuffers::Dict{Tuple{Int,Int,Bool},Lava.LavaFramebuffer}
+    terrain_shadow_pipeline::TSP
+    mesh_shadow_pipeline::MSP
+    framebuffers::Dict{Tuple{Int,Int,Bool,Symbol},Lava.LavaFramebuffer}
     terrain_resources::Union{Nothing,TerrainResources}
     overlay_resources::Union{Nothing,OverlayResources}
     mesh_resources::Union{Nothing,MeshResources}
+    shadow_mesh_resources::Union{Nothing,MeshResources}
+    shadow_resources::Union{Nothing,ShadowResources}
     texture_resources::Union{Nothing,TextureProbeResources}
     material_texture_resources::Union{Nothing,MaterialTextureResources}
     upload_bytes::UInt64
@@ -128,6 +140,8 @@ mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP}
     mesh_compiled::Bool
     texture_compiled::Bool
     depth_compiled::Bool
+    terrain_shadow_compiled::Bool
+    mesh_shadow_compiled::Bool
 end
 
 const BACKEND_REF = Ref{Union{Nothing,LavaBackend}}(nothing)
@@ -259,6 +273,7 @@ function _material_response(
     ambient_color::Vec4f,
     metallic::Float32,
     roughness::Float32,
+    shadow_visibility::Float32,
     view_direction::Vec4f,
 )::Vec4f
     surface_normal = _normalize_vector(normal)
@@ -304,7 +319,7 @@ function _material_response(
     specular_denominator = 4.0f0 * normal_view * normal_light + 0.0001f0
     specular_scale = distribution * geometry / specular_denominator
     diffuse_scale = (1.0f0 - metalness) * 0.31830987f0
-    direct_scale = light_intensity * normal_light
+    direct_scale = light_intensity * normal_light * shadow_visibility
     ambient_diffuse_scale = (1.0f0 - metalness) * 0.7f0
     ambient_specular_scale = 0.15f0
     red = (
@@ -453,6 +468,12 @@ function _terrain_vertex(
     camera_forward::Vec4f,
     camera_projection::Vec4f,
     camera_mode::Float32,
+    light_position::Vec4f,
+    light_right::Vec4f,
+    light_up::Vec4f,
+    light_forward::Vec4f,
+    light_projection::Vec4f,
+    light_mode::Float32,
     base_color::Vec4f,
     metallic::Float32,
     roughness::Float32,
@@ -516,6 +537,18 @@ function _terrain_vertex(
     Lava.gfx_output(8, ambient_color)
     Lava.gfx_output(9, fog_color)
     Lava.gfx_output(10, camera_position)
+    Lava.gfx_output(
+        11,
+        _project_world(
+            world_position,
+            light_position,
+            light_right,
+            light_up,
+            light_forward,
+            light_projection,
+            light_mode,
+        ),
+    )
     return nothing
 end
 
@@ -533,6 +566,12 @@ function _mesh_vertex(
     camera_forward::Vec4f,
     camera_projection::Vec4f,
     camera_mode::Float32,
+    light_position::Vec4f,
+    light_right::Vec4f,
+    light_up::Vec4f,
+    light_forward::Vec4f,
+    light_projection::Vec4f,
+    light_mode::Float32,
     light_direction::Vec4f,
     light_color::Vec4f,
     light_intensity::Float32,
@@ -591,7 +630,139 @@ function _mesh_vertex(
     Lava.gfx_output(8, ambient_color)
     Lava.gfx_output(9, fog_color)
     Lava.gfx_output(10, camera_position)
+    Lava.gfx_output(
+        11,
+        _project_world(
+            world_position,
+            light_position,
+            light_right,
+            light_up,
+            light_forward,
+            light_projection,
+            light_mode,
+        ),
+    )
     return nothing
+end
+
+function _terrain_shadow_vertex(
+    heights::Lava.LavaDeviceArray{Float32,1},
+    resolution::Int32,
+    width_m::Float32,
+    length_m::Float32,
+    light_position::Vec4f,
+    light_right::Vec4f,
+    light_up::Vec4f,
+    light_forward::Vec4f,
+    light_projection::Vec4f,
+    light_mode::Float32,
+)
+    vertex_id = Lava.vertex_index() - Int32(1)
+    cells_per_axis = resolution - Int32(1)
+    cell_id = div(vertex_id, Int32(6))
+    corner = rem(vertex_id, Int32(6))
+    cell_x = rem(cell_id, cells_per_axis)
+    cell_z = div(cell_id, cells_per_axis)
+    right = corner == Int32(1) || corner == Int32(2) || corner == Int32(4)
+    far = corner == Int32(2) || corner == Int32(4) || corner == Int32(5)
+    sample_x = cell_x + (right ? Int32(1) : Int32(0))
+    sample_z = cell_z + (far ? Int32(1) : Int32(0))
+    sample_index = sample_z * resolution + sample_x + Int32(1)
+    normalized_x = Float32(sample_x) / Float32(cells_per_axis)
+    normalized_z = Float32(sample_z) / Float32(cells_per_axis)
+    world_position = Vec4f(
+        (normalized_x - 0.5f0) * width_m,
+        heights[sample_index],
+        (0.5f0 - normalized_z) * length_m,
+        1.0f0,
+    )
+    light_space = _project_world(
+        world_position,
+        light_position,
+        light_right,
+        light_up,
+        light_forward,
+        light_projection,
+        light_mode,
+    )
+    Lava.set_position!(light_space)
+    Lava.gfx_output(0, light_space)
+    return nothing
+end
+
+function _mesh_shadow_vertex(
+    positions::Lava.LavaDeviceArray{Vec4f,1},
+    translations::Lava.LavaDeviceArray{Vec4f,1},
+    rotations::Lava.LavaDeviceArray{Vec4f,1},
+    scales::Lava.LavaDeviceArray{Vec4f,1},
+    light_position::Vec4f,
+    light_right::Vec4f,
+    light_up::Vec4f,
+    light_forward::Vec4f,
+    light_projection::Vec4f,
+    light_mode::Float32,
+)
+    vertex_id = Lava.vertex_index()
+    instance_id = Lava.instance_index()
+    local_position = positions[vertex_id]
+    translation = translations[instance_id]
+    rotation = rotations[instance_id]
+    scale = scales[instance_id]
+    scaled_position = Vec4f(
+        local_position[1] * scale[1],
+        local_position[2] * scale[2],
+        local_position[3] * scale[3],
+        0.0f0,
+    )
+    rotated_position = _rotate_vector(rotation, scaled_position)
+    world_position = Vec4f(
+        rotated_position[1] + translation[1],
+        rotated_position[2] + translation[2],
+        rotated_position[3] + translation[3],
+        1.0f0,
+    )
+    light_space = _project_world(
+        world_position,
+        light_position,
+        light_right,
+        light_up,
+        light_forward,
+        light_projection,
+        light_mode,
+    )
+    Lava.set_position!(light_space)
+    Lava.gfx_output(0, light_space)
+    return nothing
+end
+
+function _shadow_fragment()
+    light_space = Lava.gfx_input(Vec4f, 0)
+    depth = clamp(light_space[3], 0.0f0, 1.0f0)
+    Lava.gfx_output(0, Vec4f(depth, depth, depth, 1.0f0))
+    return nothing
+end
+
+function _shadow_depth(u::Float32, v::Float32)::Float32
+    return Lava.sample_texture_2d(UInt32(1), u, v, UInt32(0))
+end
+
+function _shadow_visibility(light_space::Vec4f)::Float32
+    inside =
+        -1.0f0 <= light_space[1] <= 1.0f0 &&
+            -1.0f0 <= light_space[2] <= 1.0f0 &&
+            0.0f0 <= light_space[3] <= 1.0f0
+    inside || return 1.0f0
+    uv_x = light_space[1] * 0.5f0 + 0.5f0
+    uv_y = light_space[2] * 0.5f0 + 0.5f0
+    texel = 1.0f0 / 512.0f0
+    bias = 0.0035f0
+    depth = light_space[3] - bias
+    visible = 0.0f0
+    visible += depth <= _shadow_depth(uv_x - texel, uv_y - texel) ? 1.0f0 : 0.0f0
+    visible += depth <= _shadow_depth(uv_x + texel, uv_y - texel) ? 1.0f0 : 0.0f0
+    visible += depth <= _shadow_depth(uv_x - texel, uv_y + texel) ? 1.0f0 : 0.0f0
+    visible += depth <= _shadow_depth(uv_x + texel, uv_y + texel) ? 1.0f0 : 0.0f0
+    return 0.25f0 + 0.75f0 * (visible * 0.25f0)
 end
 
 function _terrain_fragment()
@@ -606,6 +777,7 @@ function _terrain_fragment()
     ambient_color = Lava.gfx_input(Vec4f, 8)
     fog_color = Lava.gfx_input(Vec4f, 9)
     camera_position = Lava.gfx_input(Vec4f, 10)
+    light_space = Lava.gfx_input(Vec4f, 11)
     light_intensity = lighting_parameters[1]
     fog_density = lighting_parameters[2]
     exposure = lighting_parameters[3]
@@ -625,6 +797,7 @@ function _terrain_fragment()
         ambient_color,
         material[1],
         material[2],
+        _shadow_visibility(light_space),
         view_direction,
     )
     fogged_color = _apply_fog(
@@ -715,6 +888,22 @@ function backend()::LavaBackend
             cull=NoCull(),
             depth=DepthLess(),
         )
+        terrain_shadow_pipeline = GraphicsPipeline(
+            ;
+            vertex=_terrain_shadow_vertex,
+            fragment=_shadow_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthLess(),
+        )
+        mesh_shadow_pipeline = GraphicsPipeline(
+            ;
+            vertex=_mesh_shadow_vertex,
+            fragment=_shadow_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthLess(),
+        )
         created = LavaBackend(
             context,
             context.default_bq,
@@ -725,7 +914,11 @@ function backend()::LavaBackend
             mesh_pipeline,
             texture_pipeline,
             depth_pipeline,
-            Dict{Tuple{Int,Int,Bool},Lava.LavaFramebuffer}(),
+            terrain_shadow_pipeline,
+            mesh_shadow_pipeline,
+            Dict{Tuple{Int,Int,Bool,Symbol},Lava.LavaFramebuffer}(),
+            nothing,
+            nothing,
             nothing,
             nothing,
             nothing,
@@ -735,6 +928,8 @@ function backend()::LavaBackend
             UInt64(0),
             UInt64(0),
             UInt64(0),
+            false,
+            false,
             false,
             false,
             false,
@@ -756,8 +951,14 @@ function _validate_dimensions(width_px::Integer, height_px::Integer)
     return (Int(width_px), Int(height_px))
 end
 
-function _framebuffer!(state::LavaBackend, width_px::Int, height_px::Int, depth::Bool=false)::Lava.LavaFramebuffer
-    key = (width_px, height_px, depth)
+function _framebuffer!(
+    state::LavaBackend,
+    width_px::Int,
+    height_px::Int,
+    depth::Bool=false,
+    purpose::Symbol=:scene,
+)::Lava.LavaFramebuffer
+    key = (width_px, height_px, depth, purpose)
     return get!(state.framebuffers, key) do
         Lava.LavaFramebuffer(
             width_px,
@@ -1014,6 +1215,7 @@ end
 function _material_texture_resources!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
+    shadow::ShadowResources,
 )
     current = state.material_texture_resources
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
@@ -1055,7 +1257,7 @@ function _material_texture_resources!(
     data = _texture_matrix(bytes, width, height, color_space)
     gpu_texture = Lava.LavaTexture2D(data; ctx=state.context, filter=:linear, wrap=:clamp)
     sampler = Lava.LavaSampler(ctx=state.context, filter=:linear, wrap=:clamp)
-    bindings = Lava.bind_textures([gpu_texture * sampler])
+    bindings = Lava.bind_textures([gpu_texture * sampler, shadow.texture * shadow.sampler])
     created = MaterialTextureResources(packet.packet_sha256, gpu_texture, sampler, bindings)
     state.material_texture_resources = created
     state.upload_bytes += UInt64(length(bytes))
@@ -1159,6 +1361,86 @@ function _camera_frame(camera::WGEGraphics.CameraPacket)::CameraFrame
         camera.far_plane_m,
     )
     return CameraFrame(position, right, up, forward, projection, mode)
+end
+
+function _shadow_frame(
+    packet::WGEGraphics.GraphicsScenePacket,
+    lighting::DirectionalLighting,
+)::CameraFrame
+    light_direction = _normalize_vector(lighting.direction)
+    _dot_vector(light_direction, light_direction) > 0.5f0 ||
+        throw(AdapterError("invalid_light", "directional light direction is degenerate"))
+
+    minimum_height = minimum(packet.terrain.heights_m)
+    maximum_height = maximum(packet.terrain.heights_m)
+    center = Vec4f(0.0f0, (minimum_height + maximum_height) * 0.5f0, 0.0f0, 0.0f0)
+    horizontal_radius =
+        0.5f0 * sqrt(packet.terrain.width_m * packet.terrain.width_m + packet.terrain.length_m * packet.terrain.length_m)
+    radius = max(
+        sqrt(
+            horizontal_radius * horizontal_radius +
+                0.25f0 * (maximum_height - minimum_height) * (maximum_height - minimum_height),
+        ),
+        1.0f0,
+    )
+    for instance in packet.instances
+        translation = instance.transform.translation_xyz_m
+        offset = Vec4f(
+            translation[1] - center[1],
+            translation[2] - center[2],
+            translation[3] - center[3],
+            0.0f0,
+        )
+        radius = max(radius, sqrt(_dot_vector(offset, offset)) + max(instance.transform.scale_xyz...))
+    end
+
+    up_hint = abs(light_direction[3]) < 0.9f0 ? Vec4f(0.0f0, 0.0f0, 1.0f0, 0.0f0) : Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0)
+    right = _normalize_vector(_cross_vector(light_direction, up_hint))
+    up = _normalize_vector(_cross_vector(right, light_direction))
+    distance = max(2.0f0 * radius, 32.0f0)
+    position = Vec4f(
+        center[1] - light_direction[1] * distance,
+        center[2] - light_direction[2] * distance,
+        center[3] - light_direction[3] * distance,
+        0.0f0,
+    )
+    span = max(2.5f0 * radius, 2.0f0)
+    far_plane = 2.0f0 * distance + radius
+    return CameraFrame(
+        position,
+        right,
+        up,
+        light_direction,
+        Vec4f(0.5f0 * span, 0.5f0 * span, 0.1f0, far_plane),
+        0.0f0,
+    )
+end
+
+function _transition_color_to_sampled!(state::LavaBackend, framebuffer::Lava.LavaFramebuffer)
+    batch = Lava.ensure_active_batch!(state.queue)
+    Lava.transition_image!(
+        batch.cmd_buf,
+        framebuffer.color_image,
+        Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        Vulkan.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        Vulkan.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+        Vulkan.PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        Vulkan.ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+        Vulkan.ACCESS_SHADER_READ_BIT,
+    )
+    return nothing
+end
+
+function _shadow_texture(framebuffer::Lava.LavaFramebuffer, state::LavaBackend)
+    return Lava.LavaTexture2D{NTuple{4,Float32}}(
+        framebuffer.color_image,
+        framebuffer.color_memory,
+        framebuffer.color_view,
+        framebuffer.width,
+        framebuffer.height,
+        framebuffer.color_format,
+        state.context,
+    )
 end
 
 function _project_point(frame::CameraFrame, point::NTuple{3,<:Real})::Vec4f
@@ -1389,8 +1671,10 @@ function _mesh_resources!(
     packet::WGEGraphics.GraphicsScenePacket,
     frame::CameraFrame,
     visibility::MeshVisibility=_mesh_visibility(packet, frame),
+    ;
+    shadow::Bool=false,
 )::Union{Nothing,MeshResources}
-    current = state.mesh_resources
+    current = shadow ? state.shadow_mesh_resources : state.mesh_resources
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
     groups = Dict{Tuple{String,String},Vector{WGEGraphics.InstancePacket}}()
     for instance in packet.instances
@@ -1464,7 +1748,101 @@ function _mesh_resources!(
         visibility.culled_instance_count,
         total_vertices,
     )
-    state.mesh_resources = created
+    if shadow
+        state.shadow_mesh_resources = created
+    else
+        state.mesh_resources = created
+    end
+    return created
+end
+
+const SHADOW_MAP_SIZE = 512
+
+function _render_shadow_map!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    shadow::ShadowResources,
+    terrain::TerrainResources,
+    mesh_resources::Union{Nothing,MeshResources},
+)
+    target = OffscreenTarget(shadow.framebuffer)
+    terrain_vertices = 6 * (packet.terrain.resolution - 1)^2
+    frame = shadow.light_frame
+    draw!(
+        state.queue,
+        state.terrain_shadow_pipeline,
+        target,
+        terrain_vertices;
+        args=(
+            terrain.heights,
+            terrain.resolution,
+            Float32(packet.terrain.width_m),
+            Float32(packet.terrain.length_m),
+            frame.position,
+            frame.right,
+            frame.up,
+            frame.forward,
+            frame.projection,
+            frame.mode,
+        ),
+        clear_color=(1.0f0, 1.0f0, 1.0f0, 1.0f0),
+    )
+    state.draw_calls += 1
+    if !state.terrain_shadow_compiled
+        state.terrain_shadow_compiled = true
+        state.pipeline_compilations += 1
+    end
+    if mesh_resources !== nothing
+        for batch in mesh_resources.batches
+            draw!(
+                state.queue,
+                state.mesh_shadow_pipeline,
+                target,
+                batch.vertex_count;
+                args=(
+                    batch.positions,
+                    batch.translations,
+                    batch.rotations,
+                    batch.scales,
+                    frame.position,
+                    frame.right,
+                    frame.up,
+                    frame.forward,
+                    frame.projection,
+                    frame.mode,
+                ),
+                instances=batch.instance_count,
+                clear_color=nothing,
+                depth_clear=nothing,
+            )
+            state.draw_calls += 1
+            if !state.mesh_shadow_compiled
+                state.mesh_shadow_compiled = true
+                state.pipeline_compilations += 1
+            end
+        end
+    end
+    _transition_color_to_sampled!(state, shadow.framebuffer)
+    return nothing
+end
+
+function _shadow_resources!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    lighting::DirectionalLighting,
+)::ShadowResources
+    current = state.shadow_resources
+    current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
+    light_frame = _shadow_frame(packet, lighting)
+    framebuffer = _framebuffer!(state, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, true, :shadow)
+    texture = _shadow_texture(framebuffer, state)
+    sampler = Lava.LavaSampler(ctx=state.context, filter=:nearest, wrap=:clamp)
+    created = ShadowResources(packet.packet_sha256, framebuffer, texture, sampler, light_frame)
+    terrain = _terrain_resources!(state, packet)
+    visibility = _mesh_visibility(packet, light_frame)
+    mesh_resources = _mesh_resources!(state, packet, light_frame, visibility; shadow=true)
+    _render_shadow_map!(state, packet, created, terrain, mesh_resources)
+    state.shadow_resources = created
     return created
 end
 
@@ -1565,8 +1943,9 @@ function render_scene(
     texture_enabled = _material_texture_enabled(material)
     camera_frame = _camera_frame(packet.camera)
     lighting = _lighting(packet)
-    texture_resources = _material_texture_resources!(state, packet)
     resources = _terrain_resources!(state, packet)
+    shadow_resources = _shadow_resources!(state, packet, lighting)
+    texture_resources = _material_texture_resources!(state, packet, shadow_resources)
     visibility = _mesh_visibility(packet, camera_frame)
     mesh_resources = _mesh_resources!(state, packet, camera_frame, visibility)
     overlay_resources = _overlay_resources!(state, packet, camera_frame)
@@ -1609,6 +1988,12 @@ function render_scene(
             camera_frame.forward,
             camera_frame.projection,
             camera_frame.mode,
+            shadow_resources.light_frame.position,
+            shadow_resources.light_frame.right,
+            shadow_resources.light_frame.up,
+            shadow_resources.light_frame.forward,
+            shadow_resources.light_frame.projection,
+            shadow_resources.light_frame.mode,
             Vec4f(material.base_color_rgba...),
             material.metallic,
             material.roughness,
@@ -1651,6 +2036,12 @@ function render_scene(
                     camera_frame.forward,
                     camera_frame.projection,
                     camera_frame.mode,
+                    shadow_resources.light_frame.position,
+                    shadow_resources.light_frame.right,
+                    shadow_resources.light_frame.up,
+                    shadow_resources.light_frame.forward,
+                    shadow_resources.light_frame.projection,
+                    shadow_resources.light_frame.mode,
                     lighting.direction,
                     lighting.color,
                     Float32(lighting.intensity),

@@ -78,7 +78,7 @@ our own reproducible probes and Rust-owned receipts.
 | Textures, samplers, descriptors | `LavaTexture2D`, `LavaSampler`, texture bindings and descriptor setup | EXISTS UPSTREAM | Low-level binding exists; WGE still needs canonical texture/material asset contracts, color space, mip, streaming, and provenance policy. |
 | Raster state | depth, blending, culling, topology, attachments, viewport/scissor-related state | EXISTS UPSTREAM | Sufficient primitives for a first forward/deferred experiment; WGE render intent is missing. |
 | PBR/material graph | Hikari has material/shading code in its own path, but Lava graphics has no WGE material model or game scene material graph | MISSING | Build a narrow WGE material intent and lower it to Lava. Do not make Hikari’s scene representation canonical. |
-| Lights, shadows, IBL, HDR, AA, fog | no game-renderer-owned canonical system found in Lava graphics | MISSING | Implement only the vertical-slice subset behind typed WGE intent; retain a quality-gap ledger for the rest. |
+| Lights, shadows, IBL, HDR, AA, fog | typed directional-light/environment intent plus one deterministic directional shadow map and tone-mapped fog now exist in the native adapter | PARTIAL | Keep the fixed shadow-map profile behind the authority boundary; cascades/contact shadows, IBL, HDR history, AA, and richer atmosphere remain quality-gap work. |
 | Terrain, foliage, decals, particles, water, post-processing | no WGE/game-level implementation in Lava | MISSING | These are downstream renderer systems, not upstream Lava features. Start with terrain plus instancing and a measurable capture path. |
 | GPU scene, culling, LOD, meshlets, streaming | indirect and buffer primitives exist; no WGE scene/culling/LOD/streaming policy | PARTIAL | WGE must own semantic visibility, LOD, residency, and capture priorities. |
 | BLAS/TLAS and hardware RT | `HardwareAccel`, HWTLAS, BLAS/TLAS update/refit paths, RT shader pipeline, Raycore compatibility | EXISTS UPSTREAM | Optional capability lane, fail-closed; not a prerequisite for the first certified raster vertical slice. |
@@ -320,7 +320,8 @@ worker script digest, and a digest of the validated capability/worker identity.
 
 The inspected `render-layout` capture is deliberately recorded as a quality
 gap, not a success-by-appearance claim: it is a coarse height/slope terrain
-diagnostic with line-based semantic overlays. High-end material, lighting,
-shadow, foliage, particle, water, post-processing, and asset-rich quality work
-remain downstream of this certified substrate. No rigging, Unity, Bevy
-canonicalization, or broad text-to-3D work was used to close this checkpoint.
+diagnostic with line-based semantic overlays and one fixed 512² directional
+shadow map. Cascades, contact/soft shadows, IBL, foliage, particle, water,
+post-processing, and asset-rich quality work remain downstream of this
+certified substrate. No rigging, Unity, Bevy canonicalization, or broad
+text-to-3D work was used to close this checkpoint.
