@@ -228,6 +228,24 @@ println(JSON3.write(response["frame"]))
             > 0
     );
     assert!(frame["telemetry"]["draw_calls"].as_u64().unwrap() >= 3);
+    assert_eq!(
+        frame["telemetry"]["instance_count"].as_u64().unwrap(),
+        packet.body.instances.len() as u64
+    );
+    assert_eq!(
+        frame["telemetry"]["visible_instance_count"]
+            .as_u64()
+            .unwrap(),
+        packet.body.instances.len() as u64
+    );
+    assert_eq!(
+        frame["telemetry"]["culled_instance_count"]
+            .as_u64()
+            .unwrap(),
+        0
+    );
+    assert!(frame["telemetry"]["terrain_vertex_count"].as_u64().unwrap() > 0);
+    assert!(frame["telemetry"]["mesh_vertex_count"].as_u64().unwrap() > 0);
 
     fs::remove_dir_all(output_dir).expect("test output directory is removed");
 }

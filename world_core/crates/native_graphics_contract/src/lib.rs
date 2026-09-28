@@ -93,6 +93,7 @@ pub struct GraphicsScenePacketBody {
     pub meshes: Vec<MeshPacket>,
     pub instances: Vec<InstancePacket>,
     pub lights: Vec<LightIntent>,
+    pub environment: EnvironmentIntent,
     pub overlays: Vec<SemanticOverlay>,
     pub capture: GraphicsCaptureRequest,
 }
@@ -311,6 +312,16 @@ pub struct LightIntent {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct EnvironmentIntent {
+    pub sky_top_rgb: [f32; 3],
+    pub sky_horizon_rgb: [f32; 3],
+    pub fog_color_rgb: [f32; 3],
+    pub fog_density: f32,
+    pub exposure: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum LightKind {
     Directional {
@@ -458,6 +469,11 @@ pub struct GraphicsTelemetry {
     pub draw_calls: usize,
     pub dispatch_calls: usize,
     pub pipeline_compilations: usize,
+    pub instance_count: usize,
+    pub visible_instance_count: usize,
+    pub culled_instance_count: usize,
+    pub terrain_vertex_count: usize,
+    pub mesh_vertex_count: usize,
     pub frame_time_us: u64,
 }
 
@@ -590,6 +606,7 @@ pub fn validate_scene_packet(packet: &GraphicsScenePacket) -> Result<(), Graphic
             )));
         }
     }
+    validate_environment(&packet.body.environment)?;
     let mut marker_ids = BTreeSet::new();
     for overlay in &packet.body.overlays {
         let marker_id = validate_overlay(overlay)?;
@@ -1213,6 +1230,13 @@ pub fn lower_reference_world(
             color_rgb: [1.0, 0.97, 0.92],
             intensity: 2.0,
         }],
+        environment: EnvironmentIntent {
+            sky_top_rgb: [0.08, 0.16, 0.30],
+            sky_horizon_rgb: [0.48, 0.56, 0.62],
+            fog_color_rgb: [0.46, 0.53, 0.58],
+            fog_density: 0.006,
+            exposure: 1.0,
+        },
         overlays,
         capture,
     };
@@ -1363,6 +1387,31 @@ fn validate_material(material: &MaterialIntent) -> Result<(), GraphicsContractEr
     {
         return Err(GraphicsContractError::malformed(
             "material metallic and roughness must be in [0, 1]",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_environment(environment: &EnvironmentIntent) -> Result<(), GraphicsContractError> {
+    for (color, label) in [
+        (&environment.sky_top_rgb, "environment sky top"),
+        (&environment.sky_horizon_rgb, "environment sky horizon"),
+        (&environment.fog_color_rgb, "environment fog color"),
+    ] {
+        finite_values(color, label)?;
+        if color.iter().any(|value| !(0.0..=1.0).contains(value)) {
+            return Err(GraphicsContractError::malformed(format!(
+                "{label} must be in [0, 1]"
+            )));
+        }
+    }
+    if !environment.fog_density.is_finite()
+        || !(0.0..=1.0).contains(&environment.fog_density)
+        || !environment.exposure.is_finite()
+        || !(0.01..=16.0).contains(&environment.exposure)
+    {
+        return Err(GraphicsContractError::malformed(
+            "environment fog density or exposure is outside its bounds",
         ));
     }
     Ok(())
@@ -1638,6 +1687,11 @@ fn validate_telemetry(telemetry: &GraphicsTelemetry) -> Result<(), GraphicsContr
         (telemetry.draw_calls, "draw_calls"),
         (telemetry.dispatch_calls, "dispatch_calls"),
         (telemetry.pipeline_compilations, "pipeline_compilations"),
+        (telemetry.instance_count, "instance_count"),
+        (telemetry.visible_instance_count, "visible_instance_count"),
+        (telemetry.culled_instance_count, "culled_instance_count"),
+        (telemetry.terrain_vertex_count, "terrain_vertex_count"),
+        (telemetry.mesh_vertex_count, "mesh_vertex_count"),
     ] {
         if value > MAX_TELEMETRY_COUNTER {
             return Err(GraphicsContractError::malformed(format!(
@@ -1818,6 +1872,13 @@ mod tests {
                 color_rgb: [1.0, 1.0, 1.0],
                 intensity: 1.0,
             }],
+            environment: EnvironmentIntent {
+                sky_top_rgb: [0.08, 0.16, 0.30],
+                sky_horizon_rgb: [0.48, 0.56, 0.62],
+                fog_color_rgb: [0.46, 0.53, 0.58],
+                fog_density: 0.006,
+                exposure: 1.0,
+            },
             overlays: vec![SemanticOverlay::Polyline {
                 marker_id: "route".into(),
                 role: MarkerRole::Route,
@@ -1888,6 +1949,11 @@ mod tests {
                 draw_calls: 1,
                 dispatch_calls: 0,
                 pipeline_compilations: 1,
+                instance_count: 0,
+                visible_instance_count: 0,
+                culled_instance_count: 0,
+                terrain_vertex_count: 1,
+                mesh_vertex_count: 0,
                 frame_time_us: 1,
             },
             detail: "measured".into(),

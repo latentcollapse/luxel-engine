@@ -258,8 +258,9 @@ independently recomputed visual measurements before promoting a receipt.
 
 The supported scene profile is intentionally fail-closed while quality systems
 are being built: the Lava adapter accepts one directional light, opaque
-non-metallic material intents without scene-texture bindings, and an
-orthographic native terrain projection. Perspective cameras, point lights,
+non-metallic material intents without scene-texture bindings, an orthographic
+native terrain projection, and typed sky/fog/exposure intent. Perspective
+cameras, point lights,
 textured materials, blend/mask materials, and metallic materials are typed and
 validated at the boundary but rejected by the adapter until their semantics
 are implemented. This keeps the packet extensible without silently rendering
@@ -272,7 +273,9 @@ The receipt additionally binds the physical device UUID, worker-script digest,
 and a renderer-identity digest over the validated capability and worker-ready
 messages. Rust rejects flat/black captures, insufficient RGB diversity, and
 missing pixels for any semantic marker role present in the packet; producer
-measurements are compared against Rust’s independent recomputation.
+measurements are compared against Rust’s independent recomputation. Frame
+telemetry now carries packet-checked instance visibility and terrain/mesh
+submission counts, exposing a measurable culling/performance surface.
 The inspected frame is intentionally only a coarse diagnostic slice: terrain
 shading is height/slope-based, overlays are line primitives, and the path does
 not yet claim PBR, shadows, IBL, foliage, particles, post-processing, or

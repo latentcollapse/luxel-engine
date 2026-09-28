@@ -51,7 +51,12 @@ struct MeshResources
     positions::Lava.LavaArray{Vec4f, 1}
     normals::Lava.LavaArray{Vec4f, 1}
     colors::Lava.LavaArray{Vec4f, 1}
+    material_parameters::Lava.LavaArray{Vec4f, 1}
+    world_positions::Lava.LavaArray{Vec4f, 1}
     vertex_count::Int
+    instance_count::Int
+    visible_instance_count::Int
+    culled_instance_count::Int
 end
 
 struct TextureProbeResources
@@ -60,10 +65,11 @@ struct TextureProbeResources
     bindings::Lava.TextureBindings
 end
 
-mutable struct LavaBackend{C, Q, PP, TP, OP, MP, TXP, DP}
+mutable struct LavaBackend{C, Q, PP, SP, TP, OP, MP, TXP, DP}
     context::C
     queue::Q
     probe_pipeline::PP
+    sky_pipeline::SP
     terrain_pipeline::TP
     overlay_pipeline::OP
     mesh_pipeline::MP
@@ -81,6 +87,7 @@ mutable struct LavaBackend{C, Q, PP, TP, OP, MP, TXP, DP}
     probe_compiled::Bool
     terrain_compiled::Bool
     overlay_compiled::Bool
+    sky_compiled::Bool
     mesh_compiled::Bool
     texture_compiled::Bool
     depth_compiled::Bool
@@ -99,6 +106,44 @@ end
 
 function _probe_fragment()
     Lava.gfx_output(0, Vec4f(0.0f0, 1.0f0, 0.0f0, 1.0f0))
+    return nothing
+end
+
+function _sky_vertex(sky_top::Vec4f, sky_horizon::Vec4f)
+    vertex_id = Lava.vertex_index() - Int32(1)
+    x = Float32(Int32(vertex_id & Int32(1)) * 4 - 1)
+    y = Float32(Int32((vertex_id >> Int32(1)) & Int32(1)) * 4 - 1)
+    Lava.set_position!(Vec4f(x, y, 0.99f0, 1.0f0))
+    sky_weight = clamp((y + 1.0f0) * 0.5f0, 0.0f0, 1.0f0)
+    horizon_weight = 1.0f0 - sky_weight
+    Lava.gfx_output(
+        0,
+        Vec4f(
+            sky_horizon[1] * horizon_weight + sky_top[1] * sky_weight,
+            sky_horizon[2] * horizon_weight + sky_top[2] * sky_weight,
+            sky_horizon[3] * horizon_weight + sky_top[3] * sky_weight,
+            1.0f0,
+        ),
+    )
+    return nothing
+end
+
+function _sky_fragment(
+    fog_color::Vec4f,
+    exposure::Float32,
+)
+    sky = Lava.gfx_input(Vec4f, 0)
+    exposure_factor = max(exposure, 0.01f0)
+    atmosphere = 0.08f0 * exposure_factor
+    Lava.gfx_output(
+        0,
+        Vec4f(
+            min(sky[1] + fog_color[1] * atmosphere, 1.0f0),
+            min(sky[2] + fog_color[2] * atmosphere, 1.0f0),
+            min(sky[3] + fog_color[3] * atmosphere, 1.0f0),
+            1.0f0,
+        ),
+    )
     return nothing
 end
 
@@ -133,6 +178,107 @@ function _depth_probe_fragment()
     return nothing
 end
 
+function _normalize_vector(vector::Vec4f)
+    length_squared = vector[1] * vector[1] + vector[2] * vector[2] + vector[3] * vector[3]
+    inverse_length = inv(sqrt(max(length_squared, 1.0f-8)))
+    return Vec4f(
+        vector[1] * inverse_length,
+        vector[2] * inverse_length,
+        vector[3] * inverse_length,
+        0.0f0,
+    )
+end
+
+function _material_response(
+    base_color::Vec4f,
+    normal::Vec4f,
+    light_direction::Vec4f,
+    light_color::Vec4f,
+    light_intensity::Float32,
+    ambient::Float32,
+    metallic::Float32,
+    roughness::Float32,
+)
+    surface_normal = _normalize_vector(normal)
+    light_vector = _normalize_vector(
+        Vec4f(-light_direction[1], -light_direction[2], -light_direction[3], 0.0f0),
+    )
+    view_vector = Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0)
+    half_vector = _normalize_vector(
+        Vec4f(
+            light_vector[1] + view_vector[1],
+            light_vector[2] + view_vector[2],
+            light_vector[3] + view_vector[3],
+            0.0f0,
+        ),
+    )
+    normal_light = max(
+        surface_normal[1] * light_vector[1] +
+        surface_normal[2] * light_vector[2] +
+        surface_normal[3] * light_vector[3],
+        0.0f0,
+    )
+    normal_half = max(
+        surface_normal[1] * half_vector[1] +
+        surface_normal[2] * half_vector[2] +
+        surface_normal[3] * half_vector[3],
+        0.0f0,
+    )
+    half_squared = normal_half * normal_half
+    highlight = half_squared * half_squared
+    metalness = clamp(metallic, 0.0f0, 1.0f0)
+    surface_roughness = clamp(roughness, 0.0f0, 1.0f0)
+    diffuse_factor = (1.0f0 - metalness) * (ambient + light_intensity * normal_light)
+    specular_factor =
+        (0.04f0 + 0.96f0 * metalness) *
+        (1.0f0 - 0.8f0 * surface_roughness) *
+        light_intensity *
+        highlight
+    return Vec4f(
+        min(
+            max(
+                base_color[1] * light_color[1] * diffuse_factor +
+                light_color[1] * specular_factor,
+                0.0f0,
+            ),
+            1.0f0,
+        ),
+        min(
+            max(
+                base_color[2] * light_color[2] * diffuse_factor +
+                light_color[2] * specular_factor,
+                0.0f0,
+            ),
+            1.0f0,
+        ),
+        min(
+            max(
+                base_color[3] * light_color[3] * diffuse_factor +
+                light_color[3] * specular_factor,
+                0.0f0,
+            ),
+            1.0f0,
+        ),
+        base_color[4],
+    )
+end
+
+function _apply_fog(
+    color::Vec4f,
+    fog_color::Vec4f,
+    distance::Float32,
+    density::Float32,
+)
+    fog_weight = clamp(distance * density, 0.0f0, 0.92f0)
+    clear_weight = 1.0f0 - fog_weight
+    return Vec4f(
+        color[1] * clear_weight + fog_color[1] * fog_weight,
+        color[2] * clear_weight + fog_color[2] * fog_weight,
+        color[3] * clear_weight + fog_color[3] * fog_weight,
+        color[4],
+    )
+end
+
 function _terrain_vertex(
     heights::Lava.LavaDeviceArray{Float32, 1},
     slopes::Lava.LavaDeviceArray{Float32, 1},
@@ -147,6 +293,10 @@ function _terrain_vertex(
     light_color::Vec4f,
     light_intensity::Float32,
     ambient::Float32,
+    metallic::Float32,
+    roughness::Float32,
+    fog_color::Vec4f,
+    fog_density::Float32,
 )
     vertex_id = Lava.vertex_index() - Int32(1)
     cells_per_axis = resolution - Int32(1)
@@ -173,15 +323,25 @@ function _terrain_vertex(
     slope_factor = min(max(slope * 0.8f0, 0.0f0), 1.0f0)
     region_tint = 0.82f0 + min(Float32(region) * 0.015f0, 0.18f0)
     shade = (1.0f0 - 0.45f0 * slope_factor) * region_tint
-    illumination = min(ambient + light_intensity * max(-light_direction[2], 0.0f0), 2.0f0)
+    shaded_base = Vec4f(
+        base_color[1] * shade,
+        base_color[2] * shade,
+        base_color[3] * shade,
+        base_color[4],
+    )
+    lit_color = _material_response(
+        shaded_base,
+        Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0),
+        light_direction,
+        light_color,
+        light_intensity,
+        ambient,
+        metallic,
+        roughness,
+    )
     Lava.gfx_output(
         0,
-        Vec4f(
-            min(base_color[1] * light_color[1] * shade * illumination, 1.0f0),
-            min(base_color[2] * light_color[2] * shade * illumination, 1.0f0),
-            min(base_color[3] * light_color[3] * shade * illumination, 1.0f0),
-            base_color[4],
-        ),
+        _apply_fog(lit_color, fog_color, sqrt(world_x * world_x + world_z * world_z), fog_density),
     )
     return nothing
 end
@@ -190,28 +350,39 @@ function _mesh_vertex(
     positions::Lava.LavaDeviceArray{Vec4f, 1},
     normals::Lava.LavaDeviceArray{Vec4f, 1},
     colors::Lava.LavaDeviceArray{Vec4f, 1},
+    material_parameters::Lava.LavaDeviceArray{Vec4f, 1},
+    world_positions::Lava.LavaDeviceArray{Vec4f, 1},
     light_direction::Vec4f,
     light_color::Vec4f,
     light_intensity::Float32,
     ambient::Float32,
+    fog_color::Vec4f,
+    fog_density::Float32,
 )
     vertex_id = Lava.vertex_index()
     position = positions[vertex_id]
     normal = normals[vertex_id]
-    diffuse = max(
-        -(normal[1] * light_direction[1] + normal[2] * light_direction[2] + normal[3] * light_direction[3]),
-        0.0f0,
-    )
-    illumination = min(ambient + light_intensity * diffuse, 2.0f0)
     base_color = colors[vertex_id]
+    material = material_parameters[vertex_id]
+    world_position = world_positions[vertex_id]
     Lava.set_position!(position)
+    lit_color = _material_response(
+        base_color,
+        normal,
+        light_direction,
+        light_color,
+        light_intensity,
+        ambient,
+        material[1],
+        material[2],
+    )
     Lava.gfx_output(
         0,
-        Vec4f(
-            min(base_color[1] * light_color[1] * illumination, 1.0f0),
-            min(base_color[2] * light_color[2] * illumination, 1.0f0),
-            min(base_color[3] * light_color[3] * illumination, 1.0f0),
-            base_color[4],
+        _apply_fog(
+            lit_color,
+            fog_color,
+            sqrt(world_position[1] * world_position[1] + world_position[3] * world_position[3]),
+            fog_density,
         ),
     )
     return nothing
@@ -247,6 +418,14 @@ function backend()::LavaBackend
             ;
             vertex=_probe_vertex,
             fragment=_probe_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthOff(),
+        )
+        sky_pipeline = GraphicsPipeline(
+            ;
+            vertex=_sky_vertex,
+            fragment=_sky_fragment,
             blend=Opaque(),
             cull=NoCull(),
             depth=DepthOff(),
@@ -296,6 +475,7 @@ function backend()::LavaBackend
             context,
             context.default_bq,
             probe_pipeline,
+            sky_pipeline,
             terrain_pipeline,
             overlay_pipeline,
             mesh_pipeline,
@@ -310,6 +490,7 @@ function backend()::LavaBackend
             UInt64(0),
             UInt64(0),
             UInt64(0),
+            false,
             false,
             false,
             false,
@@ -747,13 +928,47 @@ function _append_overlay!(
     return nothing
 end
 
-function _mesh_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)
+function _instance_visible(
+    packet::WGEGraphics.GraphicsScenePacket,
+    instance::WGEGraphics.InstancePacket,
+)
+    center = _project_point(packet.camera, instance.transform.translation_xyz_m)
+    span = _orthographic_span(packet.camera)
+    aspect = Float32(packet.camera.width_px) / Float32(packet.camera.height_px)
+    radius = max(instance.transform.scale_xyz...)
+    margin_y = radius / (span * 0.5f0)
+    margin_x = radius / (span * aspect * 0.5f0)
+    return -1.0f0 - margin_x <= center[1] <= 1.0f0 + margin_x &&
+           -1.0f0 - margin_y <= center[2] <= 1.0f0 + margin_y
+end
+
+function _mesh_visibility(packet::WGEGraphics.GraphicsScenePacket)
+    instance_count = length(packet.instances)
+    visible_instance_count = count(
+        instance -> _instance_visible(packet, instance),
+        packet.instances,
+    )
+    return (
+        instance_count=instance_count,
+        visible_instance_count=visible_instance_count,
+        culled_instance_count=instance_count - visible_instance_count,
+    )
+end
+
+function _mesh_resources!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    visibility::NamedTuple=_mesh_visibility(packet),
+)
     current = state.mesh_resources
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
     positions = Vec4f[]
     normals = Vec4f[]
     colors = Vec4f[]
+    material_parameters = Vec4f[]
+    world_positions = Vec4f[]
     for instance in packet.instances
+        _instance_visible(packet, instance) || continue
         mesh = findfirst(mesh -> mesh.mesh_id == instance.mesh_id, packet.meshes)
         mesh === nothing && throw(AdapterError("provenance", "instance references an absent mesh"))
         mesh_packet = packet.meshes[mesh]
@@ -765,14 +980,33 @@ function _mesh_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsSceneP
             push!(positions, _project_point(packet.camera, world_position))
             push!(normals, Vec4f(world_normal..., 0.0f0))
             push!(colors, Vec4f(material.base_color_rgba...))
+            push!(material_parameters, Vec4f(material.metallic, material.roughness, 0.0f0, 0.0f0))
+            push!(world_positions, Vec4f(world_position..., 1.0f0))
         end
     end
     isempty(positions) && return nothing
     gpu_positions = Lava.LavaArray{Vec4f, 1}(positions; bq=state.queue)
     gpu_normals = Lava.LavaArray{Vec4f, 1}(normals; bq=state.queue)
     gpu_colors = Lava.LavaArray{Vec4f, 1}(colors; bq=state.queue)
-    state.upload_bytes += UInt64(sizeof(Vec4f) * (length(positions) + length(normals) + length(colors)))
-    created = MeshResources(packet.packet_sha256, gpu_positions, gpu_normals, gpu_colors, length(positions))
+    gpu_material_parameters = Lava.LavaArray{Vec4f, 1}(material_parameters; bq=state.queue)
+    gpu_world_positions = Lava.LavaArray{Vec4f, 1}(world_positions; bq=state.queue)
+    state.upload_bytes += UInt64(
+        sizeof(Vec4f) *
+        (length(positions) + length(normals) + length(colors) +
+         length(material_parameters) + length(world_positions)),
+    )
+    created = MeshResources(
+        packet.packet_sha256,
+        gpu_positions,
+        gpu_normals,
+        gpu_colors,
+        gpu_material_parameters,
+        gpu_world_positions,
+        length(positions),
+        visibility.instance_count,
+        visibility.visible_instance_count,
+        visibility.culled_instance_count,
+    )
     state.mesh_resources = created
     return created
 end
@@ -834,7 +1068,8 @@ function render_scene(
     started_ns = time_ns()
     width, height = _validate_dimensions(packet.width_px, packet.height_px)
     resources = _terrain_resources!(state, packet)
-    mesh_resources = _mesh_resources!(state, packet)
+    visibility = _mesh_visibility(packet)
+    mesh_resources = _mesh_resources!(state, packet, visibility)
     overlay_resources = _overlay_resources!(state, packet)
     framebuffer = _framebuffer!(state, width, height, true)
     target = OffscreenTarget(framebuffer)
@@ -845,13 +1080,33 @@ function render_scene(
     terrain_vertices = 6 * (packet.terrain.resolution - 1)^2
     draw!(
         state.queue,
+        state.sky_pipeline,
+        target,
+        3;
+        args=(
+            Vec4f(packet.environment.sky_top_rgb..., 1.0f0),
+            Vec4f(packet.environment.sky_horizon_rgb..., 1.0f0),
+        ),
+        frag_args=(
+            Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
+            packet.environment.exposure,
+        ),
+        clear_color=(0.02f0, 0.03f0, 0.05f0, 1.0f0),
+    )
+    state.draw_calls += 1
+    if !state.sky_compiled
+        state.sky_compiled = true
+        state.pipeline_compilations += 1
+    end
+    draw!(
+        state.queue,
         state.terrain_pipeline,
         target,
         terrain_vertices;
-            args=(
-                resources.heights,
-                resources.slopes,
-                resources.regions,
+        args=(
+            resources.heights,
+            resources.slopes,
+            resources.regions,
             resources.resolution,
             Float32(packet.terrain.width_m),
             Float32(packet.terrain.length_m),
@@ -862,8 +1117,12 @@ function render_scene(
             lighting.color,
             Float32(lighting.intensity),
             lighting.ambient,
+            material.metallic,
+            material.roughness,
+            Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
+            packet.environment.fog_density,
         ),
-        clear_color=(0.035f0, 0.045f0, 0.06f0, 1.0f0),
+        clear_color=nothing,
     )
     state.draw_calls += 1
     if !state.terrain_compiled
@@ -880,10 +1139,14 @@ function render_scene(
                 mesh_resources.positions,
                 mesh_resources.normals,
                 mesh_resources.colors,
+                mesh_resources.material_parameters,
+                mesh_resources.world_positions,
                 lighting.direction,
                 lighting.color,
                 Float32(lighting.intensity),
                 lighting.ambient,
+                Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
+                packet.environment.fog_density,
             ),
             clear_color=nothing,
             depth_clear=nothing,
@@ -931,6 +1194,11 @@ function render_scene(
             draw_calls=Int(state.draw_calls),
             dispatch_calls=0,
             pipeline_compilations=Int(state.pipeline_compilations),
+            instance_count=visibility.instance_count,
+            visible_instance_count=visibility.visible_instance_count,
+            culled_instance_count=visibility.culled_instance_count,
+            terrain_vertex_count=terrain_vertices,
+            mesh_vertex_count=mesh_resources === nothing ? 0 : mesh_resources.vertex_count,
             frame_time_us=Int(cld(time_ns() - started_ns, UInt64(1_000))),
         ),
     )

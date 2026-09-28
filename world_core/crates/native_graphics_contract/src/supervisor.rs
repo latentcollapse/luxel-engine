@@ -1,3 +1,4 @@
+use std::fs;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -200,13 +201,8 @@ impl GraphicsWorkerSupervisor {
                 GraphicsWorkerError::provenance("worker ready message has no script identity")
             })?
             .to_owned();
-        let renderer_identity_sha256 = sha256_prefixed(
-            &canonical_json(&json!({
-                "capabilities": ready,
-                "worker": self.ready_message,
-            }))
-            .map_err(GraphicsWorkerError::contract)?,
-        );
+        let renderer_identity_sha256 =
+            self.renderer_identity_sha256(ready, &worker_script_sha256)?;
         let response = self.request(json!({"op": "render_packet", "packet": packet}))?;
         let frame_value = response
             .get("frame")
@@ -266,6 +262,7 @@ impl GraphicsWorkerSupervisor {
                 "frame capture digest does not match its bytes",
             ));
         }
+        validate_frame_telemetry(packet, &frame.telemetry)?;
         let authoritative_measurements =
             measure_frame_capture(packet, &capture_bytes).map_err(GraphicsWorkerError::contract)?;
         validate_native_visual_gate(packet, &authoritative_measurements)
@@ -360,12 +357,40 @@ impl GraphicsWorkerSupervisor {
                 "worker ready script identity is not a sha256 digest",
             ));
         }
+        let expected_script_sha256 = sha256_file(&self.worker)?;
+        if script_sha256 != expected_script_sha256 {
+            return Err(GraphicsWorkerError::provenance(
+                "worker ready script identity does not match the launched worker file",
+            ));
+        }
         if ready.get("kind").and_then(Value::as_str) != Some("ready") {
             return Err(GraphicsWorkerError::protocol(
                 "worker did not send a ready message",
             ));
         }
         Ok(())
+    }
+
+    fn renderer_identity_sha256(
+        &self,
+        ready: &GraphicsReady,
+        worker_script_sha256: &str,
+    ) -> Result<String, GraphicsWorkerError> {
+        let source_digests = json!({
+            "worker_script": worker_script_sha256,
+            "lava_adapter": sha256_file(&self.project.join("src/LavaAdapter.jl"))?,
+            "graphics_contract": sha256_file(&self.project.join("src/WGEGraphics.jl"))?,
+            "project": sha256_file(&self.project.join("Project.toml"))?,
+            "manifest": sha256_file(&self.project.join("Manifest.toml"))?,
+        });
+        let identity = json!({
+            "capabilities": ready,
+            "worker_ready": self.ready_message,
+            "sources": source_digests,
+        });
+        Ok(sha256_prefixed(
+            &canonical_json(&identity).map_err(GraphicsWorkerError::contract)?,
+        ))
     }
 
     fn write_frame(&mut self, payload: &[u8]) -> Result<(), GraphicsWorkerError> {
@@ -415,6 +440,56 @@ impl GraphicsWorkerSupervisor {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+fn sha256_file(path: &Path) -> Result<String, GraphicsWorkerError> {
+    let bytes = fs::read(path).map_err(|error| {
+        GraphicsWorkerError::provenance(format!(
+            "renderer identity source {} is unreadable: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(sha256_prefixed(&bytes))
+}
+
+fn validate_frame_telemetry(
+    packet: &GraphicsScenePacket,
+    telemetry: &GraphicsTelemetry,
+) -> Result<(), GraphicsWorkerError> {
+    let expected_terrain_vertices = (packet.body.terrain.resolution - 1)
+        .checked_mul(packet.body.terrain.resolution - 1)
+        .and_then(|cells| cells.checked_mul(6))
+        .ok_or_else(|| GraphicsWorkerError::provenance("terrain vertex count overflows"))?;
+    if telemetry.terrain_vertex_count != expected_terrain_vertices {
+        return Err(GraphicsWorkerError::provenance(
+            "frame terrain vertex telemetry does not match the packet",
+        ));
+    }
+    if telemetry.instance_count != packet.body.instances.len()
+        || telemetry.visible_instance_count > telemetry.instance_count
+        || telemetry.culled_instance_count > telemetry.instance_count
+    {
+        return Err(GraphicsWorkerError::provenance(
+            "frame instance visibility telemetry is inconsistent with the packet",
+        ));
+    }
+    let reported_instances = telemetry
+        .visible_instance_count
+        .checked_add(telemetry.culled_instance_count)
+        .ok_or_else(|| {
+            GraphicsWorkerError::provenance("frame instance visibility telemetry overflows")
+        })?;
+    if reported_instances != telemetry.instance_count {
+        return Err(GraphicsWorkerError::provenance(
+            "frame instance visibility telemetry does not balance",
+        ));
+    }
+    if packet.body.instances.is_empty() && telemetry.mesh_vertex_count != 0 {
+        return Err(GraphicsWorkerError::provenance(
+            "frame reports mesh vertices for a packet without instances",
+        ));
+    }
+    Ok(())
 }
 
 fn measurements_agree(

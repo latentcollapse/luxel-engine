@@ -110,6 +110,14 @@ struct LightPacket
     intensity::Float32
 end
 
+struct EnvironmentPacket
+    sky_top_rgb::NTuple{3, Float32}
+    sky_horizon_rgb::NTuple{3, Float32}
+    fog_color_rgb::NTuple{3, Float32}
+    fog_density::Float32
+    exposure::Float32
+end
+
 abstract type OverlayPacket end
 
 struct PointOverlay <: OverlayPacket
@@ -152,6 +160,7 @@ struct GraphicsScenePacket
     meshes::Vector{MeshPacket}
     instances::Vector{InstancePacket}
     lights::Vector{LightPacket}
+    environment::EnvironmentPacket
     overlays::Vector{OverlayValue}
     capture_id::String
     width_px::UInt32
@@ -209,6 +218,7 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
             "meshes",
             "instances",
             "lights",
+            "environment",
             "overlays",
             "capture",
         )),
@@ -236,6 +246,7 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
     meshes = _parse_meshes(body["meshes"], material_ids)
     instances = _parse_instances(body["instances"], meshes, material_ids)
     lights = _parse_lights(body["lights"])
+    environment = _parse_environment(_object(body["environment"], "environment"))
     overlays = _parse_overlays(body["overlays"])
     capture = _object(body["capture"], "capture")
     _validate_capture(capture, body["camera"])
@@ -254,6 +265,7 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
         meshes,
         instances,
         lights,
+        environment,
         Vector{OverlayValue}(overlays),
         _string(capture["capture_id"], "capture_id"),
         UInt32(_integer(capture["width_px"], "capture.width_px")),
@@ -573,6 +585,28 @@ function _parse_lights(value::JSON3.Array)::Vector{LightPacket}
         push!(lights, LightPacket(id, _parse_light_kind(_object(object["kind"], "light.kind")), color, intensity))
     end
     return lights
+end
+
+function _parse_environment(value::JSON3.Object)::EnvironmentPacket
+    _exact_keys(
+        value,
+        Set(("sky_top_rgb", "sky_horizon_rgb", "fog_color_rgb", "fog_density", "exposure")),
+        "environment",
+    )
+    sky_top = _tuple(value["sky_top_rgb"], Val(3), "environment.sky_top_rgb")
+    sky_horizon = _tuple(value["sky_horizon_rgb"], Val(3), "environment.sky_horizon_rgb")
+    fog_color = _tuple(value["fog_color_rgb"], Val(3), "environment.fog_color_rgb")
+    for (color, label) in ((sky_top, "sky_top_rgb"), (sky_horizon, "sky_horizon_rgb"), (fog_color, "fog_color_rgb"))
+        all(channel -> 0.0f0 <= channel <= 1.0f0, color) ||
+            throw(ProtocolError("malformed_packet", "environment.$label is outside [0, 1]"))
+    end
+    fog_density = _finite_float32(value["fog_density"], "environment.fog_density")
+    exposure = _finite_float32(value["exposure"], "environment.exposure")
+    0.0f0 <= fog_density <= 1.0f0 ||
+        throw(ProtocolError("malformed_packet", "environment fog density is outside [0, 1]"))
+    0.01f0 <= exposure <= 16.0f0 ||
+        throw(ProtocolError("malformed_packet", "environment exposure is outside [0.01, 16]"))
+    return EnvironmentPacket(sky_top, sky_horizon, fog_color, fog_density, exposure)
 end
 
 function _parse_light_kind(value::JSON3.Object)::LightKindPacket

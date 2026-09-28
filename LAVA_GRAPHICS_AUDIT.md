@@ -275,8 +275,10 @@ signatures. The adapter rejects material features it does not yet implement
 (scene textures, non-opaque alpha modes, and metallic shading) instead of
 silently discarding those intents. The current supported render profile is
 therefore explicit: one opaque, non-metallic material family, one directional
-light, orthographic terrain projection, depth-tested raster, and line-based
-semantic overlays.
+light, typed sky/fog/exposure intent, orthographic terrain projection,
+depth-tested raster, and line-based semantic overlays. The adapter also emits
+deterministic instance visibility and submitted-vertex telemetry; Rust checks
+the counts against the packet rather than treating them as decorative stats.
 
 Rust now supervises the persistent worker, checks the exact audited Lava and
 adapter revisions, validates the typed ready payload, binds the frame to the
