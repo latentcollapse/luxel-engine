@@ -162,6 +162,7 @@ mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
     draw_calls::UInt64
     readback_bytes::UInt64
     pipeline_compilations::UInt64
+    gpu_timestamp_supported::Bool
     probe_compiled::Bool
     terrain_compiled::Bool
     overlay_compiled::Bool
@@ -1132,6 +1133,7 @@ function backend()::LavaBackend
             UInt64(0),
             UInt64(0),
             UInt64(0),
+            _gpu_timestamp_capable(context),
             false,
             false,
             false,
@@ -1154,6 +1156,20 @@ function _validate_dimensions(width_px::Integer, height_px::Integer)
     width_px * height_px * 4 <= MAX_CAPTURE_BYTES ||
         throw(AdapterError("invalid_dimensions", "capture byte length exceeds the native frame bound"))
     return (Int(width_px), Int(height_px))
+end
+
+function _gpu_timestamp_capable(context::Lava.VkContext)::Bool
+    try
+        properties = Vulkan.get_physical_device_properties(context.physical_device)
+        queue_properties = Vulkan.get_physical_device_queue_family_properties(
+            context.physical_device,
+        )[Int(context.queue_family_index) + 1]
+        return isfinite(properties.limits.timestamp_period) &&
+               properties.limits.timestamp_period > 0.0f0 &&
+               queue_properties.timestamp_valid_bits > 0
+    catch
+        return false
+    end
 end
 
 function _framebuffer!(
@@ -1246,6 +1262,7 @@ function backend_probe(state::LavaBackend=backend())
         device_uuid=_device_uuid(state.context),
         vulkan_api_version=string(properties.api_version),
         hardware_ray_tracing=state.context.rt_pipeline_properties !== nothing,
+        gpu_timestamps=state.gpu_timestamp_supported,
         persistent_context=true,
         offscreen_raster=state.probe_compiled,
         depth_attachment=state.depth_compiled,
@@ -1271,6 +1288,7 @@ function backend_ready(state::LavaBackend=backend())
             texture_sampling=state.texture_compiled,
             readback=state.probe_compiled,
             hardware_ray_tracing=state.context.rt_pipeline_properties !== nothing,
+            gpu_timestamps=state.gpu_timestamp_supported,
         ),
     )
 end
@@ -1717,6 +1735,71 @@ function _transition_color_to_sampled!(state::LavaBackend, framebuffer::Lava.Lav
         Vulkan.ACCESS_SHADER_READ_BIT,
     )
     return nothing
+end
+
+const GPU_FRAME_TIMING_LABEL = "wge.graphics.frame"
+
+function _begin_gpu_frame_timing(state::LavaBackend)::Union{Nothing,Int}
+    state.gpu_timestamp_supported || return nothing
+    try
+        Lava.reset_dispatch_timing!(state.context)
+        Lava.enable_dispatch_timing!(true, state.context)
+        batch = Lava.ensure_active_batch!(state.queue)
+        slot = Lava.maybe_write_dispatch_start_timestamp!(
+            state.context,
+            batch.cmd_buf,
+            GPU_FRAME_TIMING_LABEL;
+            stage=Vulkan.PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        )
+        if slot < 0
+            Lava.enable_dispatch_timing!(false, state.context)
+            return nothing
+        end
+        return slot
+    catch
+        state.gpu_timestamp_supported = false
+        Lava.enable_dispatch_timing!(false, state.context)
+        return nothing
+    end
+end
+
+function _end_gpu_frame_timing!(state::LavaBackend, ::Nothing)
+    return nothing
+end
+
+function _end_gpu_frame_timing!(state::LavaBackend, start_slot::Int)
+    try
+        batch = Lava.ensure_active_batch!(state.queue)
+        Lava.maybe_write_dispatch_end_timestamp!(
+            state.context,
+            batch.cmd_buf,
+            start_slot,
+            C_NULL;
+            stage=Vulkan.PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            stage_mask=UInt32(Vulkan.PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT),
+        )
+    catch
+        state.gpu_timestamp_supported = false
+    end
+    return nothing
+end
+
+function _read_gpu_frame_time_us(state::LavaBackend, ::Nothing)::Nothing
+    return nothing
+end
+
+function _read_gpu_frame_time_us(state::LavaBackend, ::Int)::Union{Nothing,Int}
+    try
+        reports = Lava.dispatch_timing_report(state.context; flush_first=false)
+        index = findfirst(report -> report.name == GPU_FRAME_TIMING_LABEL, reports)
+        index === nothing && return nothing
+        elapsed_ns = reports[index].total_ns
+        isfinite(elapsed_ns) && elapsed_ns >= 0.0 || return nothing
+        return ceil(Int, elapsed_ns / 1_000.0)
+    catch
+        state.gpu_timestamp_supported = false
+        return nothing
+    end
 end
 
 function _framebuffer_texture(framebuffer::Lava.LavaFramebuffer, state::LavaBackend)
@@ -2269,6 +2352,19 @@ function render_scene(
     packet::WGEGraphics.GraphicsScenePacket,
     state::LavaBackend=backend(),
 )
+    gpu_timing_slot = _begin_gpu_frame_timing(state)
+    try
+        return _render_scene(packet, state, gpu_timing_slot)
+    finally
+        gpu_timing_slot === nothing || Lava.enable_dispatch_timing!(false, state.context)
+    end
+end
+
+function _render_scene(
+    packet::WGEGraphics.GraphicsScenePacket,
+    state::LavaBackend,
+    gpu_timing_slot::Union{Nothing,Int},
+)
     started_ns = time_ns()
     width, height = _validate_dimensions(packet.width_px, packet.height_px)
     material = _terrain_material(packet)
@@ -2455,8 +2551,10 @@ function render_scene(
             state.pipeline_compilations += 1
         end
     end
+    _end_gpu_frame_timing!(state, gpu_timing_slot)
     Lava.vk_flush!(state.context)
     pixels = readback_framebuffer(capture_framebuffer)
+    gpu_frame_time_us = _read_gpu_frame_time_us(state, gpu_timing_slot)
     capture_bytes = _capture_bytes(pixels)
     state.readback_bytes += length(capture_bytes)
     return (
@@ -2489,6 +2587,7 @@ function render_scene(
             terrain_vertex_count=terrain_vertices,
             mesh_vertex_count=mesh_resources === nothing ? 0 : mesh_resources.vertex_count,
             frame_time_us=Int(cld(time_ns() - started_ns, UInt64(1_000))),
+            gpu_frame_time_us=gpu_frame_time_us,
         ),
     )
 end

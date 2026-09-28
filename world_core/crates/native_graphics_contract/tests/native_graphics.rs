@@ -462,6 +462,7 @@ fn rust_supervisor_promotes_a_bound_lava_frame() {
     assert!(ready.features.depth_attachment);
     assert!(ready.features.texture_sampling);
     assert!(ready.features.readback);
+    let gpu_timestamps = ready.features.gpu_timestamps;
 
     let promoted = supervisor
         .render_and_promote(&packet)
@@ -501,6 +502,16 @@ fn rust_supervisor_promotes_a_bound_lava_frame() {
         promoted.capture_bytes.len(),
         promoted.frame.width_px as usize * promoted.frame.height_px as usize * 4
     );
+    if gpu_timestamps {
+        assert!(
+            promoted
+                .receipt
+                .body
+                .telemetry
+                .gpu_frame_time_us
+                .is_some_and(|value| value > 0)
+        );
+    }
     let first_capture = promoted.capture_bytes.clone();
     let first_measurements = promoted.receipt.body.measurements.clone();
     supervisor

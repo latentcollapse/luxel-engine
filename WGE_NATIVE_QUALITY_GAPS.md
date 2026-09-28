@@ -34,8 +34,9 @@ visual bar.
 8. Cold startup is currently expensive: the measured native CLI run took
    105.97 seconds and about 1.91 GiB maximum RSS. A persistent worker reached
    a 20.285 ms second frame. The formal 30-frame supervisor benchmark reached
-   309.555 ms wall-time p95 and 72.853 ms adapter-frame p95; graphics-pass GPU
-   timestamps remain uncollected.
+   254.137 ms wall-time p95 and 60.030 ms adapter-frame p95. Its graphics-pass
+   GPU interval was 52 µs at p50, 410 µs at p95, and 862 µs at p99 for this
+   13-draw diagnostic scene; this is not yet a dense-scene frame budget.
 9. The native capture path renders a validated gameplay/world snapshot. The
    Rust reference runtime completes the 78-step traversal and wins gameplay,
    but Lava is not yet the renderer attached to a live native input/update
@@ -60,10 +61,10 @@ may promote them based on a world snapshot or a status-only receipt.
 
 1. Add a real authored hero asset/material packet with normal, occlusion, and
    emissive roles, then validate a textured close-range capture.
-2. Add graphics-pass GPU timestamp telemetry before optimizing cold startup or
-   choosing a frame budget.
-3. Add a denser authored scene with landmark and gameplay-critical visibility,
-   camera cuts, and a stressable population so semantic culling is meaningful.
+2. Add a denser stress scene and per-pass GPU timing breakdown before
+   optimizing cold startup or choosing a frame budget.
+3. Exercise traversal-aware semantic culling with landmark and
+   gameplay-critical visibility, camera cuts, and a stressable population.
 4. Add prefiltered IBL and higher-quality shadow strategy behind typed packet
    contracts and independent visual gates.
 5. Attach the renderer to a reference gameplay update/input loop only after

@@ -83,7 +83,7 @@ our own reproducible probes and Rust-owned receipts.
 | GPU scene, culling, LOD, meshlets, streaming | Lava-backed instanced batches now consume closed WGE importance hints (`background`, `landmark`, `gameplay_critical`), use typed culling margins, and report per-class visibility/culling totals; LOD/meshlets/residency/streaming remain absent | PARTIAL | Keep semantic visibility and capture priorities Rust-owned; add LOD/residency only through the same typed packet and independently balanced telemetry. |
 | BLAS/TLAS and hardware RT | `HardwareAccel`, HWTLAS, BLAS/TLAS update/refit paths, RT shader pipeline, Raycore compatibility | EXISTS UPSTREAM | Optional capability lane, fail-closed; not a prerequisite for the first certified raster vertical slice. |
 | Hikari/Raycore integration | Raycore source entry and Hikari-oriented integration/tests/examples | EXISTS UPSTREAM | Evidence that RT is viable, not evidence that a WGE gameplay renderer exists. Keep it behind an optional adapter. |
-| Profiling and diagnostics | state dumps, logging, validation configuration, memory counters, phase timing, profiling hooks | EXISTS UPSTREAM | Connect selected telemetry to Rust receipts; avoid promoting opaque upstream logs as evidence. |
+| Profiling and diagnostics | state dumps, logging, validation configuration, memory counters, phase timing, profiling hooks | EXISTS UPSTREAM + WGE BRIDGE | WGE promotes a capability-gated Vulkan graphics-frame timestamp plus bounded transfer/draw/compilation telemetry; avoid promoting opaque upstream logs as evidence. |
 | API stability | upstream README calls compute stable and graphics/RT functional but evolving | PARTIAL | Pin the exact commit and isolate all upstream API use in a narrow Julia adapter. |
 | Dependency reproducibility | Lava commit is known, but `Project.toml` sources Raycore at `rev = "master"` | PARTIAL | A WGE lock must pin the complete transitive source graph, especially Raycore and Vulkan source choice. |
 | Test reproducibility | tiered test harness distinguishes SPIR-V/no-GPU/GPU, but requires an umbrella environment and warns that plain `Pkg.test` is insufficient | PARTIAL | WGE needs capability probes and explicit `indeterminate` results; “test suite ran” is not a GPU certification. |
@@ -279,8 +279,9 @@ the vertex path. The adapter rejects material features it does not yet
 implement (multiple texture sets and non-opaque alpha modes) instead of
 silently discarding those intents. The current supported render profile is
 therefore explicit: one opaque material family with bounded
-metallic/roughness response, one shared content-addressed inline RGBA8 albedo
-payload, one directional light, typed sky/horizon/ground/fog/exposure intent,
+metallic/roughness response, role-specific content-addressed inline RGBA8
+albedo/normal/roughness/occlusion/emissive payloads, independent per-material
+descriptor sets, one directional light, typed sky/horizon/ground/fog/exposure intent,
 orientation-aware analytic environment lighting, camera-aware
 Cook–Torrance-style roughness/metalness, orthographic and perspective terrain
 projections, depth-tested raster, and line-based semantic overlays. Texture dimensions and
@@ -294,7 +295,7 @@ transfer before `rgba8_srgb` quantization, alpha remains linear, and Rust
 remeasures marker colors through the same conversion. sRGB albedo payloads are
 decoded to linear values before shader sampling; linear/data payloads are not
 transformed. Prefiltered image-based lighting, mip generation/streaming, and
-multiple material texture roles remain quality-gap work. The adapter also emits deterministic
+richer material graph features remain quality-gap work. The adapter also emits deterministic
 instance visibility and submitted-vertex telemetry; mesh/material groups use
 Lava's real instanced draw path, uploading base geometry once and indexing
 per-instance transforms and material parameters with `instance_index()`.
@@ -302,7 +303,10 @@ Rust checks the counts against the packet rather than treating them as
 decorative stats. Producer visual measurements are computed from the exact
 encoded capture-byte vector that is hashed and promoted, with separate Julia
 dispatch for linear float readback and RGBA8 byte-domain luminance; Rust
-recomputes the same byte-domain measurements independently.
+recomputes the same byte-domain measurements independently. When the selected
+Vulkan queue exposes valid timestamp bits, the adapter brackets the graphics
+pass with two timestamp writes and carries the measured GPU interval into the
+Rust receipt; unsupported queues remain explicitly `null`.
 
 Rust now supervises the persistent worker, checks the exact audited Lava and
 adapter revisions, validates the typed ready payload, binds the frame to the

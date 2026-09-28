@@ -133,7 +133,10 @@ capture bytes use the standard scene-linear-to-sRGB transfer before
 quantization; alpha remains linear. sRGB albedo payloads are decoded to linear
 values before material evaluation. The Rust receipt stores the independently
 recomputed measurements and the adapter reports render-through-readback time
-in microseconds.
+in microseconds. When the selected Vulkan queue exposes valid timestamp bits,
+the adapter also brackets the graphics pass with two Vulkan timestamp writes
+and reports the GPU interval separately; a queue without that capability
+remains explicitly `null`.
 
 Visual evidence remains a real gate. The reference Rust capture and the Lava
 capture are compared for semantic markers and measured properties first, then
@@ -276,10 +279,10 @@ terrain projections, and typed sky/horizon/ground/fog/exposure intent. Instances
 `background`, `landmark`, or `gameplay_critical` importance, which controls a
 typed culling margin and is independently balanced in the promoted telemetry.
 The payload is dimension-checked and digest-checked in
-both Rust and Julia before Lava creates sampler bindings. Point lights,
-multiple texture profiles, and blend/mask materials are typed and
-validated at the boundary but rejected by the adapter until their semantics
-are implemented. Metallic/roughness response, role-sampled normal/roughness/
+both Rust and Julia before Lava creates sampler bindings. Point lights and
+blend/mask materials are typed and validated at the boundary but rejected by
+the adapter until their semantics are implemented. Metallic/roughness response,
+role-sampled normal/roughness/
 occlusion/emissive maps, and orientation-aware analytic
 sky/ground environment lighting are supported by the bounded material path,
 but it is not yet a complete production PBR graph or prefiltered image-based
@@ -293,8 +296,8 @@ exact. Cascades, contact refinement, soft shadows, prefiltered IBL, temporal AA,
 and many-light shadow budgets remain quality gaps. This keeps
 the packet extensible
 without silently rendering less than the model requested; prefiltered
-environment maps, richer foliage/material profiles, and richer material graphs
-remain explicit quality-gap work.
+environment maps, richer foliage systems, and richer material graphs remain
+explicit quality-gap work.
 
 The supervised integration test also restarts Julia and proves the same packet
 produces byte-identical RGBA8 capture bytes after a clean GPU-context rebuild.
@@ -304,9 +307,9 @@ and a renderer-identity digest over the validated capability and worker-ready
 messages. Rust rejects flat/black captures, insufficient RGB diversity, and
 missing pixels for any semantic marker role present in the packet; producer
 measurements are compared against Rust’s independent recomputation. Frame
-telemetry now carries packet-checked total and per-importance instance visibility
-and terrain/mesh submission counts, exposing a measurable semantic-culling/
-performance surface. Visible
+telemetry now carries packet-checked total and per-importance instance visibility,
+terrain/mesh submission counts, and an optional capability-gated graphics-pass
+GPU interval, exposing a measurable semantic-culling/performance surface. Visible
 mesh/material groups are submitted with Lava instancing: base triangle data is
 uploaded once per deterministic batch and transforms/material parameters are
 indexed per instance on the GPU. The integration fixture duplicates an

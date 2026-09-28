@@ -439,6 +439,7 @@ pub struct GraphicsFeatures {
     pub texture_sampling: bool,
     pub readback: bool,
     pub hardware_ray_tracing: bool,
+    pub gpu_timestamps: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -511,6 +512,8 @@ pub struct GraphicsTelemetry {
     pub terrain_vertex_count: usize,
     pub mesh_vertex_count: usize,
     pub frame_time_us: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_frame_time_us: Option<u64>,
 }
 
 pub fn sha256_prefixed(bytes: &[u8]) -> String {
@@ -2190,6 +2193,14 @@ fn validate_telemetry(telemetry: &GraphicsTelemetry) -> Result<(), GraphicsContr
             "telemetry frame time exceeds the bounded limit",
         ));
     }
+    if telemetry
+        .gpu_frame_time_us
+        .is_some_and(|value| value > MAX_FRAME_TIME_US)
+    {
+        return Err(GraphicsContractError::malformed(
+            "telemetry GPU frame time exceeds the bounded limit",
+        ));
+    }
     Ok(())
 }
 
@@ -2494,6 +2505,7 @@ mod tests {
                 terrain_vertex_count: 1,
                 mesh_vertex_count: 0,
                 frame_time_us: 1,
+                gpu_frame_time_us: None,
             },
             detail: "measured".into(),
         };

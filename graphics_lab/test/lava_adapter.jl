@@ -137,6 +137,7 @@ end
     @test capabilities.persistent_context
     @test !isempty(capabilities.device_uuid)
     @test capabilities.hardware_ray_tracing
+    @test capabilities.gpu_timestamps
 
     first = LavaAdapter.render_probe(24, 12, state)
     @test first.matrix_size == (24, 12)

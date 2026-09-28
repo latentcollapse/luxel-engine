@@ -16,6 +16,7 @@ const MAX_WARM_FRAMES: usize = 256;
 struct BenchmarkSample {
     wall_time_us: u64,
     renderer_frame_time_us: u64,
+    gpu_frame_time_us: Option<u64>,
     capture_sha256: String,
     draw_calls: usize,
     pipeline_compilations: usize,
@@ -41,6 +42,7 @@ struct BenchmarkReport {
     cold: BenchmarkSample,
     warm_wall_time: TimingSummary,
     warm_renderer_frame_time: TimingSummary,
+    warm_gpu_frame_time: Option<TimingSummary>,
     warm_capture_sha256: String,
     deterministic_capture: bool,
 }
@@ -260,6 +262,7 @@ fn run() -> Result<(), String> {
                         .map(|sample| sample.renderer_frame_time_us)
                         .collect::<Vec<_>>(),
                 )?,
+                warm_gpu_frame_time: summarize_optional_gpu_time(&warm_samples)?,
                 warm_capture_sha256,
                 deterministic_capture,
             };
@@ -290,6 +293,7 @@ fn measure_frame(
     let sample = BenchmarkSample {
         wall_time_us: started.elapsed().as_micros().min(u128::from(u64::MAX)) as u64,
         renderer_frame_time_us: telemetry.frame_time_us,
+        gpu_frame_time_us: telemetry.gpu_frame_time_us,
         capture_sha256: promoted.frame.capture_sha256.clone(),
         draw_calls: telemetry.draw_calls,
         pipeline_compilations: telemetry.pipeline_compilations,
@@ -315,6 +319,22 @@ fn summarize(values: &[u64]) -> Result<TimingSummary, String> {
         max_us: *sorted.last().expect("non-empty timing samples"),
         mean_us: (sum / sorted.len() as u128).min(u128::from(u64::MAX)) as u64,
     })
+}
+
+fn summarize_optional_gpu_time(
+    samples: &[BenchmarkSample],
+) -> Result<Option<TimingSummary>, String> {
+    let values = samples
+        .iter()
+        .filter_map(|sample| sample.gpu_frame_time_us)
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return Ok(None);
+    }
+    if values.len() != samples.len() {
+        return Err("benchmark GPU timing was present for only some warm frames".into());
+    }
+    summarize(&values).map(Some)
 }
 
 fn nearest_rank(sorted: &[u64], numerator: usize, denominator: usize) -> u64 {

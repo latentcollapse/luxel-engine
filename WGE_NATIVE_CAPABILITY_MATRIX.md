@@ -22,6 +22,7 @@ complete for a commercial game.
 | Directional lighting | green | Typed light intent and Lava shader lowering |
 | Analytic environment lighting | green | Typed sky-top, horizon, ground, fog, and exposure intent |
 | HDR scene target and resolve | green | Linear HDR target, deterministic 2x resolve, tone mapping at final boundary |
+| Graphics-pass GPU timestamps | green | Capability-gated Vulkan timestamp bracket around the native frame; Rust receipt preserves `null` on unsupported queues |
 | Directional shadows | partial | Fixed 512x512 map and deterministic 4-tap PCF; no cascades, contact, or soft shadows |
 | Prefiltered IBL | absent | No environment convolution or probe/residency contract yet |
 | Temporal AA / history | absent | Resolve is spatial and deterministic, not temporal |
