@@ -240,9 +240,13 @@ explicitly deferred/indeterminate.
 7. Measure and improve visual quality only inside the certified boundary.
 
 The Rust packet contract and protocol worker are now implemented. The Lava
-adapter has also passed a real offscreen color/readback probe through a
-persistent Julia process, with the first target-size cache/reuse test green.
-The next code slice is a packet-driven terrain/marker render, followed by
-depth and texture capability probes and Rust-owned receipt promotion. No
-renderer implementation should bypass this contract or use Bevy types as the
-native scene model.
+adapter has passed a real offscreen color/readback probe through a persistent
+Julia process and now renders the certified `riverwatch` packet: terrain
+height/slope buffers, the canonical orthographic camera, terrain material
+intent, and gameplay-visible route/spawn/encounter/objective overlays all
+cross the native path. The Rust integration gate checks packet binding,
+dimensions, non-flat terrain color, and route visibility.
+
+The next code slice is depth and texture capability proof followed by
+Rust-owned frame-receipt promotion. No renderer implementation should bypass
+this contract or use Bevy types as the native scene model.

@@ -257,3 +257,12 @@ and emits deterministic RGBA8 bytes. The integration test also renders two
 different target sizes through the same cached context and pipeline. This is
 substrate evidence only: it does not certify depth, texture sampling, terrain
 lowering, or Rust receipt promotion.
+
+The next checkpoint now also renders the actual Rust-lowered `riverwatch`
+packet: Julia retains camera/material/light/overlay intent as concrete types,
+uploads the certified height and slope fields to Lava buffers, draws terrain
+triangles and gameplay-visible route/spawn/encounter/objective overlays, and
+returns deterministic capture bytes plus telemetry. The Rust integration gate
+independently checks packet binding, dimensions, non-flat terrain color, and
+route visibility. Depth/texture capability promotion and Rust frame-receipt
+validation remain separate gates.

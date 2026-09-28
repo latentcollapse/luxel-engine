@@ -70,14 +70,20 @@ function handle(payload::AbstractString)::String
             width = haskey(value, "width_px") ? Int(value["width_px"]) : 16
             height = haskey(value, "height_px") ? Int(value["height_px"]) : 16
             state = LavaAdapter.backend()
-            capabilities = LavaAdapter.backend_probe(state)
             render = LavaAdapter.render_probe(width, height, state)
+            capabilities = LavaAdapter.backend_probe(state)
             return JSON3.write((
                 schema=WORKER_SCHEMA,
                 kind="backend_probed",
                 capabilities=capabilities,
                 render=render,
             ))
+        elseif operation == "render_packet"
+            Set(String(key) for key in keys(value)) == Set(("op", "packet")) ||
+                return failure("malformed_request", "render_packet request fields are closed")
+            packet = validate_scene_packet(JSON3.write(value["packet"]))
+            frame = LavaAdapter.render_scene(packet)
+            return JSON3.write((schema=WORKER_SCHEMA, kind="frame_rendered", frame=frame))
         else
             return failure("unsupported_operation", "operation is not available in the graphics worker")
         end

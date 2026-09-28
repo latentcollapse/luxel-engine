@@ -27,6 +27,85 @@ struct TerrainPacket
     region_codes::Vector{UInt8}
 end
 
+abstract type CameraProjection end
+
+struct OrthographicProjection <: CameraProjection
+    span_m::Float32
+end
+
+struct PerspectiveProjection <: CameraProjection
+    fov_y_degrees::Float32
+end
+
+const CameraProjectionValue = Union{OrthographicProjection, PerspectiveProjection}
+
+struct CameraPacket
+    camera_id::String
+    projection::CameraProjectionValue
+    position_xyz_m::NTuple{3, Float32}
+    forward_xyz::NTuple{3, Float32}
+    up_xyz::NTuple{3, Float32}
+    near_plane_m::Float32
+    far_plane_m::Float32
+    width_px::UInt32
+    height_px::UInt32
+end
+
+struct MaterialPacket
+    material_id::String
+    base_color_rgba::NTuple{4, Float32}
+    metallic::Float32
+    roughness::Float32
+    alpha_mode::Symbol
+    texture_ids::Vector{String}
+end
+
+struct DirectionalLightPacket
+    direction_xyz::NTuple{3, Float32}
+end
+
+struct PointLightPacket
+    position_xyz_m::NTuple{3, Float32}
+    range_m::Float32
+end
+
+const LightKindPacket = Union{DirectionalLightPacket, PointLightPacket}
+
+struct LightPacket
+    light_id::String
+    kind::LightKindPacket
+    color_rgb::NTuple{3, Float32}
+    intensity::Float32
+end
+
+abstract type OverlayPacket end
+
+struct PointOverlay <: OverlayPacket
+    marker_id::String
+    role::Symbol
+    position_xyz_m::NTuple{3, Float32}
+    radius_m::Float32
+    color_rgba::NTuple{4, Float32}
+end
+
+struct CircleOverlay <: OverlayPacket
+    marker_id::String
+    role::Symbol
+    center_xyz_m::NTuple{3, Float32}
+    radius_m::Float32
+    color_rgba::NTuple{4, Float32}
+end
+
+struct PolylineOverlay <: OverlayPacket
+    marker_id::String
+    role::Symbol
+    points_xyz_m::Vector{NTuple{3, Float32}}
+    thickness_m::Float32
+    color_rgba::NTuple{4, Float32}
+end
+
+const OverlayValue = Union{PointOverlay, CircleOverlay, PolylineOverlay}
+
 struct GraphicsScenePacket
     packet_sha256::String
     packet_id::String
@@ -34,13 +113,14 @@ struct GraphicsScenePacket
     world_artifact_sha256::String
     spatial_fields_sha256::String
     frame_seed::UInt64
+    camera::CameraPacket
     terrain::TerrainPacket
-    material_count::Int
+    materials::Vector{MaterialPacket}
     texture_count::Int
     mesh_count::Int
     instance_count::Int
-    light_count::Int
-    overlay_count::Int
+    lights::Vector{LightPacket}
+    overlays::Vector{OverlayValue}
     capture_id::String
     width_px::UInt32
     height_px::UInt32
@@ -68,7 +148,7 @@ packet_summary(packet::GraphicsScenePacket)::PacketSummary = PacketSummary(
     packet.capture_id,
     packet.width_px,
     packet.height_px,
-    packet.overlay_count,
+    length(packet.overlays),
 )
 
 function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
@@ -114,19 +194,19 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
     _valid_sha(spatial_sha, "spatial_fields_sha256")
     frame_seed = _uint64(body["frame_seed"], "frame_seed")
 
-    _validate_coordinate_system(_object(body["coordinate_system"], "coordinate_system"))
-    camera = _object(body["camera"], "camera")
-    _validate_camera(camera)
-    terrain = _parse_terrain(_object(body["terrain"], "terrain"), body["materials"])
     materials = _parse_materials(body["materials"])
+    material_ids = Set(material.material_id for material in materials)
+    _validate_coordinate_system(_object(body["coordinate_system"], "coordinate_system"))
+    camera = _parse_camera(_object(body["camera"], "camera"))
+    terrain = _parse_terrain(_object(body["terrain"], "terrain"), materials)
     textures = _parse_textures(body["textures"])
     _validate_material_texture_links(materials, textures)
-    meshes = _parse_meshes(body["meshes"], materials.ids)
-    instances = _parse_instances(body["instances"], meshes, materials.ids)
-    _parse_lights(body["lights"])
+    meshes = _parse_meshes(body["meshes"], material_ids)
+    instances = _parse_instances(body["instances"], meshes, material_ids)
+    lights = _parse_lights(body["lights"])
     overlays = _parse_overlays(body["overlays"])
     capture = _object(body["capture"], "capture")
-    _validate_capture(capture, camera)
+    _validate_capture(capture, body["camera"])
 
     return GraphicsScenePacket(
         packet_sha256,
@@ -135,13 +215,14 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
         _string(body["world_artifact_sha256"], "world_artifact_sha256"),
         spatial_sha,
         frame_seed,
+        camera,
         terrain,
-        length(materials.ids),
+        materials,
         length(textures),
         length(meshes),
         length(instances),
-        _array_length(body["lights"], "lights"),
-        overlays,
+        lights,
+        Vector{OverlayValue}(overlays),
         _string(capture["capture_id"], "capture_id"),
         UInt32(_integer(capture["width_px"], "capture.width_px")),
         UInt32(_integer(capture["height_px"], "capture.height_px")),
@@ -149,7 +230,7 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
     )
 end
 
-function _parse_terrain(value::JSON3.Object, materials_value)::TerrainPacket
+function _parse_terrain(value::JSON3.Object, materials::Vector{MaterialPacket})::TerrainPacket
     _exact_keys(
         value,
         Set((
@@ -179,8 +260,7 @@ function _parse_terrain(value::JSON3.Object, materials_value)::TerrainPacket
     heights = _parse_buffer(value["heights_m"], resolution * resolution, "terrain.heights_m", :f32)
     slope = _parse_buffer(value["slope_grade"], resolution * resolution, "terrain.slope_grade", :f32)
     regions = _parse_buffer(value["region_codes"], resolution * resolution, "terrain.region_codes", :u8)
-    materials_value isa JSON3.Array || throw(ProtocolError("malformed_packet", "materials must be an array"))
-    any(_string(material["material_id"], "material_id") == material_id for material in materials_value) ||
+    any(material.material_id == material_id for material in materials) ||
         throw(ProtocolError("provenance", "terrain references an unknown material"))
     return TerrainPacket(terrain_id, width, length, resolution, material_id, heights, slope, regions)
 end
@@ -253,10 +333,11 @@ function _payload_sha256(values::Vector{UInt32}, ::Symbol)
     return _sha256(bytes)
 end
 
-function _parse_materials(value)
+function _parse_materials(value)::Vector{MaterialPacket}
     array = _array(value, "materials")
     ids = Set{String}()
-    texture_ids = Set{String}()
+    materials = MaterialPacket[]
+    sizehint!(materials, length(array))
     for material in array
         object = _object(material, "material")
         _exact_keys(object, Set(("material_id", "base_color_rgba", "metallic", "roughness", "alpha_mode", "texture_ids")), "material")
@@ -264,23 +345,25 @@ function _parse_materials(value)
         _valid_id(id, "material_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate material $id"))
         push!(ids, id)
-        color = _array(object["base_color_rgba"], "material.base_color_rgba")
-        length(color) == 4 || throw(ProtocolError("malformed_packet", "material color needs four channels"))
-        all(0.0f0 .<= Float32[_finite_float32(v, "material color") for v in color] .<= 1.0f0) ||
+        color = _tuple(object["base_color_rgba"], Val(4), "material.base_color_rgba")
+        all(channel -> 0.0f0 <= channel <= 1.0f0, color) ||
             throw(ProtocolError("malformed_packet", "material color is outside [0, 1]"))
         metallic = _finite_float32(object["metallic"], "material.metallic")
         roughness = _finite_float32(object["roughness"], "material.roughness")
         0.0f0 <= metallic <= 1.0f0 || throw(ProtocolError("malformed_packet", "material metallic is outside [0, 1]"))
         0.0f0 <= roughness <= 1.0f0 || throw(ProtocolError("malformed_packet", "material roughness is outside [0, 1]"))
-        _string(object["alpha_mode"], "material.alpha_mode") in ("opaque", "mask", "blend") ||
+        alpha_mode = Symbol(_string(object["alpha_mode"], "material.alpha_mode"))
+        alpha_mode in (:opaque, :mask, :blend) ||
             throw(ProtocolError("unsupported", "material alpha mode is unsupported"))
-        for texture_id in _array(object["texture_ids"], "material.texture_ids")
-            texture_id = _string(texture_id, "material.texture_id")
+        texture_ids = String[]
+        for item in _array(object["texture_ids"], "material.texture_ids")
+            texture_id = _string(item, "material.texture_id")
             _valid_id(texture_id, "material.texture_id")
             push!(texture_ids, texture_id)
         end
+        push!(materials, MaterialPacket(id, color, metallic, roughness, alpha_mode, texture_ids))
     end
-    return (ids=ids, texture_ids=texture_ids)
+    return materials
 end
 
 function _parse_textures(value)
@@ -304,9 +387,9 @@ function _parse_textures(value)
     return ids
 end
 
-function _validate_material_texture_links(materials, texture_ids::Set{String})
-    isempty(materials.ids) && throw(ProtocolError("malformed_packet", "packet needs a material"))
-    for texture_id in materials.texture_ids
+function _validate_material_texture_links(materials::Vector{MaterialPacket}, texture_ids::Set{String})
+    isempty(materials) && throw(ProtocolError("malformed_packet", "packet needs a material"))
+    for material in materials, texture_id in material.texture_ids
         texture_id in texture_ids ||
             throw(ProtocolError("provenance", "material references unknown texture $texture_id"))
     end
@@ -364,10 +447,12 @@ function _parse_instances(value, mesh_ids::Set{String}, material_ids::Set{String
     return ids
 end
 
-function _parse_lights(value)
+function _parse_lights(value)::Vector{LightPacket}
     array = _array(value, "lights")
     isempty(array) && throw(ProtocolError("malformed_packet", "packet needs a light"))
     ids = Set{String}()
+    lights = LightPacket[]
+    sizehint!(lights, length(array))
     for light in array
         object = _object(light, "light")
         _exact_keys(object, Set(("light_id", "kind", "color_rgb", "intensity")), "light")
@@ -375,65 +460,106 @@ function _parse_lights(value)
         _valid_id(id, "light_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate light $id"))
         push!(ids, id)
-        kind_object = _object(object["kind"], "light.kind")
-        kind = _string(kind_object["kind"], "light.kind.kind")
-        if kind == "directional"
-            _exact_keys(kind_object, Set(("kind", "direction_xyz")), "light.kind")
-            direction = _array(kind_object["direction_xyz"], "light.kind.direction_xyz")
-            length(direction) == 3 || throw(ProtocolError("malformed_packet", "light direction needs three coordinates"))
-            [_finite_float32(value, "light direction") for value in direction]
-        elseif kind == "point"
-            _exact_keys(kind_object, Set(("kind", "position_xyz_m", "range_m")), "light.kind")
-            position = _array(kind_object["position_xyz_m"], "light.kind.position_xyz_m")
-            length(position) == 3 || throw(ProtocolError("malformed_packet", "point light position needs three coordinates"))
-            [_finite_float32(value, "point light position") for value in position]
-            _finite_float32(kind_object["range_m"], "light.kind.range_m") > 0.0f0 || throw(ProtocolError("malformed_packet", "point light range is invalid"))
-        else
-            throw(ProtocolError("unsupported", "light kind is unsupported"))
-        end
-        color = _array(object["color_rgb"], "light.color_rgb")
-        length(color) == 3 || throw(ProtocolError("malformed_packet", "light color needs three channels"))
-        [_finite_float32(value, "light color") for value in color]
-        _finite_float32(object["intensity"], "light.intensity") >= 0.0f0 || throw(ProtocolError("malformed_packet", "light intensity is negative"))
+        color = _tuple(object["color_rgb"], Val(3), "light.color_rgb")
+        all(channel -> channel >= 0.0f0, color) ||
+            throw(ProtocolError("malformed_packet", "light color is negative"))
+        intensity = _finite_float32(object["intensity"], "light.intensity")
+        intensity >= 0.0f0 || throw(ProtocolError("malformed_packet", "light intensity is negative"))
+        push!(lights, LightPacket(id, _parse_light_kind(_object(object["kind"], "light.kind")), color, intensity))
     end
-    return length(array)
+    return lights
 end
 
-function _parse_overlays(value)
+function _parse_light_kind(value::JSON3.Object)::LightKindPacket
+    kind = Symbol(_string(value["kind"], "light.kind.kind"))
+    return _parse_light_kind(Val(kind), value)
+end
+
+function _parse_light_kind(::Val{:directional}, value::JSON3.Object)::DirectionalLightPacket
+    _exact_keys(value, Set(("kind", "direction_xyz")), "light.kind")
+    return DirectionalLightPacket(_tuple(value["direction_xyz"], Val(3), "light.kind.direction_xyz"))
+end
+
+function _parse_light_kind(::Val{:point}, value::JSON3.Object)::PointLightPacket
+    _exact_keys(value, Set(("kind", "position_xyz_m", "range_m")), "light.kind")
+    range = _finite_float32(value["range_m"], "light.kind.range_m")
+    range > 0.0f0 || throw(ProtocolError("malformed_packet", "point light range is invalid"))
+    return PointLightPacket(
+        _tuple(value["position_xyz_m"], Val(3), "light.kind.position_xyz_m"),
+        range,
+    )
+end
+
+function _parse_light_kind(::Val{kind}, ::JSON3.Object) where {kind}
+    throw(ProtocolError("unsupported", "light kind $(kind) is unsupported"))
+end
+
+function _parse_overlays(value)::Vector{OverlayValue}
     array = _array(value, "overlays")
     ids = Set{String}()
+    overlays = OverlayValue[]
+    sizehint!(overlays, length(array))
     for overlay in array
         object = _object(overlay, "overlay")
-        kind = _string(object["kind"], "overlay.kind")
-        _exact_keys(object, kind == "point" ? Set(("kind", "marker_id", "role", "position_xyz_m", "radius_m", "color_rgba")) : kind == "circle" ? Set(("kind", "marker_id", "role", "center_xyz_m", "radius_m", "color_rgba")) : kind == "polyline" ? Set(("kind", "marker_id", "role", "points_xyz_m", "thickness_m", "color_rgba")) : Set(("kind",)), "overlay")
-        kind in ("point", "circle", "polyline") || throw(ProtocolError("unsupported", "overlay kind is unsupported"))
-        id = _string(object["marker_id"], "overlay.marker_id")
+        parsed = _parse_overlay(object)
+        id = parsed.marker_id
         _valid_id(id, "marker_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate overlay $id"))
         push!(ids, id)
-        _string(object["role"], "overlay.role") in ("route", "player_spawn", "opponent_spawn", "encounter", "objective") ||
-            throw(ProtocolError("unsupported", "overlay role is unsupported"))
-        points = kind == "point" ? _array(object["position_xyz_m"], "overlay.position_xyz_m") : kind == "circle" ? _array(object["center_xyz_m"], "overlay.center_xyz_m") : _array(object["points_xyz_m"], "overlay.points_xyz_m")
-        kind == "polyline" && length(points) < 2 && throw(ProtocolError("malformed_packet", "polyline needs two points"))
-        for point in points
-            point_array = kind == "polyline" ? point : points
-            if kind == "polyline"
-                coordinates = _array(point_array, "overlay point")
-                length(coordinates) == 3 || throw(ProtocolError("malformed_packet", "overlay point needs three coordinates"))
-                [_finite_float32(value, "overlay point") for value in coordinates]
-            else
-                length(point_array) == 3 || throw(ProtocolError("malformed_packet", "overlay point needs three coordinates"))
-                [_finite_float32(value, "overlay point") for value in point_array]
-                break
-            end
-        end
-        style_key = kind == "polyline" ? "thickness_m" : "radius_m"
-        _finite_float32(object[style_key], "overlay style") > 0.0f0 || throw(ProtocolError("malformed_packet", "overlay style is invalid"))
-        color = _array(object["color_rgba"], "overlay.color_rgba")
-        length(color) == 4 || throw(ProtocolError("malformed_packet", "overlay color needs four channels"))
-        [_finite_float32(value, "overlay color") for value in color]
+        push!(overlays, parsed)
     end
-    return length(array)
+    return overlays
+end
+
+function _parse_overlay(value::JSON3.Object)::OverlayValue
+    kind = Symbol(_string(value["kind"], "overlay.kind"))
+    return _parse_overlay(Val(kind), value)
+end
+
+function _overlay_header(value::JSON3.Object)
+    marker_id = _string(value["marker_id"], "overlay.marker_id")
+    role = Symbol(_string(value["role"], "overlay.role"))
+    role in (:route, :player_spawn, :opponent_spawn, :encounter, :objective) ||
+        throw(ProtocolError("unsupported", "overlay role is unsupported"))
+    return marker_id, role
+end
+
+function _overlay_color(value::JSON3.Object)::NTuple{4, Float32}
+    color = _tuple(value["color_rgba"], Val(4), "overlay.color_rgba")
+    all(channel -> 0.0f0 <= channel <= 1.0f0, color) ||
+        throw(ProtocolError("malformed_packet", "overlay color is outside [0, 1]"))
+    return color
+end
+
+function _parse_overlay(::Val{:point}, value::JSON3.Object)::PointOverlay
+    _exact_keys(value, Set(("kind", "marker_id", "role", "position_xyz_m", "radius_m", "color_rgba")), "overlay")
+    marker_id, role = _overlay_header(value)
+    radius = _finite_float32(value["radius_m"], "overlay.radius_m")
+    radius > 0.0f0 || throw(ProtocolError("malformed_packet", "overlay radius is invalid"))
+    return PointOverlay(marker_id, role, _tuple(value["position_xyz_m"], Val(3), "overlay.position_xyz_m"), radius, _overlay_color(value))
+end
+
+function _parse_overlay(::Val{:circle}, value::JSON3.Object)::CircleOverlay
+    _exact_keys(value, Set(("kind", "marker_id", "role", "center_xyz_m", "radius_m", "color_rgba")), "overlay")
+    marker_id, role = _overlay_header(value)
+    radius = _finite_float32(value["radius_m"], "overlay.radius_m")
+    radius > 0.0f0 || throw(ProtocolError("malformed_packet", "overlay radius is invalid"))
+    return CircleOverlay(marker_id, role, _tuple(value["center_xyz_m"], Val(3), "overlay.center_xyz_m"), radius, _overlay_color(value))
+end
+
+function _parse_overlay(::Val{:polyline}, value::JSON3.Object)::PolylineOverlay
+    _exact_keys(value, Set(("kind", "marker_id", "role", "points_xyz_m", "thickness_m", "color_rgba")), "overlay")
+    marker_id, role = _overlay_header(value)
+    point_values = _array(value["points_xyz_m"], "overlay.points_xyz_m")
+    length(point_values) >= 2 || throw(ProtocolError("malformed_packet", "polyline needs two points"))
+    points = NTuple{3, Float32}[_tuple(point, Val(3), "overlay point") for point in point_values]
+    thickness = _finite_float32(value["thickness_m"], "overlay.thickness_m")
+    thickness > 0.0f0 || throw(ProtocolError("malformed_packet", "overlay thickness is invalid"))
+    return PolylineOverlay(marker_id, role, points, thickness, _overlay_color(value))
+end
+
+function _parse_overlay(::Val{kind}, ::JSON3.Object) where {kind}
+    throw(ProtocolError("unsupported", "overlay kind $(kind) is unsupported"))
 end
 
 function _validate_coordinate_system(value::JSON3.Object)
@@ -443,32 +569,51 @@ function _validate_coordinate_system(value::JSON3.Object)
     _finite_float32(value["units_per_meter"], "coordinate_system.units_per_meter") == 1.0f0 || throw(ProtocolError("unsupported", "native graphics requires one unit per meter"))
 end
 
-function _validate_camera(value::JSON3.Object)
+function _parse_camera(value::JSON3.Object)::CameraPacket
     _exact_keys(value, Set(("camera_id", "projection", "position_xyz_m", "forward_xyz", "up_xyz", "near_plane_m", "far_plane_m", "width_px", "height_px")), "camera")
-    _valid_id(_string(value["camera_id"], "camera.camera_id"), "camera_id")
-    for key in ("position_xyz_m", "forward_xyz", "up_xyz")
-        coordinates = _array(value[key], "camera.$key")
-        length(coordinates) == 3 || throw(ProtocolError("malformed_packet", "camera vector has wrong arity"))
-        [_finite_float32(item, "camera.$key") for item in coordinates]
-    end
+    camera_id = _string(value["camera_id"], "camera.camera_id")
+    _valid_id(camera_id, "camera_id")
     near = _finite_float32(value["near_plane_m"], "camera.near_plane_m")
     far = _finite_float32(value["far_plane_m"], "camera.far_plane_m")
     near > 0.0f0 && far > near || throw(ProtocolError("malformed_packet", "camera planes are invalid"))
-    projection = _object(value["projection"], "camera.projection")
-    projection_kind = _string(projection["kind"], "camera.projection.kind")
-    if projection_kind == "orthographic"
-        _exact_keys(projection, Set(("kind", "span_m")), "camera.projection")
-        _finite_float32(projection["span_m"], "camera.projection.span_m") > 0.0f0 ||
-            throw(ProtocolError("malformed_packet", "orthographic camera span is invalid"))
-    elseif projection_kind == "perspective"
-        _exact_keys(projection, Set(("kind", "fov_y_degrees")), "camera.projection")
-        fov = _finite_float32(projection["fov_y_degrees"], "camera.projection.fov_y_degrees")
-        1.0f0 <= fov <= 179.0f0 ||
-            throw(ProtocolError("malformed_packet", "perspective camera field of view is invalid"))
-    else
-        throw(ProtocolError("unsupported", "camera projection is unsupported"))
-    end
-    _dimensions(_integer(value["width_px"], "camera.width_px"), _integer(value["height_px"], "camera.height_px"), "camera")
+    width = _integer(value["width_px"], "camera.width_px")
+    height = _integer(value["height_px"], "camera.height_px")
+    _dimensions(width, height, "camera")
+    return CameraPacket(
+        camera_id,
+        _parse_projection(_object(value["projection"], "camera.projection")),
+        _tuple(value["position_xyz_m"], Val(3), "camera.position_xyz_m"),
+        _tuple(value["forward_xyz"], Val(3), "camera.forward_xyz"),
+        _tuple(value["up_xyz"], Val(3), "camera.up_xyz"),
+        near,
+        far,
+        UInt32(width),
+        UInt32(height),
+    )
+end
+
+function _parse_projection(value::JSON3.Object)::CameraProjectionValue
+    kind = Symbol(_string(value["kind"], "camera.projection.kind"))
+    return _parse_projection(Val(kind), value)
+end
+
+function _parse_projection(::Val{:orthographic}, value::JSON3.Object)::OrthographicProjection
+    _exact_keys(value, Set(("kind", "span_m")), "camera.projection")
+    span = _finite_float32(value["span_m"], "camera.projection.span_m")
+    span > 0.0f0 || throw(ProtocolError("malformed_packet", "orthographic camera span is invalid"))
+    return OrthographicProjection(span)
+end
+
+function _parse_projection(::Val{:perspective}, value::JSON3.Object)::PerspectiveProjection
+    _exact_keys(value, Set(("kind", "fov_y_degrees")), "camera.projection")
+    fov = _finite_float32(value["fov_y_degrees"], "camera.projection.fov_y_degrees")
+    1.0f0 <= fov <= 179.0f0 ||
+        throw(ProtocolError("malformed_packet", "perspective camera field of view is invalid"))
+    return PerspectiveProjection(fov)
+end
+
+function _parse_projection(::Val{kind}, ::JSON3.Object) where {kind}
+    throw(ProtocolError("unsupported", "camera projection $(kind) is unsupported"))
 end
 
 function _validate_capture(value::JSON3.Object, camera::JSON3.Object)
@@ -492,6 +637,12 @@ end
 function _array(value, label::String)::JSON3.Array
     value isa JSON3.Array || throw(ProtocolError("malformed_packet", "$label must be an array"))
     return value
+end
+
+function _tuple(value, ::Val{N}, label::String)::NTuple{N, Float32} where {N}
+    array = _array(value, label)
+    length(array) == N || throw(ProtocolError("malformed_packet", "$label has the wrong arity"))
+    return ntuple(index -> _finite_float32(array[index], "$label[$index]"), N)
 end
 
 function _array_length(value, label::String)::Int
