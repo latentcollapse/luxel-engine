@@ -31,6 +31,16 @@ end
     @test srgb[1, 1][4] == 1.0f0
 end
 
+@testset "capture-domain measurements" begin
+    @test LavaAdapter._pixel_luminance((UInt8(255), UInt8(255), UInt8(255), UInt8(255))) ≈ 1.0 atol = 1.0f-6
+    @test LavaAdapter._pixel_luminance((1.0f0, 1.0f0, 1.0f0, 1.0f0)) ≈ 1.0 atol = 1.0f-6
+    bytes = UInt8[0, 127, 255, 255, 255, 0, 0, 255]
+    @test LavaAdapter._capture_pixels(bytes) == [
+        (UInt8(0), UInt8(127), UInt8(255), UInt8(255)),
+        (UInt8(255), UInt8(0), UInt8(0), UInt8(255)),
+    ]
+end
+
 @testset "camera projection lowering" begin
     orthographic = WGEGraphics.CameraPacket(
         "orthographic",

@@ -298,7 +298,10 @@ instance visibility and submitted-vertex telemetry; mesh/material groups use
 Lava's real instanced draw path, uploading base geometry once and indexing
 per-instance transforms and material parameters with `instance_index()`.
 Rust checks the counts against the packet rather than treating them as
-decorative stats.
+decorative stats. Producer visual measurements are computed from the exact
+encoded capture-byte vector that is hashed and promoted, with separate Julia
+dispatch for linear float readback and RGBA8 byte-domain luminance; Rust
+recomputes the same byte-domain measurements independently.
 
 Rust now supervises the persistent worker, checks the exact audited Lava and
 adapter revisions, validates the typed ready payload, binds the frame to the

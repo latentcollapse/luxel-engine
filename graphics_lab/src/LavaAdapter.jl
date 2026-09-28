@@ -1493,6 +1493,14 @@ function _pixel_luminance(pixel::NTuple{4,<:Real})::Float64
     return 0.2126 * Float64(pixel[1]) + 0.7152 * Float64(pixel[2]) + 0.0722 * Float64(pixel[3])
 end
 
+function _pixel_luminance(pixel::NTuple{4,UInt8})::Float64
+    return (
+        0.2126 * Float64(pixel[1]) +
+            0.7152 * Float64(pixel[2]) +
+            0.0722 * Float64(pixel[3])
+    ) / 255.0
+end
+
 function _capture_pixels(capture_bytes::Vector{UInt8})::Vector{NTuple{4,UInt8}}
     length(capture_bytes) % 4 == 0 ||
         throw(AdapterError("invalid_capture", "capture byte length is not RGBA-aligned"))
