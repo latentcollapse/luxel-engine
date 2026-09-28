@@ -77,8 +77,8 @@ our own reproducible probes and Rust-owned receipts.
 | Offscreen rendering | `LavaFramebuffer`, color/depth attachments, readback, blit, deterministic-sized target support | EXISTS UPSTREAM | Use offscreen targets for WGE captures; window presentation remains optional tooling. |
 | Textures, samplers, descriptors | `LavaTexture2D`, `LavaSampler`, texture bindings and descriptor setup | EXISTS UPSTREAM | Low-level binding exists; WGE still needs canonical texture/material asset contracts, color space, mip, streaming, and provenance policy. |
 | Raster state | depth, blending, culling, topology, attachments, viewport/scissor-related state | EXISTS UPSTREAM | Sufficient primitives for a first forward/deferred experiment; WGE render intent is missing. |
-| PBR/material graph | Hikari has material/shading code in its own path, but Lava graphics has no WGE material model or game scene material graph | MISSING | Build a narrow WGE material intent and lower it to Lava. Do not make Hikari’s scene representation canonical. |
-| Lights, shadows, IBL, HDR, AA, fog | typed directional-light/environment intent, one deterministic directional shadow map, a linear-HDR scene target with 2× spatial resolve, and tone-mapped fog now exist in the native adapter | PARTIAL | Keep the fixed shadow/resolve profile behind the authority boundary; cascades/contact shadows, IBL, HDR history, temporal AA, and richer atmosphere remain quality-gap work. |
+| PBR/material graph | WGE now has a narrow typed opaque material intent with bounded metallic/roughness response, one content-addressed albedo role, and a Cook–Torrance-style Lava lowering; it is not a complete production graph | PARTIAL | Keep the bounded material contract canonical while adding normal/roughness/occlusion/emissive roles and richer graph semantics behind independent evidence. Do not make Hikari’s scene representation canonical. |
+| Lights, shadows, IBL, HDR, AA, fog | typed directional-light/environment intent, orientation-aware analytic sky/horizon/ground lighting, one deterministic directional shadow map, a linear-HDR scene target with 2× spatial resolve, and tone-mapped fog now exist in the native adapter | PARTIAL | Keep the fixed shadow/resolve profile behind the authority boundary; cascades/contact shadows, prefiltered image-based lighting, HDR history, temporal AA, and richer atmosphere remain quality-gap work. |
 | Terrain, foliage, decals, particles, water, post-processing | no WGE/game-level implementation in Lava | MISSING | These are downstream renderer systems, not upstream Lava features. Start with terrain plus instancing and a measurable capture path. |
 | GPU scene, culling, LOD, meshlets, streaming | indirect and buffer primitives exist; no WGE scene/culling/LOD/streaming policy | PARTIAL | WGE must own semantic visibility, LOD, residency, and capture priorities. |
 | BLAS/TLAS and hardware RT | `HardwareAccel`, HWTLAS, BLAS/TLAS update/refit paths, RT shader pipeline, Raycore compatibility | EXISTS UPSTREAM | Optional capability lane, fail-closed; not a prerequisite for the first certified raster vertical slice. |
@@ -280,7 +280,8 @@ implement (multiple texture sets and non-opaque alpha modes) instead of
 silently discarding those intents. The current supported render profile is
 therefore explicit: one opaque material family with bounded
 metallic/roughness response, one shared content-addressed inline RGBA8 albedo
-payload, one directional light, typed sky/fog/exposure intent, camera-aware
+payload, one directional light, typed sky/horizon/ground/fog/exposure intent,
+orientation-aware analytic environment lighting, camera-aware
 Cook–Torrance-style roughness/metalness, orthographic and perspective terrain
 projections, depth-tested raster, and line-based semantic overlays. Texture dimensions and
 payload digests are validated in Rust and Julia, and the same typed descriptor
@@ -292,8 +293,8 @@ empty. Capture conversion is explicit: scene-linear RGB uses the standard sRGB
 transfer before `rgba8_srgb` quantization, alpha remains linear, and Rust
 remeasures marker colors through the same conversion. sRGB albedo payloads are
 decoded to linear values before shader sampling; linear/data payloads are not
-transformed. Mip generation/streaming and multiple material texture roles remain
-quality-gap work. The adapter also emits deterministic
+transformed. Prefiltered image-based lighting, mip generation/streaming, and
+multiple material texture roles remain quality-gap work. The adapter also emits deterministic
 instance visibility and submitted-vertex telemetry; mesh/material groups use
 Lava's real instanced draw path, uploading base geometry once and indexing
 per-instance transforms and material parameters with `instance_index()`.
@@ -321,7 +322,7 @@ worker script digest, and a digest of the validated capability/worker identity.
 The inspected `render-layout` capture is deliberately recorded as a quality
 gap, not a success-by-appearance claim: it is a coarse height/slope terrain
 diagnostic with line-based semantic overlays and one fixed 512² directional
-shadow map. Cascades, contact/soft shadows, IBL, foliage, particle, water,
+shadow map. Cascades, contact/soft shadows, prefiltered IBL, foliage, particle, water,
 post-processing, and asset-rich quality work remain downstream of this
 certified substrate. No rigging, Unity, Bevy canonicalization, or broad
 text-to-3D work was used to close this checkpoint.

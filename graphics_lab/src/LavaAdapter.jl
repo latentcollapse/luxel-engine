@@ -92,6 +92,12 @@ struct DirectionalLighting
     intensity::Float32
 end
 
+struct EnvironmentLighting
+    sky_top::Vec4f
+    sky_horizon::Vec4f
+    ground::Vec4f
+end
+
 struct CameraFrame
     position::Vec4f
     right::Vec4f
@@ -193,22 +199,15 @@ end
 function _sky_vertex(
     sky_top::Vec4f,
     sky_horizon::Vec4f,
+    ground::Vec4f,
     fog_color::Vec4f,
-    exposure::Float32,
 )
     vertex_id = Lava.vertex_index() - Int32(1)
     x = Float32(Int32(vertex_id & Int32(1)) * 4 - 1)
     y = Float32(Int32((vertex_id >> Int32(1)) & Int32(1)) * 4 - 1)
     Lava.set_position!(Vec4f(x, y, 0.99f0, 1.0f0))
-    sky_weight = clamp((y + 1.0f0) * 0.5f0, 0.0f0, 1.0f0)
-    horizon_weight = 1.0f0 - sky_weight
-    sky_color = Vec4f(
-        sky_horizon[1] * horizon_weight + sky_top[1] * sky_weight,
-        sky_horizon[2] * horizon_weight + sky_top[2] * sky_weight,
-        sky_horizon[3] * horizon_weight + sky_top[3] * sky_weight,
-        1.0f0,
-    )
-    atmosphere = 0.08f0 * max(exposure, 0.01f0)
+    sky_color = _environment_color(Vec4f(0.0f0, y, 0.0f0, 0.0f0), sky_top, sky_horizon, ground)
+    atmosphere = 0.08f0
     Lava.gfx_output(
         0,
         Vec4f(
@@ -272,13 +271,50 @@ function _dot_vector(first::Vec4f, second::Vec4f)::Float32
     return first[1] * second[1] + first[2] * second[2] + first[3] * second[3]
 end
 
+function _environment_color(
+    direction::Vec4f,
+    sky_top::Vec4f,
+    sky_horizon::Vec4f,
+    ground::Vec4f,
+)::Vec4f
+    vertical = clamp(direction[2], -1.0f0, 1.0f0)
+    if vertical >= 0.0f0
+        weight = sqrt(vertical)
+        return Vec4f(
+            sky_horizon[1] * (1.0f0 - weight) + sky_top[1] * weight,
+            sky_horizon[2] * (1.0f0 - weight) + sky_top[2] * weight,
+            sky_horizon[3] * (1.0f0 - weight) + sky_top[3] * weight,
+            1.0f0,
+        )
+    end
+    weight = sqrt(-vertical)
+    return Vec4f(
+        sky_horizon[1] * (1.0f0 - weight) + ground[1] * weight,
+        sky_horizon[2] * (1.0f0 - weight) + ground[2] * weight,
+        sky_horizon[3] * (1.0f0 - weight) + ground[3] * weight,
+        1.0f0,
+    )
+end
+
+function _reflect_vector(incident::Vec4f, normal::Vec4f)::Vec4f
+    scale = 2.0f0 * _dot_vector(incident, normal)
+    return Vec4f(
+        incident[1] - scale * normal[1],
+        incident[2] - scale * normal[2],
+        incident[3] - scale * normal[3],
+        0.0f0,
+    )
+end
+
 function _material_response(
     base_color::Vec4f,
     normal::Vec4f,
     light_direction::Vec4f,
     light_color::Vec4f,
     light_intensity::Float32,
-    ambient_color::Vec4f,
+    environment_top::Vec4f,
+    environment_horizon::Vec4f,
+    environment_ground::Vec4f,
     metallic::Float32,
     roughness::Float32,
     shadow_visibility::Float32,
@@ -328,25 +364,41 @@ function _material_response(
     specular_scale = distribution * geometry / specular_denominator
     diffuse_scale = (1.0f0 - metalness) * 0.31830987f0
     direct_scale = light_intensity * normal_light * shadow_visibility
-    ambient_diffuse_scale = (1.0f0 - metalness) * 0.7f0
-    ambient_specular_scale = 0.15f0
+    environment_diffuse = _environment_color(
+        surface_normal,
+        environment_top,
+        environment_horizon,
+        environment_ground,
+    )
+    reflection = _reflect_vector(
+        Vec4f(-view_vector[1], -view_vector[2], -view_vector[3], 0.0f0),
+        surface_normal,
+    )
+    environment_specular = _environment_color(
+        reflection,
+        environment_top,
+        environment_horizon,
+        environment_ground,
+    )
+    ambient_diffuse_scale = (1.0f0 - metalness) * 0.52f0
+    ambient_specular_scale = 0.08f0 + 0.16f0 * (1.0f0 - surface_roughness)
     red = (
         (base_color[1] * diffuse_scale + fresnel_red * specular_scale) *
-            light_color[1] * direct_scale +
-            (base_color[1] * ambient_diffuse_scale + fresnel_red * ambient_specular_scale) *
-            ambient_color[1]
+                light_color[1] * direct_scale +
+            base_color[1] * ambient_diffuse_scale * environment_diffuse[1] +
+            fresnel_red * ambient_specular_scale * environment_specular[1]
     )
     green = (
         (base_color[2] * diffuse_scale + fresnel_green * specular_scale) *
-            light_color[2] * direct_scale +
-            (base_color[2] * ambient_diffuse_scale + fresnel_green * ambient_specular_scale) *
-            ambient_color[2]
+                light_color[2] * direct_scale +
+            base_color[2] * ambient_diffuse_scale * environment_diffuse[2] +
+            fresnel_green * ambient_specular_scale * environment_specular[2]
     )
     blue = (
         (base_color[3] * diffuse_scale + fresnel_blue * specular_scale) *
-            light_color[3] * direct_scale +
-            (base_color[3] * ambient_diffuse_scale + fresnel_blue * ambient_specular_scale) *
-            ambient_color[3]
+                light_color[3] * direct_scale +
+            base_color[3] * ambient_diffuse_scale * environment_diffuse[3] +
+            fresnel_blue * ambient_specular_scale * environment_specular[3]
     )
     return Vec4f(max(red, 0.0f0), max(green, 0.0f0), max(blue, 0.0f0), base_color[4])
 end
@@ -488,7 +540,9 @@ function _terrain_vertex(
     light_direction::Vec4f,
     light_color::Vec4f,
     light_intensity::Float32,
-    ambient_color::Vec4f,
+    environment_top::Vec4f,
+    environment_horizon::Vec4f,
+    environment_ground::Vec4f,
     fog_color::Vec4f,
     fog_density::Float32,
     exposure::Float32,
@@ -542,11 +596,13 @@ function _terrain_vertex(
     Lava.gfx_output(5, light_direction)
     Lava.gfx_output(6, light_color)
     Lava.gfx_output(7, Vec4f(light_intensity, fog_density, exposure, texture_enabled))
-    Lava.gfx_output(8, ambient_color)
-    Lava.gfx_output(9, fog_color)
-    Lava.gfx_output(10, camera_position)
+    Lava.gfx_output(8, environment_top)
+    Lava.gfx_output(9, environment_horizon)
+    Lava.gfx_output(10, environment_ground)
+    Lava.gfx_output(11, fog_color)
+    Lava.gfx_output(12, camera_position)
     Lava.gfx_output(
-        11,
+        13,
         _project_world(
             world_position,
             light_position,
@@ -583,7 +639,9 @@ function _mesh_vertex(
     light_direction::Vec4f,
     light_color::Vec4f,
     light_intensity::Float32,
-    ambient_color::Vec4f,
+    environment_top::Vec4f,
+    environment_horizon::Vec4f,
+    environment_ground::Vec4f,
     fog_color::Vec4f,
     fog_density::Float32,
     exposure::Float32,
@@ -635,11 +693,13 @@ function _mesh_vertex(
     Lava.gfx_output(5, light_direction)
     Lava.gfx_output(6, light_color)
     Lava.gfx_output(7, Vec4f(light_intensity, fog_density, exposure, texture_enabled))
-    Lava.gfx_output(8, ambient_color)
-    Lava.gfx_output(9, fog_color)
-    Lava.gfx_output(10, camera_position)
+    Lava.gfx_output(8, environment_top)
+    Lava.gfx_output(9, environment_horizon)
+    Lava.gfx_output(10, environment_ground)
+    Lava.gfx_output(11, fog_color)
+    Lava.gfx_output(12, camera_position)
     Lava.gfx_output(
-        11,
+        13,
         _project_world(
             world_position,
             light_position,
@@ -821,10 +881,12 @@ function _terrain_fragment()
     light_direction = Lava.gfx_input(Vec4f, 5)
     light_color = Lava.gfx_input(Vec4f, 6)
     lighting_parameters = Lava.gfx_input(Vec4f, 7)
-    ambient_color = Lava.gfx_input(Vec4f, 8)
-    fog_color = Lava.gfx_input(Vec4f, 9)
-    camera_position = Lava.gfx_input(Vec4f, 10)
-    light_space = Lava.gfx_input(Vec4f, 11)
+    environment_top = Lava.gfx_input(Vec4f, 8)
+    environment_horizon = Lava.gfx_input(Vec4f, 9)
+    environment_ground = Lava.gfx_input(Vec4f, 10)
+    fog_color = Lava.gfx_input(Vec4f, 11)
+    camera_position = Lava.gfx_input(Vec4f, 12)
+    light_space = Lava.gfx_input(Vec4f, 13)
     light_intensity = lighting_parameters[1]
     fog_density = lighting_parameters[2]
     exposure = lighting_parameters[3]
@@ -841,7 +903,9 @@ function _terrain_fragment()
         light_direction,
         light_color,
         light_intensity,
-        ambient_color,
+        environment_top,
+        environment_horizon,
+        environment_ground,
         material[1],
         material[2],
         _shadow_visibility(light_space),
@@ -1559,12 +1623,11 @@ function _lighting(packet::WGEGraphics.GraphicsScenePacket)::DirectionalLighting
     return _directional_lighting(light.kind, light.color_rgb, light.intensity)
 end
 
-function _ambient_color(environment::WGEGraphics.EnvironmentPacket)::Vec4f
-    return Vec4f(
-        0.32f0 * environment.sky_horizon_rgb[1] + 0.12f0 * environment.sky_top_rgb[1],
-        0.32f0 * environment.sky_horizon_rgb[2] + 0.12f0 * environment.sky_top_rgb[2],
-        0.32f0 * environment.sky_horizon_rgb[3] + 0.12f0 * environment.sky_top_rgb[3],
-        1.0f0,
+function _environment_lighting(environment::WGEGraphics.EnvironmentPacket)::EnvironmentLighting
+    return EnvironmentLighting(
+        Vec4f(environment.sky_top_rgb..., 1.0f0),
+        Vec4f(environment.sky_horizon_rgb..., 1.0f0),
+        Vec4f(environment.ground_rgb..., 1.0f0),
     )
 end
 
@@ -2012,7 +2075,7 @@ function render_scene(
     for material_intent in packet.materials
         _validate_material(material_intent)
     end
-    ambient_color = _ambient_color(packet.environment)
+    environment_lighting = _environment_lighting(packet.environment)
     texture_enabled = _material_texture_enabled(material)
     camera_frame = _camera_frame(packet.camera)
     lighting = _lighting(packet)
@@ -2035,8 +2098,8 @@ function render_scene(
         args=(
             Vec4f(packet.environment.sky_top_rgb..., 1.0f0),
             Vec4f(packet.environment.sky_horizon_rgb..., 1.0f0),
+            environment_lighting.ground,
             Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
-            packet.environment.exposure,
         ),
         clear_color=(0.02f0, 0.03f0, 0.05f0, 1.0f0),
     )
@@ -2075,7 +2138,9 @@ function render_scene(
             lighting.direction,
             lighting.color,
             Float32(lighting.intensity),
-            ambient_color,
+            environment_lighting.sky_top,
+            environment_lighting.sky_horizon,
+            environment_lighting.ground,
             Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
             packet.environment.fog_density,
             packet.environment.exposure,
@@ -2120,7 +2185,9 @@ function render_scene(
                     lighting.direction,
                     lighting.color,
                     Float32(lighting.intensity),
-                    ambient_color,
+                    environment_lighting.sky_top,
+                    environment_lighting.sky_horizon,
+                    environment_lighting.ground,
                     Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
                     packet.environment.fog_density,
                     packet.environment.exposure,

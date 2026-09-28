@@ -63,7 +63,7 @@ set.
 
 ## Typed packet boundary
 
-The first Rust contract is `wge.graphics-scene-packet/v1`. It is a closed,
+The first Rust contract is `wge.graphics-scene-packet/v2`. It is a closed,
 `deny_unknown_fields` structure with a canonical body digest. Its shape is:
 
 ```text
@@ -75,7 +75,7 @@ GraphicsScenePacket
 ├── mesh and texture buffer references
 ├── material intent
 ├── instance transforms and semantic roles
-├── light intent
+├── light and sky/horizon/ground environment intent
 └── gameplay-visible markers (route, spawns, encounters, objective)
 ```
 
@@ -151,8 +151,9 @@ The first native frame is intentionally bounded:
 4. certified route, player/opponent spawn, encounter, and objective markers;
 5. fixed camera, linear-HDR offscreen scene target, deterministic 2× spatial
    resolve, and final color/depth evidence target;
-6. one directional/ambient light intent, deterministic directional shadow map,
-   and depth-tested opaque raster path;
+6. one directional light plus typed sky/horizon/ground environment intent,
+   orientation-aware analytic environment lighting, deterministic directional
+   shadow map, and depth-tested opaque raster path;
 7. capture, readback, Rust measurement, and repeatability evidence.
 
 This proves the entire authority and process path without pretending that a
@@ -268,22 +269,25 @@ The supported scene profile is intentionally fail-closed while quality systems
 are being built: the Lava adapter accepts one directional light, opaque
 material intents with one shared, content-addressed inline RGBA8
 albedo payload, orthographic and perspective native terrain projections, and typed
-sky/fog/exposure intent. The payload is dimension-checked and digest-checked in
+sky/horizon/ground/fog/exposure intent. The payload is dimension-checked and digest-checked in
 both Rust and Julia before Lava creates a sampler binding. Point lights,
 multiple texture sets, and blend/mask materials are typed and
 validated at the boundary but rejected by the adapter until their semantics
-are implemented. Metallic/roughness response is supported by the bounded
-material path, but it is not yet a complete production PBR graph. The current
+are implemented. Metallic/roughness response and orientation-aware analytic
+sky/ground environment lighting are supported by the bounded material path,
+but it is not yet a complete production PBR graph or prefiltered image-based
+lighting system. The current
 directional profile renders a deterministic 512² shadow map from terrain and
 light-frustum-visible instanced meshes, then applies four-tap percentage-closer
 visibility in the main pass. Scene color stays linear HDR until a deterministic
 2× four-sample resolve applies the exposure/tone-map boundary; semantic
 overlays are composited afterward so their Rust-validated role colors remain
-exact. Cascades, contact refinement, soft shadows, temporal AA, and many-light
-shadow budgets remain quality gaps. This keeps
+exact. Cascades, contact refinement, soft shadows, prefiltered IBL, temporal AA,
+and many-light shadow budgets remain quality gaps. This keeps
 the packet extensible
-without silently rendering less than the model requested; color-management
-transfer and richer material graphs remain explicit quality-gap work.
+without silently rendering less than the model requested; prefiltered
+environment maps, texture-role breadth, and richer material graphs remain
+explicit quality-gap work.
 
 The supervised integration test also restarts Julia and proves the same packet
 produces byte-identical RGBA8 capture bytes after a clean GPU-context rebuild.
@@ -305,7 +309,7 @@ terrain shading derives finite-difference normals from the certified height
 field and uses slope/region tinting, overlays are line primitives, and the
 shadow profile is one fixed directional map with four-tap percentage-closer
 sampling followed by a deterministic spatial HDR resolve. Cascades,
-contact/soft shadows, IBL, temporal AA, foliage, particles, post-processing,
+contact/soft shadows, prefiltered IBL, temporal AA, foliage, particles, post-processing,
 and Elden-Ring-level visual quality remain quality-gap work
 behind this native authority boundary, not reasons to weaken the current
 evidence gate.

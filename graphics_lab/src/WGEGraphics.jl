@@ -6,7 +6,7 @@ using SHA
 
 export GraphicsScenePacket, ProtocolError, validate_scene_packet, packet_summary
 
-const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v1"
+const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v2"
 const MAX_PACKET_ELEMENTS = 16 * 1024 * 1024
 const MAX_CAPTURE_DIMENSION = 8192
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
@@ -115,6 +115,7 @@ end
 struct EnvironmentPacket
     sky_top_rgb::NTuple{3,Float32}
     sky_horizon_rgb::NTuple{3,Float32}
+    ground_rgb::NTuple{3,Float32}
     fog_color_rgb::NTuple{3,Float32}
     fog_density::Float32
     exposure::Float32
@@ -619,13 +620,14 @@ end
 function _parse_environment(value::JSON3.Object)::EnvironmentPacket
     _exact_keys(
         value,
-        Set(("sky_top_rgb", "sky_horizon_rgb", "fog_color_rgb", "fog_density", "exposure")),
+        Set(("sky_top_rgb", "sky_horizon_rgb", "ground_rgb", "fog_color_rgb", "fog_density", "exposure")),
         "environment",
     )
     sky_top = _tuple(value["sky_top_rgb"], Val(3), "environment.sky_top_rgb")
     sky_horizon = _tuple(value["sky_horizon_rgb"], Val(3), "environment.sky_horizon_rgb")
+    ground = _tuple(value["ground_rgb"], Val(3), "environment.ground_rgb")
     fog_color = _tuple(value["fog_color_rgb"], Val(3), "environment.fog_color_rgb")
-    for (color, label) in ((sky_top, "sky_top_rgb"), (sky_horizon, "sky_horizon_rgb"), (fog_color, "fog_color_rgb"))
+    for (color, label) in ((sky_top, "sky_top_rgb"), (sky_horizon, "sky_horizon_rgb"), (ground, "ground_rgb"), (fog_color, "fog_color_rgb"))
         all(channel -> 0.0f0 <= channel <= 1.0f0, color) ||
             throw(ProtocolError("malformed_packet", "environment.$label is outside [0, 1]"))
     end
@@ -635,7 +637,7 @@ function _parse_environment(value::JSON3.Object)::EnvironmentPacket
         throw(ProtocolError("malformed_packet", "environment fog density is outside [0, 1]"))
     0.01f0 <= exposure <= 16.0f0 ||
         throw(ProtocolError("malformed_packet", "environment exposure is outside [0.01, 16]"))
-    return EnvironmentPacket(sky_top, sky_horizon, fog_color, fog_density, exposure)
+    return EnvironmentPacket(sky_top, sky_horizon, ground, fog_color, fog_density, exposure)
 end
 
 function _parse_light_kind(value::JSON3.Object)::LightKindPacket

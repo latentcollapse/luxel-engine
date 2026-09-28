@@ -1,4 +1,5 @@
 using Base64
+using GeometryBasics: Vec4f
 using SHA
 using Test
 using WGEGraphics
@@ -29,6 +30,39 @@ end
     srgb = LavaAdapter._texture_matrix(UInt8[128, 128, 128, 255], UInt32(1), UInt32(1), :srgb)
     @test srgb[1, 1][1] ≈ 0.2158605f0 atol = 1.0f-5
     @test srgb[1, 1][4] == 1.0f0
+end
+
+@testset "analytic environment lighting" begin
+    environment = WGEGraphics.EnvironmentPacket(
+        (0.08f0, 0.16f0, 0.30f0),
+        (0.48f0, 0.56f0, 0.62f0),
+        (0.16f0, 0.20f0, 0.16f0),
+        (0.46f0, 0.53f0, 0.58f0),
+        0.006f0,
+        1.0f0,
+    )
+    lighting = LavaAdapter._environment_lighting(environment)
+    top = LavaAdapter._environment_color(
+        Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0),
+        lighting.sky_top,
+        lighting.sky_horizon,
+        lighting.ground,
+    )
+    horizon = LavaAdapter._environment_color(
+        Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0),
+        lighting.sky_top,
+        lighting.sky_horizon,
+        lighting.ground,
+    )
+    ground = LavaAdapter._environment_color(
+        Vec4f(0.0f0, -1.0f0, 0.0f0, 0.0f0),
+        lighting.sky_top,
+        lighting.sky_horizon,
+        lighting.ground,
+    )
+    @test top[1:3] == lighting.sky_top[1:3]
+    @test horizon[1:3] == lighting.sky_horizon[1:3]
+    @test ground[1:3] == lighting.ground[1:3]
 end
 
 @testset "capture-domain measurements" begin

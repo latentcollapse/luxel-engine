@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
 
-pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v1";
+pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v2";
 pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
 pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
 pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v1";
@@ -325,6 +325,7 @@ pub struct LightIntent {
 pub struct EnvironmentIntent {
     pub sky_top_rgb: [f32; 3],
     pub sky_horizon_rgb: [f32; 3],
+    pub ground_rgb: [f32; 3],
     pub fog_color_rgb: [f32; 3],
     pub fog_density: f32,
     pub exposure: f32,
@@ -1282,6 +1283,7 @@ pub fn lower_reference_world(
         environment: EnvironmentIntent {
             sky_top_rgb: [0.08, 0.16, 0.30],
             sky_horizon_rgb: [0.48, 0.56, 0.62],
+            ground_rgb: [0.16, 0.20, 0.16],
             fog_color_rgb: [0.46, 0.53, 0.58],
             fog_density: 0.006,
             exposure: 1.0,
@@ -1445,6 +1447,7 @@ fn validate_environment(environment: &EnvironmentIntent) -> Result<(), GraphicsC
     for (color, label) in [
         (&environment.sky_top_rgb, "environment sky top"),
         (&environment.sky_horizon_rgb, "environment sky horizon"),
+        (&environment.ground_rgb, "environment ground"),
         (&environment.fog_color_rgb, "environment fog color"),
     ] {
         finite_values(color, label)?;
@@ -1965,6 +1968,7 @@ mod tests {
             environment: EnvironmentIntent {
                 sky_top_rgb: [0.08, 0.16, 0.30],
                 sky_horizon_rgb: [0.48, 0.56, 0.62],
+                ground_rgb: [0.16, 0.20, 0.16],
                 fog_color_rgb: [0.46, 0.53, 0.58],
                 fog_density: 0.006,
                 exposure: 1.0,
