@@ -272,18 +272,26 @@ accepted. Packet data is represented by concrete domain structs; closed JSON
 variants use dispatch on typed values rather than property probing; payload
 hashing dispatches on the decoded buffer element type and preserves the Rust
 little-endian identity; and parser/worker helpers have bounded concrete
-signatures. The adapter rejects material features it does not yet implement
-(multiple texture sets, non-opaque alpha modes, and metallic shading) instead
-of silently discarding those intents. The current supported render profile is
-therefore explicit: one opaque, non-metallic material family, one shared
-content-addressed inline RGBA8 albedo payload, one directional light, typed
-sky/fog/exposure intent, orthographic terrain projection, depth-tested raster,
-and line-based semantic overlays. Texture dimensions and payload digests are
-validated in Rust and Julia, and the same typed descriptor binding is used by
-terrain and mesh draws. Color-space transfer, mip generation/streaming, and
-multiple material texture roles remain quality-gap work. The adapter also emits
-deterministic instance visibility and submitted-vertex telemetry; Rust checks
-the counts against the packet rather than treating them as decorative stats.
+signatures. GPU entry points use concrete `Vec2f`/`Vec4f` and device-array
+signatures, and scene lighting is a domain struct rather than an anonymous
+property bag. Terrain normals are derived from the certified height field in
+the vertex path. The adapter rejects material features it does not yet
+implement (multiple texture sets and non-opaque alpha modes) instead of
+silently discarding those intents. The current supported render profile is
+therefore explicit: one opaque material family with bounded
+metallic/roughness response, one shared content-addressed inline RGBA8 albedo
+payload, one directional light, typed sky/fog/exposure intent, camera-aware
+Cook–Torrance-style roughness/metalness, orthographic terrain projection,
+depth-tested raster, and line-based semantic overlays. Texture dimensions and
+payload digests are validated in Rust and Julia, and the same typed descriptor
+binding is used by terrain and mesh draws. The pinned Lava revision has a
+compatibility hazard where `frag_args` affects the fragment signature but is
+not packed into the draw argument buffer; the adapter therefore forwards
+scene constants through explicit varyings and keeps fragment argument tuples
+empty. Color-space transfer, mip generation/streaming, and multiple material
+texture roles remain quality-gap work. The adapter also emits deterministic
+instance visibility and submitted-vertex telemetry; Rust checks the counts
+against the packet rather than treating them as decorative stats.
 
 Rust now supervises the persistent worker, checks the exact audited Lava and
 adapter revisions, validates the typed ready payload, binds the frame to the

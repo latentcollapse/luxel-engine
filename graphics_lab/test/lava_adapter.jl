@@ -5,6 +5,21 @@ using Test
 include(joinpath(@__DIR__, "..", "src", "LavaAdapter.jl"))
 using .LavaAdapter
 
+@testset "RGBA payload layout" begin
+    bytes = UInt8[
+        1, 2, 3, 4,
+        5, 6, 7, 8,
+        9, 10, 11, 12,
+        13, 14, 15, 16,
+        17, 18, 19, 20,
+        21, 22, 23, 24,
+    ]
+    matrix = LavaAdapter._texture_matrix(bytes, UInt32(3), UInt32(2))
+    @test size(matrix) == (2, 3)
+    @test matrix[1, 1] == (1.0f0 / 255.0f0, 2.0f0 / 255.0f0, 3.0f0 / 255.0f0, 4.0f0 / 255.0f0)
+    @test matrix[2, 3] == (21.0f0 / 255.0f0, 22.0f0 / 255.0f0, 23.0f0 / 255.0f0, 24.0f0 / 255.0f0)
+end
+
 @testset "persistent Lava adapter" begin
     state = LavaAdapter.backend()
     @test state === LavaAdapter.backend()

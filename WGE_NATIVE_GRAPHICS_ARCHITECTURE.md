@@ -258,13 +258,15 @@ independently recomputed visual measurements before promoting a receipt.
 
 The supported scene profile is intentionally fail-closed while quality systems
 are being built: the Lava adapter accepts one directional light, opaque
-non-metallic material intents with one shared, content-addressed inline RGBA8
+material intents with one shared, content-addressed inline RGBA8
 albedo payload, an orthographic native terrain projection, and typed
 sky/fog/exposure intent. The payload is dimension-checked and digest-checked in
 both Rust and Julia before Lava creates a sampler binding. Perspective cameras,
-point lights, multiple texture sets, blend/mask materials, and metallic
-materials are typed and validated at the boundary but rejected by the adapter
-until their semantics are implemented. This keeps the packet extensible
+point lights, multiple texture sets, and blend/mask materials are typed and
+validated at the boundary but rejected by the adapter until their semantics
+are implemented. Metallic/roughness response is supported by the bounded
+material path, but it is not yet a complete production PBR graph. This keeps
+the packet extensible
 without silently rendering less than the model requested; color-management
 transfer and richer material graphs remain explicit quality-gap work.
 
@@ -279,7 +281,8 @@ measurements are compared against Rust’s independent recomputation. Frame
 telemetry now carries packet-checked instance visibility and terrain/mesh
 submission counts, exposing a measurable culling/performance surface.
 The inspected frame is intentionally only a coarse diagnostic slice: terrain
-shading is height/slope-based, overlays are line primitives, and the path does
-not yet claim PBR, shadows, IBL, foliage, particles, post-processing, or
-Elden-Ring-level visual quality. Those are quality-gap work behind this native
-authority boundary, not reasons to weaken the current evidence gate.
+shading derives finite-difference normals from the certified height field and
+uses slope/region tinting, overlays are line primitives, and the path does not
+yet claim production PBR, shadows, IBL, foliage, particles, post-processing,
+or Elden-Ring-level visual quality. Those are quality-gap work behind this
+native authority boundary, not reasons to weaken the current evidence gate.

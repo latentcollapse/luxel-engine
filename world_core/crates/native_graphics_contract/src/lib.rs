@@ -1112,7 +1112,7 @@ pub fn lower_reference_world(
         materials.push(MaterialIntent {
             material_id: "obstacle-default".into(),
             base_color_rgba: [0.27, 0.24, 0.20, 1.0],
-            metallic: 0.0,
+            metallic: 0.35,
             roughness: 0.78,
             alpha_mode: AlphaMode::Opaque,
             texture_ids: vec![albedo_texture.texture_id.clone()],

@@ -39,14 +39,14 @@ struct PerspectiveProjection <: CameraProjection
     fov_y_degrees::Float32
 end
 
-const CameraProjectionValue = Union{OrthographicProjection, PerspectiveProjection}
+const CameraProjectionValue = Union{OrthographicProjection,PerspectiveProjection}
 
 struct CameraPacket
     camera_id::String
     projection::CameraProjectionValue
-    position_xyz_m::NTuple{3, Float32}
-    forward_xyz::NTuple{3, Float32}
-    up_xyz::NTuple{3, Float32}
+    position_xyz_m::NTuple{3,Float32}
+    forward_xyz::NTuple{3,Float32}
+    up_xyz::NTuple{3,Float32}
     near_plane_m::Float32
     far_plane_m::Float32
     width_px::UInt32
@@ -55,7 +55,7 @@ end
 
 struct MaterialPacket
     material_id::String
-    base_color_rgba::NTuple{4, Float32}
+    base_color_rgba::NTuple{4,Float32}
     metallic::Float32
     roughness::Float32
     alpha_mode::Symbol
@@ -70,21 +70,21 @@ struct TexturePacket
     height_px::UInt32
     mip_levels::UInt32
     color_space::Symbol
-    payload::Union{Nothing, Vector{UInt8}}
+    payload::Union{Nothing,Vector{UInt8}}
 end
 
 struct MeshPacket
     mesh_id::String
-    positions_m::Vector{NTuple{3, Float32}}
-    normals::Vector{NTuple{3, Float32}}
+    positions_m::Vector{NTuple{3,Float32}}
+    normals::Vector{NTuple{3,Float32}}
     indices::Vector{UInt32}
     material_id::String
 end
 
 struct TransformPacket
-    translation_xyz_m::NTuple{3, Float32}
-    rotation_xyzw::NTuple{4, Float32}
-    scale_xyz::NTuple{3, Float32}
+    translation_xyz_m::NTuple{3,Float32}
+    rotation_xyzw::NTuple{4,Float32}
+    scale_xyz::NTuple{3,Float32}
 end
 
 struct InstancePacket
@@ -95,27 +95,27 @@ struct InstancePacket
 end
 
 struct DirectionalLightPacket
-    direction_xyz::NTuple{3, Float32}
+    direction_xyz::NTuple{3,Float32}
 end
 
 struct PointLightPacket
-    position_xyz_m::NTuple{3, Float32}
+    position_xyz_m::NTuple{3,Float32}
     range_m::Float32
 end
 
-const LightKindPacket = Union{DirectionalLightPacket, PointLightPacket}
+const LightKindPacket = Union{DirectionalLightPacket,PointLightPacket}
 
 struct LightPacket
     light_id::String
     kind::LightKindPacket
-    color_rgb::NTuple{3, Float32}
+    color_rgb::NTuple{3,Float32}
     intensity::Float32
 end
 
 struct EnvironmentPacket
-    sky_top_rgb::NTuple{3, Float32}
-    sky_horizon_rgb::NTuple{3, Float32}
-    fog_color_rgb::NTuple{3, Float32}
+    sky_top_rgb::NTuple{3,Float32}
+    sky_horizon_rgb::NTuple{3,Float32}
+    fog_color_rgb::NTuple{3,Float32}
     fog_density::Float32
     exposure::Float32
 end
@@ -125,28 +125,28 @@ abstract type OverlayPacket end
 struct PointOverlay <: OverlayPacket
     marker_id::String
     role::Symbol
-    position_xyz_m::NTuple{3, Float32}
+    position_xyz_m::NTuple{3,Float32}
     radius_m::Float32
-    color_rgba::NTuple{4, Float32}
+    color_rgba::NTuple{4,Float32}
 end
 
 struct CircleOverlay <: OverlayPacket
     marker_id::String
     role::Symbol
-    center_xyz_m::NTuple{3, Float32}
+    center_xyz_m::NTuple{3,Float32}
     radius_m::Float32
-    color_rgba::NTuple{4, Float32}
+    color_rgba::NTuple{4,Float32}
 end
 
 struct PolylineOverlay <: OverlayPacket
     marker_id::String
     role::Symbol
-    points_xyz_m::Vector{NTuple{3, Float32}}
+    points_xyz_m::Vector{NTuple{3,Float32}}
     thickness_m::Float32
-    color_rgba::NTuple{4, Float32}
+    color_rgba::NTuple{4,Float32}
 end
 
-const OverlayValue = Union{PointOverlay, CircleOverlay, PolylineOverlay}
+const OverlayValue = Union{PointOverlay,CircleOverlay,PolylineOverlay}
 
 struct GraphicsScenePacket
     packet_sha256::String
@@ -369,10 +369,10 @@ function _payload_sha256(values::Vector{Float32})
         append!(
             bytes,
             UInt8[
-                bits & 0xff,
-                (bits >> 8) & 0xff,
-                (bits >> 16) & 0xff,
-                (bits >> 24) & 0xff,
+                bits&0xff,
+                (bits>>8)&0xff,
+                (bits>>16)&0xff,
+                (bits>>24)&0xff,
             ],
         )
     end
@@ -390,10 +390,10 @@ function _payload_sha256(values::Vector{UInt32})
         append!(
             bytes,
             UInt8[
-                value & 0xff,
-                (value >> 8) & 0xff,
-                (value >> 16) & 0xff,
-                (value >> 24) & 0xff,
+                value&0xff,
+                (value>>8)&0xff,
+                (value>>16)&0xff,
+                (value>>24)&0xff,
             ],
         )
     end
@@ -527,11 +527,11 @@ function _parse_meshes(value::JSON3.Array, material_ids::Set{String})::Vector{Me
         _valid_id(id, "mesh_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate mesh $id"))
         push!(ids, id)
-        positions = NTuple{3, Float32}[
+        positions = NTuple{3,Float32}[
             _tuple(position, Val(3), "mesh.positions_m") for
             position in _array(object["positions_m"], "mesh.positions_m")
         ]
-        normals = NTuple{3, Float32}[
+        normals = NTuple{3,Float32}[
             _tuple(normal, Val(3), "mesh.normals") for
             normal in _array(object["normals"], "mesh.normals")
         ]
@@ -692,7 +692,7 @@ function _overlay_header(value::JSON3.Object)
     return marker_id, role
 end
 
-function _overlay_color(value::JSON3.Object)::NTuple{4, Float32}
+function _overlay_color(value::JSON3.Object)::NTuple{4,Float32}
     color = _tuple(value["color_rgba"], Val(4), "overlay.color_rgba")
     all(channel -> 0.0f0 <= channel <= 1.0f0, color) ||
         throw(ProtocolError("malformed_packet", "overlay color is outside [0, 1]"))
@@ -744,7 +744,7 @@ function _parse_overlay(::Val{:polyline}, value::JSON3.Object)::PolylineOverlay
     marker_id, role = _overlay_header(value)
     point_values = _array(value["points_xyz_m"], "overlay.points_xyz_m")
     length(point_values) >= 2 || throw(ProtocolError("malformed_packet", "polyline needs two points"))
-    points = NTuple{3, Float32}[_tuple(point, Val(3), "overlay point") for point in point_values]
+    points = NTuple{3,Float32}[_tuple(point, Val(3), "overlay point") for point in point_values]
     thickness = _finite_float32(value["thickness_m"], "overlay.thickness_m")
     thickness > 0.0f0 || throw(ProtocolError("malformed_packet", "overlay thickness is invalid"))
     return PolylineOverlay(marker_id, role, points, thickness, _overlay_color(value))
@@ -869,7 +869,7 @@ function _array(value, label::String)::JSON3.Array
     return value
 end
 
-function _tuple(value, ::Val{N}, label::String)::NTuple{N, Float32} where {N}
+function _tuple(value, ::Val{N}, label::String)::NTuple{N,Float32} where {N}
     array = _array(value, label)
     length(array) == N || throw(ProtocolError("malformed_packet", "$label has the wrong arity"))
     return ntuple(index -> _finite_float32(array[index], "$label[$index]"), N)
