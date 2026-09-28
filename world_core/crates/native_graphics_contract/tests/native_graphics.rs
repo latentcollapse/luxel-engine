@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 use wge_native_graphics_contract::{
-    CameraProjection, GraphicsReady, GraphicsWorkerSupervisor, lower_reference_world,
+    GraphicsReady, GraphicsWorkerSupervisor, lower_objective_close_packet, lower_reference_world,
     seal_scene_packet, validate_frame_receipt, validate_ready, validate_scene_packet,
 };
 use wge_reference_runtime::build_from_layout_path;
@@ -53,6 +53,23 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
             .meshes
             .iter()
             .any(|mesh| mesh.mesh_id == "foliage-cross")
+    );
+    assert!(
+        packet
+            .body
+            .meshes
+            .iter()
+            .any(|mesh| mesh.mesh_id == "objective-beacon")
+    );
+    let beacon = packet
+        .body
+        .instances
+        .iter()
+        .find(|instance| instance.instance_id == "objective-beacon")
+        .expect("objective beacon instance exists");
+    assert_eq!(
+        beacon.importance,
+        wge_native_graphics_contract::InstanceImportance::Landmark
     );
     assert!(packet.body.instances.len() > build.world.body.authored_layout.obstacles.len());
     assert!(packet.body.instances.iter().any(|instance| {
@@ -221,11 +238,8 @@ fn rust_packet_renders_through_the_pinned_lava_worker() {
         .map(|mesh| mesh.indices.len() as u64)
         .sum::<u64>();
     let packet = seal_scene_packet(body).expect("instanced packet seals");
-    let mut perspective_body = packet.body.clone();
-    perspective_body.camera.projection = CameraProjection::Perspective {
-        fov_y_degrees: 60.0,
-    };
-    let perspective_packet = seal_scene_packet(perspective_body).expect("perspective packet seals");
+    let perspective_packet =
+        lower_objective_close_packet(&packet).expect("objective close packet seals");
     fs::write(
         &packet_path,
         serde_json::to_vec(&packet).expect("packet serializes"),
@@ -357,7 +371,17 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
         frame["telemetry"]["landmark_visible_instance_count"]
             .as_u64()
             .unwrap(),
-        0
+        packet
+            .body
+            .instances
+            .iter()
+            .filter(|instance| {
+                matches!(
+                    instance.importance,
+                    wge_native_graphics_contract::InstanceImportance::Landmark
+                )
+            })
+            .count() as u64
     );
     assert!(frame["telemetry"]["terrain_vertex_count"].as_u64().unwrap() > 0);
     assert!(frame["telemetry"]["mesh_vertex_count"].as_u64().unwrap() > 0);
@@ -382,6 +406,16 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
             .as_u64()
             .unwrap()
             > 1
+    );
+    assert_ne!(
+        frame["capture_sha256"], perspective_frame["capture_sha256"],
+        "close-range perspective capture must not alias the overview capture"
+    );
+    assert_eq!(
+        perspective_frame["telemetry"]["landmark_visible_instance_count"]
+            .as_u64()
+            .unwrap(),
+        1
     );
 
     fs::remove_dir_all(output_dir).expect("test output directory is removed");

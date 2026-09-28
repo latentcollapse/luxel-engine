@@ -18,12 +18,14 @@ intentionally not part of this checkpoint.
   obstacle instance in the Riverwatch fixture, thirty background foliage
   instances, route/spawn/
   encounter/objective projections, typed materials, environment lighting,
-  authored mesh UV0 channels, directional shadow map, linear HDR resolve, and
-  semantic visibility telemetry.
+  authored mesh UV0 channels, a semantic objective beacon with a distinct
+  emissive role, directional shadow map, linear HDR resolve, and semantic
+  visibility telemetry.
 - Material contract: `wge.graphics-scene-packet/v5`, adapter identity
   `wge.lava-adapter/v2`, with digest-bound albedo, normal, roughness,
-  occlusion, and emissive roles.
-- Capture: deterministic 384x256 PPM for the native Lava path; the Bevy
+  occlusion, and emissive roles, including a beacon-specific albedo/emissive
+  pair.
+- Capture: deterministic 320x240 PPM for the native Lava path; the Bevy
   inspection capture is 320x240 PNG.
 
 ## Results
@@ -32,10 +34,10 @@ intentionally not part of this checkpoint.
 | --- | ---: | ---: | --- | --- |
 | Reference-runtime `build` | 3.49 s | 383,604 KiB | passed | 78 traversal steps; gameplay won; visual gate passed |
 | Reference-runtime `verify` | 0.75 s | — | passed | independently revalidated world, traversal, gameplay, and visual evidence hashes |
-| Native Lava `render-layout` (cold CLI) | 111.67 s | 2,008,324 KiB | passed | Rust lowered, supervised, rendered, measured, and promoted the v5 receipt |
+| Native Lava `render-layout` (cold CLI) | 127.20 s | 1,933,720 KiB | passed | Rust lowered, supervised, rendered, measured, and promoted the v5 receipt |
 | Persistent Lava worker, first frame | see formal cold sample | — | passed | lazy device/pipeline/scene initialization |
-| Persistent Lava worker, warm frames | 259.311 ms wall p50 | — | passed | 30 supervised warm samples; no new compilation; byte-identical capture digest |
-| Formal persistent benchmark (1 cold + 30 warm) | 27.299 s cold wall; 259.311 ms warm p50 | — | passed | Rust promotion round trip; warm wall p95 309.788 ms, p99 320.549 ms; deterministic captures |
+| Persistent Lava worker, warm frames | 263.459 ms wall p50 | — | passed | 30 supervised warm samples; no new compilation; byte-identical capture digest |
+| Formal persistent benchmark (1 cold + 30 warm) | 25.361 s cold wall; 263.459 ms warm p50 | — | passed | Rust promotion round trip; warm wall p95 301.552 ms, p99 321.951 ms; deterministic captures |
 | Bevy native inspection capture (cold) | 155.52 s | 6,104,240 KiB | provenance passed | artifact revalidated; visual representation remains coarse and is not used as Lava parity evidence |
 
 The persistent-worker values are deliberately separated from the cold CLI
@@ -45,40 +47,53 @@ deployment/startup measurement, not a steady-state frame-time claim.
 
 The warm replay produced the same capture digest on every frame:
 
-`sha256:d9d5e2f2adc4ebc6095fe6bb6a54e362d9815223d6711d40e55321a4b97f1c09`
+`sha256:564ffb3b4d5ef0e6545cc7cf53397628f354c9c2ba5613540f03fd172e8fba8f`
 
 The promoted benchmark packet digest was:
 
-`sha256:af3413b768a505e5ca6f95221147c0f93684d62731376de84457ddd92df2fa19`
+`sha256:ecffb37c4a44dc5d7fd0bce81e81592ad8e136d10a6e25055a45e5ce15c421e9`
 
 The native Rust receipt for the promoted Riverwatch frame reported:
 
-- 31 instances: 30 background, 1 gameplay-critical in the current Riverwatch
+- 32 instances: 30 background, 1 landmark beacon, and 1 gameplay-critical in the current Riverwatch
   fixture after deterministic foliage placement;
-- 13 draw calls, 10 pipeline compilations, 41,833 uploaded bytes, and 308,224
+- 15 draw calls, 10 pipeline compilations, 59,433 uploaded bytes, and 308,224
   readback bytes;
-- 31 visible and 0 culled instances for this camera;
-- terrain vertex count 13,824 and mesh vertex count 48;
-- visual measurements: luminance standard deviation `0.0822154541`, 2,685
+- 32 visible and 0 culled instances for this camera;
+- terrain vertex count 13,824 and mesh vertex count 240;
+- visual measurements: luminance standard deviation `0.0822184531`, 2,730
   distinct colors, route pixels 290, player pixels 7, opponent pixels 6,
   encounter pixels 69, objective pixels 7.
 
 The formal persistent benchmark uses the full supervisor round trip and Rust
-promotion for every frame. Its cold promoted frame reported a 12.941 s
-adapter interval and a 12.873 s graphics-pass GPU interval, dominated by
+promotion for every frame. Its cold promoted frame reported a 12.115 s
+adapter interval and a 12.055 s graphics-pass GPU interval, dominated by
 first-use pipeline/device work. Across 30 warm frames it reported:
 
-- wall time: p50 `259.311 ms`, p95 `309.788 ms`, p99 `320.549 ms`, mean
-  `267.667 ms`;
-- renderer-reported frame time (including Lava readback): p50 `51.002 ms`,
-  p95 `71.326 ms`, p99 `106.474 ms`, mean `52.138 ms`;
-- graphics-pass GPU interval: p50 `722 µs`, p95 `1,277 µs`, p99 `1,278 µs`,
-  mean `795 µs`;
+- wall time: p50 `263.459 ms`, p95 `301.552 ms`, p99 `321.951 ms`, mean
+  `266.699 ms`;
+- renderer-reported frame time (including Lava readback): p50 `46.825 ms`,
+  p95 `61.933 ms`, p99 `76.700 ms`, mean `45.700 ms`;
+- graphics-pass GPU interval: p50 `55 µs`, p95 `57 µs`, p99 `213 µs`, mean
+  `60 µs`;
 - every warm capture matched the cold capture digest.
 
-The separate cold `render-layout` receipt reported an 11.153 s adapter
-interval and an 11.094 s graphics-pass GPU interval. Its process consumed
-2,008,324 KiB maximum resident memory including the Rust/Cargo CLI boundary.
+The separate cold `render-layout` receipt reported a 14.026 s adapter
+interval and a 13.957 s graphics-pass GPU interval. Its process consumed
+1,933,720 KiB maximum resident memory including the Rust/Cargo CLI boundary.
+
+The close-range objective inspection command produced a separate promoted
+receipt from the same world:
+
+- packet digest `sha256:392e5b58eb5d46952efebfca83a02257fb862ec811616eeb75cd3590bb2a90b`;
+- capture digest `sha256:4c3c32bad21d66b96bc6b123a2b652163b863d6f91bb9be2028e19492243b4a6`;
+- 13 draws, 9 pipeline compilations, 48,265 uploaded bytes, 32 total
+  instances, 10 visible and 22 culled, including 1 visible landmark;
+- 204 mesh vertices, 1,704 distinct colors, and luminance standard deviation
+  `0.0374367692`.
+
+This view intentionally has no gameplay overlays, so zero marker pixels there
+is expected; overview promotion remains the gameplay-visible visual gate.
 
 The GPU interval is a Vulkan timestamp bracket around the native graphics
 commands; it excludes CPU packet/protocol work and the host readback. The
@@ -109,6 +124,14 @@ cargo run -q -p wge-native-graphics-contract -- render-layout \
   "/mnt/d/Code Projects/WGE/graphics_lab" \
   "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
   /tmp/wge-riverwatch-native.ppm
+
+cargo run -q -p wge-native-graphics-contract -- render-close-layout \
+  crates/reference_runtime/examples/riverwatch.layout.json \
+  /home/mattc/.juliaup/bin/julia \
+  "/mnt/d/Code Projects/WGE/terrain_lab" \
+  "/mnt/d/Code Projects/WGE/graphics_lab" \
+  "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
+  /tmp/wge-riverwatch-objective-close.ppm
 
 cargo run -q -p wge-native-graphics-contract -- benchmark-layout \
   crates/reference_runtime/examples/riverwatch.layout.json \
@@ -147,8 +170,10 @@ failure in these runs.
 ## Interpretation and next benchmark improvements
 
 This checkpoint establishes a repeatable native path, a measured 30-frame warm
-distribution, and a real graphics-pass GPU timer. It does not yet establish a
-production frame budget. The next benchmark slice should add a denser authored
-scene, per-pass GPU timing breakdown, and separate upload, compilation,
-render, readback, and promotion timings. Quartz should be rerun after the
-foliage pass so both current reference scenes share the same graphics revision.
+distribution, a real graphics-pass GPU timer, and a close-range material
+inspection profile. It does not yet establish a production frame budget or
+imported hero-asset quality. The next benchmark slice should add a denser
+authored scene, per-pass GPU timing breakdown, and separate upload,
+compilation, render, readback, and promotion timings. Quartz should be rerun
+after the foliage pass so both current reference scenes share the same graphics
+revision.

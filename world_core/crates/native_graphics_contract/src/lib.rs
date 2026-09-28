@@ -1144,6 +1144,26 @@ fn foliage_mesh() -> MeshPacket {
     }
 }
 
+fn objective_beacon_mesh() -> MeshPacket {
+    const SEGMENTS: usize = 8;
+    let mut mesh = BeaconMeshBuffers::with_capacity(SEGMENTS);
+
+    mesh.append_band(0.0, 0.45, 1.8, 1.6);
+    mesh.append_band(0.45, 3.8, 0.72, 0.72);
+    mesh.append_band(3.8, 4.35, 1.2, 0.9);
+    mesh.append_cap(4.35, 0.9, true);
+    mesh.append_cap(0.0, 1.8, false);
+
+    MeshPacket {
+        mesh_id: "objective-beacon".into(),
+        positions_m: mesh.positions,
+        normals: mesh.normals,
+        uv0: mesh.uv0,
+        indices: mesh.indices,
+        material_id: "objective-beacon".into(),
+    }
+}
+
 fn deterministic_foliage_instances(
     world: &WorldArtifact,
 ) -> Result<Vec<InstancePacket>, GraphicsContractError> {
@@ -1218,6 +1238,115 @@ fn append_mesh_face(
     normals.extend([normal; 4]);
     uv0.extend([[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
     indices.extend([first, first + 1, first + 2, first, first + 2, first + 3]);
+}
+
+struct BeaconMeshBuffers {
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    uv0: Vec<[f32; 2]>,
+    indices: Vec<u32>,
+    segments: usize,
+}
+
+impl BeaconMeshBuffers {
+    fn with_capacity(segments: usize) -> Self {
+        Self {
+            positions: Vec::with_capacity(segments * 4 * 3 + segments * 6),
+            normals: Vec::with_capacity(segments * 4 * 3 + segments * 6),
+            uv0: Vec::with_capacity(segments * 4 * 3 + segments * 6),
+            indices: Vec::with_capacity(segments * 6 * 4),
+            segments,
+        }
+    }
+
+    fn append_band(&mut self, lower_y: f32, upper_y: f32, lower_radius: f32, upper_radius: f32) {
+        let segments_f = self.segments as f32;
+        for segment in 0..self.segments {
+            let first_angle = std::f32::consts::TAU * segment as f32 / segments_f;
+            let second_angle = std::f32::consts::TAU * (segment + 1) as f32 / segments_f;
+            let first_u = segment as f32 / segments_f;
+            let second_u = (segment + 1) as f32 / segments_f;
+            let normal_angle = (first_angle + second_angle) * 0.5;
+            let normal = [normal_angle.cos(), 0.0, normal_angle.sin()];
+            let face = [
+                [
+                    lower_radius * first_angle.cos(),
+                    lower_y,
+                    lower_radius * first_angle.sin(),
+                ],
+                [
+                    lower_radius * second_angle.cos(),
+                    lower_y,
+                    lower_radius * second_angle.sin(),
+                ],
+                [
+                    upper_radius * second_angle.cos(),
+                    upper_y,
+                    upper_radius * second_angle.sin(),
+                ],
+                [
+                    upper_radius * first_angle.cos(),
+                    upper_y,
+                    upper_radius * first_angle.sin(),
+                ],
+            ];
+            let first = self.positions.len() as u32;
+            self.positions.extend(face);
+            self.normals.extend([normal; 4]);
+            self.uv0.extend([
+                [first_u, 0.0],
+                [second_u, 0.0],
+                [second_u, 1.0],
+                [first_u, 1.0],
+            ]);
+            self.indices
+                .extend([first, first + 1, first + 2, first, first + 2, first + 3]);
+        }
+    }
+
+    fn append_cap(&mut self, y: f32, radius: f32, top: bool) {
+        let normal = if top {
+            [0.0, 1.0, 0.0]
+        } else {
+            [0.0, -1.0, 0.0]
+        };
+        let center = [0.0, y, 0.0];
+        let segments_f = self.segments as f32;
+        for segment in 0..self.segments {
+            let first_angle = std::f32::consts::TAU * segment as f32 / segments_f;
+            let second_angle = std::f32::consts::TAU * (segment + 1) as f32 / segments_f;
+            let first = [radius * first_angle.cos(), y, radius * first_angle.sin()];
+            let second = [radius * second_angle.cos(), y, radius * second_angle.sin()];
+            let vertices = if top {
+                [center, first, second]
+            } else {
+                [center, second, first]
+            };
+            self.append_triangle(
+                vertices,
+                normal,
+                [
+                    [0.5, 0.5],
+                    [
+                        0.5 + first[0] / (radius * 2.0),
+                        0.5 + first[2] / (radius * 2.0),
+                    ],
+                    [
+                        0.5 + second[0] / (radius * 2.0),
+                        0.5 + second[2] / (radius * 2.0),
+                    ],
+                ],
+            );
+        }
+    }
+
+    fn append_triangle(&mut self, vertices: [[f32; 3]; 3], normal: [f32; 3], uvs: [[f32; 2]; 3]) {
+        let first = self.positions.len() as u32;
+        self.positions.extend(vertices);
+        self.normals.extend([normal; 3]);
+        self.uv0.extend(uvs);
+        self.indices.extend([first, first + 1, first + 2]);
+    }
 }
 
 fn procedural_texture(
@@ -1308,6 +1437,15 @@ fn procedural_foliage_albedo_texture() -> TextureReference {
     )
 }
 
+fn procedural_beacon_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "riverwatch-beacon-albedo",
+        "procedural-riverwatch-beacon-albedo-v1",
+        [72, 86, 96],
+        [132, 116, 78],
+    )
+}
+
 fn procedural_normal_texture() -> TextureReference {
     let width = 8;
     let height = 8;
@@ -1393,6 +1531,31 @@ fn procedural_emissive_texture() -> TextureReference {
     )
 }
 
+fn procedural_beacon_emissive_texture() -> TextureReference {
+    let width = 16;
+    let height = 16;
+    let mut bytes = Vec::with_capacity(width * height * 4);
+    for row in 0..height {
+        for column in 0..width {
+            let band = (6..=9).contains(&row);
+            let sparkle = (row * 7 + column * 11) % 19 == 0;
+            bytes.extend(if band || sparkle {
+                [255, 112, 22, 255]
+            } else {
+                [0, 0, 0, 255]
+            });
+        }
+    }
+    procedural_texture(
+        "riverwatch-beacon-emissive",
+        "procedural-riverwatch-beacon-emissive-v1",
+        TextureColorSpace::Srgb,
+        width as u32,
+        height as u32,
+        bytes,
+    )
+}
+
 pub fn lower_reference_world(
     world: &WorldArtifact,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
@@ -1430,14 +1593,24 @@ pub fn lower_reference_world(
     let terrain_albedo_texture = procedural_terrain_albedo_texture();
     let stone_albedo_texture = procedural_stone_albedo_texture();
     let foliage_albedo_texture = procedural_foliage_albedo_texture();
+    let beacon_albedo_texture = procedural_beacon_albedo_texture();
     let normal_texture = procedural_normal_texture();
     let roughness_texture = procedural_roughness_texture();
     let occlusion_texture = procedural_occlusion_texture();
     let emissive_texture = procedural_emissive_texture();
+    let beacon_emissive_texture = procedural_beacon_emissive_texture();
     let normal_texture_id = Some(normal_texture.texture_id.clone());
     let roughness_texture_id = Some(roughness_texture.texture_id.clone());
     let occlusion_texture_id = Some(occlusion_texture.texture_id.clone());
     let emissive_texture_id = Some(emissive_texture.texture_id.clone());
+    let beacon_emissive_texture_id = Some(beacon_emissive_texture.texture_id.clone());
+    let [objective_x, objective_z] = layout.traversal.objective_position_xz_m;
+    let objective_cell = nearest_cell(
+        layout.width_m,
+        layout.length_m,
+        resolution,
+        [objective_x, objective_z],
+    );
     let mut materials = vec![MaterialIntent {
         material_id: "terrain-default".into(),
         base_color_rgba: [0.29, 0.38, 0.28, 1.0],
@@ -1516,6 +1689,40 @@ pub fn lower_reference_world(
         meshes.push(foliage_mesh());
         instances.extend(foliage_instances);
     }
+    materials.push(MaterialIntent {
+        material_id: "objective-beacon".into(),
+        base_color_rgba: [0.24, 0.29, 0.34, 1.0],
+        metallic: 0.45,
+        roughness: 0.48,
+        alpha_mode: AlphaMode::Opaque,
+        texture_ids: vec![beacon_albedo_texture.texture_id.clone()],
+        normal_texture_id: normal_texture_id.clone(),
+        roughness_texture_id: roughness_texture_id.clone(),
+        occlusion_texture_id: occlusion_texture_id.clone(),
+        emissive_texture_id: beacon_emissive_texture_id,
+        normal_scale: 0.7,
+        occlusion_strength: 0.85,
+        emissive_factor_rgb: [0.85, 0.3, 0.035],
+    });
+    meshes.push(objective_beacon_mesh());
+    instances.push(InstancePacket {
+        instance_id: "objective-beacon".into(),
+        mesh_id: "objective-beacon".into(),
+        material_id: "objective-beacon".into(),
+        importance: InstanceImportance::Landmark,
+        transform: Transform3d {
+            translation_xyz_m: [
+                finite_f32(objective_x, "objective x")?,
+                finite_f32(
+                    world.body.fields.heights_m[objective_cell],
+                    "objective height",
+                )?,
+                finite_f32(objective_z, "objective z")?,
+            ],
+            rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+            scale_xyz: [1.0, 1.0, 1.0],
+        },
+    });
     let route_points = world
         .body
         .navigation
@@ -1577,13 +1784,6 @@ pub fn lower_reference_world(
             color_rgba: [0.93, 0.32, 0.28, 1.0],
         });
     }
-    let [objective_x, objective_z] = layout.traversal.objective_position_xz_m;
-    let objective_cell = nearest_cell(
-        layout.width_m,
-        layout.length_m,
-        resolution,
-        [objective_x, objective_z],
-    );
     overlays.push(SemanticOverlay::Point {
         marker_id: layout.traversal.objective_id.clone(),
         role: MarkerRole::Objective,
@@ -1633,10 +1833,12 @@ pub fn lower_reference_world(
             terrain_albedo_texture,
             stone_albedo_texture,
             foliage_albedo_texture,
+            beacon_albedo_texture,
             normal_texture,
             roughness_texture,
             occlusion_texture,
             emissive_texture,
+            beacon_emissive_texture,
         ],
         meshes,
         instances,
@@ -1659,6 +1861,44 @@ pub fn lower_reference_world(
         overlays,
         capture,
     };
+    seal_scene_packet(body)
+}
+
+/// Derive a deterministic close-range material inspection view from a valid
+/// overview packet without changing the semantic world or asset identities.
+pub fn lower_objective_close_packet(
+    packet: &GraphicsScenePacket,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    validate_scene_packet(packet)?;
+    let beacon = packet
+        .body
+        .instances
+        .iter()
+        .find(|instance| instance.instance_id == "objective-beacon")
+        .ok_or_else(|| {
+            GraphicsContractError::provenance(
+                "objective close view requires the lowered objective beacon instance",
+            )
+        })?;
+    let [beacon_x, beacon_y, beacon_z] = beacon.transform.translation_xyz_m;
+    let mut body = packet.body.clone();
+    body.packet_id = format!("{}-objective-close", body.packet_id);
+    body.camera = GraphicsCamera {
+        camera_id: "objective-close".into(),
+        projection: CameraProjection::Perspective {
+            fov_y_degrees: 48.0,
+        },
+        position_xyz_m: [beacon_x, beacon_y + 5.0, beacon_z + 8.0],
+        forward_xyz: [0.0, -0.3511234, -0.9363292],
+        up_xyz: [0.0, 0.9363292, -0.3511234],
+        near_plane_m: 0.1,
+        far_plane_m: 128.0,
+        width_px: packet.body.camera.width_px,
+        height_px: packet.body.camera.height_px,
+    };
+    body.overlays.clear();
+    body.capture.capture_id = format!("{}-objective-close", body.capture.capture_id);
+    body.capture.camera_id = body.camera.camera_id.clone();
     seal_scene_packet(body)
 }
 

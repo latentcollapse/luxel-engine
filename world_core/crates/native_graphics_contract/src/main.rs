@@ -5,7 +5,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use serde::Serialize;
-use wge_native_graphics_contract::{GraphicsWorkerSupervisor, lower_reference_world};
+use wge_native_graphics_contract::{
+    GraphicsWorkerSupervisor, lower_objective_close_packet, lower_reference_world,
+};
 use wge_reference_runtime::build_from_layout_path;
 
 const BENCHMARK_SCHEMA: &str = "wge.native-graphics-benchmark/v1";
@@ -59,7 +61,8 @@ fn main() -> ExitCode {
 
 fn run() -> Result<(), String> {
     let mut arguments = env::args().skip(1);
-    match arguments.next().as_deref() {
+    let command = arguments.next();
+    match command.as_deref() {
         Some("lower-layout") => {
             let layout = canonical_path(
                 PathBuf::from(
@@ -95,25 +98,26 @@ fn run() -> Result<(), String> {
             );
             Ok(())
         }
-        Some("render-layout") => {
+        Some("render-layout") | Some("render-close-layout") => {
+            let close_view = command.as_deref() == Some("render-close-layout");
             let layout = canonical_path(
                 PathBuf::from(
                     arguments
                         .next()
-                        .ok_or_else(|| "render-layout requires LAYOUT PATH".to_owned())?,
+                        .ok_or_else(|| "render command requires LAYOUT PATH".to_owned())?,
                 ),
                 "layout",
             )?;
             let julia = PathBuf::from(
                 arguments
                     .next()
-                    .ok_or_else(|| "render-layout requires JULIA PATH".to_owned())?,
+                    .ok_or_else(|| "render command requires JULIA PATH".to_owned())?,
             );
             let terrain_lab = canonical_path(
                 PathBuf::from(
                     arguments
                         .next()
-                        .ok_or_else(|| "render-layout requires TERRAIN_LAB PATH".to_owned())?,
+                        .ok_or_else(|| "render command requires TERRAIN_LAB PATH".to_owned())?,
                 ),
                 "terrain lab",
             )?;
@@ -121,7 +125,7 @@ fn run() -> Result<(), String> {
                 PathBuf::from(
                     arguments
                         .next()
-                        .ok_or_else(|| "render-layout requires GRAPHICS PROJECT PATH".to_owned())?,
+                        .ok_or_else(|| "render command requires GRAPHICS PROJECT PATH".to_owned())?,
                 ),
                 "graphics project",
             )?;
@@ -129,24 +133,29 @@ fn run() -> Result<(), String> {
                 PathBuf::from(
                     arguments
                         .next()
-                        .ok_or_else(|| "render-layout requires WORKER PATH".to_owned())?,
+                        .ok_or_else(|| "render command requires WORKER PATH".to_owned())?,
                 ),
                 "graphics worker",
             )?;
             let output = PathBuf::from(
                 arguments
                     .next()
-                    .ok_or_else(|| "render-layout requires OUTPUT PPM PATH".to_owned())?,
+                    .ok_or_else(|| "render command requires OUTPUT PPM PATH".to_owned())?,
             );
             if arguments.next().is_some() {
                 return Err(
-                    "render-layout accepts exactly LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT"
+                    "render command accepts exactly LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT"
                         .into(),
                 );
             }
             let world = build_from_layout_path(&layout, &julia, &terrain_lab)
                 .map_err(|error| error.to_string())?;
             let packet = lower_reference_world(&world.world).map_err(|error| error.to_string())?;
+            let packet = if close_view {
+                lower_objective_close_packet(&packet).map_err(|error| error.to_string())?
+            } else {
+                packet
+            };
             let mut supervisor = GraphicsWorkerSupervisor::start(&julia, &graphics_project, &worker)
                 .map_err(|error| error.to_string())?;
             supervisor.capabilities().map_err(|error| error.to_string())?;
@@ -276,7 +285,7 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         _ => {
-            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]".into())
+            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]".into())
         }
     }
 }

@@ -158,15 +158,17 @@ The first native frame is intentionally bounded:
 2. deterministic terrain mesh and normals;
 3. deterministic authored mesh UV0 channels and one canonical terrain material
    family with explicit color space;
-4. deterministic opaque background foliage cross-mesh instances using the
+4. a deterministic objective landmark beacon with separate albedo/emissive
+   material identity and close-range perspective inspection support;
+5. deterministic opaque background foliage cross-mesh instances using the
    semantic-importance/culling path;
-5. certified route, player/opponent spawn, encounter, and objective markers;
-6. fixed camera, linear-HDR offscreen scene target, deterministic 2× spatial
+6. certified route, player/opponent spawn, encounter, and objective markers;
+7. fixed camera, linear-HDR offscreen scene target, deterministic 2× spatial
    resolve, and final color/depth evidence target;
-7. one directional light plus typed sky/horizon/ground environment intent,
+8. one directional light plus typed sky/horizon/ground environment intent,
    orientation-aware analytic environment lighting, deterministic directional
    shadow map, and depth-tested opaque raster path;
-8. capture, readback, Rust measurement, and repeatability evidence.
+9. capture, readback, Rust measurement, and repeatability evidence.
 
 This proves the entire authority and process path without pretending that a
 single triangle is an Elden Ring renderer. PBR breadth beyond the bounded
@@ -175,6 +177,12 @@ temporal techniques beyond the deterministic spatial resolve, production foliage
 systems beyond the opaque diagnostic cross-mesh, particles, water,
 post-processing, and optional RT come only after this path has real evidence and
 a quality-gap report.
+
+`render-close-layout` derives a second, deterministic perspective packet from
+the same certified world and packet identities. It removes gameplay overlays
+for material inspection, while the overview packet remains the gameplay and
+semantic-visibility gate. This is an inspection profile, not a second semantic
+world or a claim of imported hero-asset parity.
 
 ## Capability and fallback policy
 

@@ -17,6 +17,8 @@ complete for a commercial game.
 | sRGB texture handling | green | Typed RGBA8 upload, exact transfer conversion, and focused Julia tests |
 | Terrain geometry | green | Rust-owned world heightfield lowered to deterministic GPU mesh |
 | Authored mesh UV0 | green | Closed v5 packet channel; Rust cardinality/finite validation and typed Lava upload |
+| Semantic objective landmark | green | Rust-lowered octagonal beacon with distinct albedo/emissive roles and landmark telemetry |
+| Close-range perspective inspection | green | Typed objective-close packet, real Lava capture, Rust promotion, and deterministic digest check |
 | Opaque mesh materials | partial | Bounded albedo, metallic, roughness, Cook–Torrance-style response, and role-sampled surface maps; richer graph semantics remain |
 | Normal/roughness/occlusion/emissive material roles | green | Rust/Julia role-typed IDs, color-space validation, digest-bound procedural maps, and Lava descriptor bindings |
 | Independent material profiles | green | Riverwatch lowers distinct terrain, stone, and foliage albedo identities; each mesh batch resolves its own typed descriptor set |
