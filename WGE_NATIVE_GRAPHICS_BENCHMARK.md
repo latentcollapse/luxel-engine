@@ -14,11 +14,15 @@ intentionally not part of this checkpoint.
 - Rust authority: `wge-native-graphics-contract` and the reference runtime.
 - World: `riverwatch.layout.json`, lowered to graphics packet
   `wge.graphics-scene-packet/v3`.
-- Native packet contents: deterministic terrain, two gameplay-critical
-  obstacle instances, thirty background foliage instances, route/spawn/
+- Native packet contents: deterministic terrain, one gameplay-critical
+  obstacle instance in the Riverwatch fixture, thirty background foliage
+  instances, route/spawn/
   encounter/objective projections, typed materials, environment lighting,
   directional shadow map, linear HDR resolve, and semantic visibility
   telemetry.
+- Material contract: `wge.graphics-scene-packet/v4`, adapter identity
+  `wge.lava-adapter/v2`, with digest-bound albedo, normal, roughness,
+  occlusion, and emissive roles.
 - Capture: deterministic 384x256 PPM for the native Lava path; the Bevy
   inspection capture is 320x240 PNG.
 
@@ -28,9 +32,9 @@ intentionally not part of this checkpoint.
 | --- | ---: | ---: | --- | --- |
 | Reference-runtime `build` | 3.49 s | 383,604 KiB | passed | 78 traversal steps; gameplay won; visual gate passed |
 | Reference-runtime `verify` | 0.75 s | — | passed | independently revalidated world, traversal, gameplay, and visual evidence hashes |
-| Native Lava `render-layout` (cold CLI) | 105.59 s | 1,909,480 KiB | passed | Rust lowered, supervised, rendered, measured, and promoted the receipt |
-| Persistent Lava worker, first frame | 54.862 s frame time | 1,928,136 KiB process | passed | lazy device/pipeline/scene initialization |
-| Persistent Lava worker, second frame | 26.774 ms frame time | same process | passed | byte-identical capture digest; seven pipelines, no new compilation |
+| Native Lava `render-layout` (cold CLI) | 105.43 s | 1,902,468 KiB | passed | Rust lowered, supervised, rendered, measured, and promoted the v4 receipt |
+| Persistent Lava worker, first frame | 53.178 s frame time | 1,939,764 KiB process | passed | lazy device/pipeline/scene initialization |
+| Persistent Lava worker, second frame | 23.103 ms frame time | same process | passed | byte-identical capture digest; seven pipelines, no new compilation |
 | Bevy native inspection capture (cold) | 155.52 s | 6,104,240 KiB | provenance passed | artifact revalidated; visual representation remains coarse and is not used as Lava parity evidence |
 
 The persistent-worker values are deliberately separated from the cold CLI
@@ -40,7 +44,7 @@ deployment/startup measurement, not a steady-state frame-time claim.
 
 The warm replay produced the same capture digest on both frames:
 
-`sha256:2466d14b...`
+`sha256:d76481b4383bf21bb7da67f13940c4f27c3241de8793e5dd8f8117cf4d1a8ed4`
 
 The native Rust receipt for the promoted Riverwatch frame reported:
 
@@ -50,7 +54,7 @@ The native Rust receipt for the promoted Riverwatch frame reported:
   readback bytes;
 - 31 visible and 0 culled instances for this camera;
 - terrain vertex count 13,824 and mesh vertex count 48;
-- visual measurements: luminance standard deviation `0.0715599372`, 4,481
+- visual measurements: luminance standard deviation `0.0822096961`, 2,628
   distinct colors, route pixels 290, player pixels 7, opponent pixels 6,
   encounter pixels 69, objective pixels 7.
 
@@ -95,7 +99,7 @@ failure in these runs.
 
 ## Regression evidence
 
-- Rust native graphics contract: 9 unit tests, clippy with `-D warnings`, and
+- Rust native graphics contract: 10 unit tests, clippy with `-D warnings`, and
   the six-test native graphics suite passed.
 - Julia protocol worker: 7 worker protocol tests and 2 fake-rejection tests
   passed.
