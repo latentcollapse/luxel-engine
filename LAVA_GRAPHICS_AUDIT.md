@@ -85,17 +85,18 @@ our own reproducible probes and Rust-owned receipts.
 | Hikari/Raycore integration | Raycore source entry and Hikari-oriented integration/tests/examples | EXISTS UPSTREAM | Evidence that RT is viable, not evidence that a WGE gameplay renderer exists. Keep it behind an optional adapter. |
 | Profiling and diagnostics | state dumps, logging, validation configuration, memory counters, phase timing, profiling hooks | EXISTS UPSTREAM + WGE BRIDGE | WGE promotes a capability-gated Vulkan graphics-frame timestamp plus bounded transfer/draw/compilation telemetry; avoid promoting opaque upstream logs as evidence. |
 | API stability | upstream README calls compute stable and graphics/RT functional but evolving | PARTIAL | Pin the exact commit and isolate all upstream API use in a narrow Julia adapter. |
-| Dependency reproducibility | Lava commit is known, but `Project.toml` sources Raycore at `rev = "master"` | PARTIAL | A WGE lock must pin the complete transitive source graph, especially Raycore and Vulkan source choice. |
+| Dependency reproducibility | `Project.toml` and the committed `Manifest.toml` pin Lava, Raycore, Vulkan, and VulkanCore revisions, including the resolved git trees | EXISTS IN WGE | Keep the manifest and source declarations synchronized; a dependency change requires a fresh adapter/provenance audit. |
 | Test reproducibility | tiered test harness distinguishes SPIR-V/no-GPU/GPU, but requires an umbrella environment and warns that plain `Pkg.test` is insufficient | PARTIAL | WGE needs capability probes and explicit `indeterminate` results; “test suite ran” is not a GPU certification. |
 | Capture/replay | upstream capture/replay tests cover compute command replay; no WGE visual-capture receipt or graphics replay contract | PARTIAL | WGE must add deterministic graphics capture, scene identity, camera identity, device identity, and Rust revalidation. |
 | Device/vendor robustness | lavapipe and self-hosted GPU paths exist; known RADV RT device-loss and BDA validation blind spots remain | PARTIAL | Treat device capability and known-driver hazards as first-class gates. Never silently fall back to a different semantic result. |
 
 ### Upstream hazards that affect adoption
 
-1. **The upstream revision is not a complete lock.** Lava itself is pinned for
-   this audit, but its `[sources]` entry points Raycore at `master`. The WGE
-   graphics environment must resolve and record every source revision before a
-   renderer receipt can claim reproducibility.
+1. **The initial upstream revision was not a complete lock.** The first audit
+   found Lava's transitive Raycore source pointed at `master`. WGE now overrides
+   that source explicitly and commits the resolved `Manifest.toml` entries for
+   Lava, Raycore, Vulkan, and VulkanCore. Any source or manifest drift is a
+   provenance change and must invalidate renderer identity until re-audited.
 
 2. **The public graphics/RT API is explicitly evolving.** WGE must have one
    narrow adapter module. No semantic WGE code may import Lava types directly.
@@ -315,6 +316,16 @@ telemetry, independently recomputes visual measurements, and promotes a typed
 frame receipt only after capture-backed validation. A clean worker restart has
 been exercised; the same `riverwatch` packet reproduced byte-identical RGBA8
 capture bytes and identical Rust measurements.
+
+The supervisor also has a bounded response deadline with a separate startup
+handshake budget. A stalled worker is now a `worker_timeout` failure that clears
+validated capability state; the worker must be torn down and restarted before a
+new frame can be promoted. The adversarial timeout/recovery test uses a worker
+that emits a valid ready message and then stops responding, proving that a
+blocked graphics process cannot silently become an unbounded Rust call. These
+contract and shader-basis corrections are recorded as adapter revision
+`wge.lava-adapter/v4`; v3 benchmark receipts remain historical evidence, not
+current renderer identity.
 
 The native visual gate is authority-owned rather than appearance-shaped: Rust
 recomputes luminance variation, RGB color diversity, and exact semantic

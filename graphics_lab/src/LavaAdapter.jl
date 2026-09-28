@@ -18,7 +18,7 @@ export AdapterError,
     render_texture_probe,
     render_scene
 
-const ADAPTER_REVISION = "wge.lava-adapter/v3"
+const ADAPTER_REVISION = "wge.lava-adapter/v4"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 const VULKAN_REVISION = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"
 const VULKAN_CORE_REVISION = "1d02829e8fa92da430d879db4dd7bf564a872035"
@@ -517,6 +517,13 @@ function _apply_fog(
     )
 end
 
+function _distance_between(first::Vec4f, second::Vec4f)::Float32
+    delta_x = first[1] - second[1]
+    delta_y = first[2] - second[2]
+    delta_z = first[3] - second[3]
+    return sqrt(delta_x * delta_x + delta_y * delta_y + delta_z * delta_z)
+end
+
 function _project_world(
     world_position::Vec4f,
     camera_position::Vec4f,
@@ -1001,7 +1008,7 @@ function _terrain_fragment()
     fogged_color = _apply_fog(
         lit_color,
         fog_color,
-        sqrt(world_position[1] * world_position[1] + world_position[3] * world_position[3]),
+        _distance_between(world_position, camera_position),
         fog_density,
     )
     Lava.gfx_output(0, fogged_color)
@@ -1622,6 +1629,31 @@ function _cross_vector(first::Vec4f, second::Vec4f)::Vec4f
     )
 end
 
+function _basis_vectors(
+    direction::Vec4f,
+    up_hint::Vec4f,
+    label::String,
+)::Tuple{Vec4f,Vec4f,Vec4f}
+    direction_length_squared = _dot_vector(direction, direction)
+    up_length_squared = _dot_vector(up_hint, up_hint)
+    isfinite(direction_length_squared) && isfinite(up_length_squared) &&
+        direction_length_squared > 1.0f-8 && up_length_squared > 1.0f-8 ||
+        throw(AdapterError("invalid_basis", "$label contains a degenerate direction"))
+    forward = _normalize_vector(direction)
+    requested_up = _normalize_vector(up_hint)
+    abs(_dot_vector(forward, requested_up)) < 0.999f0 ||
+        throw(AdapterError("invalid_basis", "$label directions must not be collinear"))
+    right = _normalize_vector(_cross_vector(forward, requested_up))
+    up = _normalize_vector(_cross_vector(right, forward))
+    return forward, right, up
+end
+
+function _shadow_up_hint(direction::Vec4f)::Vec4f
+    return abs(direction[3]) < 0.9f0 ?
+        Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0) :
+        Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)
+end
+
 function _camera_projection(
     projection::WGEGraphics.OrthographicProjection,
     aspect::Float32,
@@ -1658,10 +1690,11 @@ end
 
 function _camera_frame(camera::WGEGraphics.CameraPacket)::CameraFrame
     position = Vec4f(camera.position_xyz_m..., 0.0f0)
-    forward = _normalize_vector(Vec4f(camera.forward_xyz..., 0.0f0))
-    requested_up = _normalize_vector(Vec4f(camera.up_xyz..., 0.0f0))
-    right = _normalize_vector(_cross_vector(forward, requested_up))
-    up = _normalize_vector(_cross_vector(right, forward))
+    forward, right, up = _basis_vectors(
+        Vec4f(camera.forward_xyz..., 0.0f0),
+        Vec4f(camera.up_xyz..., 0.0f0),
+        "camera forward/up basis",
+    )
     aspect = Float32(camera.width_px) / Float32(camera.height_px)
     projection, mode = _camera_projection(
         camera.projection,
@@ -1676,9 +1709,13 @@ function _shadow_frame(
     packet::WGEGraphics.GraphicsScenePacket,
     lighting::DirectionalLighting,
 )::CameraFrame
-    light_direction = _normalize_vector(lighting.direction)
-    _dot_vector(light_direction, light_direction) > 0.5f0 ||
-        throw(AdapterError("invalid_light", "directional light direction is degenerate"))
+    raw_light_direction = lighting.direction
+    up_hint = _shadow_up_hint(raw_light_direction)
+    light_direction, right, up = _basis_vectors(
+        raw_light_direction,
+        up_hint,
+        "directional light basis",
+    )
 
     minimum_height = minimum(packet.terrain.heights_m)
     maximum_height = maximum(packet.terrain.heights_m)
@@ -1703,9 +1740,6 @@ function _shadow_frame(
         radius = max(radius, sqrt(_dot_vector(offset, offset)) + max(instance.transform.scale_xyz...))
     end
 
-    up_hint = abs(light_direction[3]) < 0.9f0 ? Vec4f(0.0f0, 0.0f0, 1.0f0, 0.0f0) : Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0)
-    right = _normalize_vector(_cross_vector(light_direction, up_hint))
-    up = _normalize_vector(_cross_vector(right, light_direction))
     distance = max(2.0f0 * radius, 32.0f0)
     position = Vec4f(
         center[1] - light_direction[1] * distance,

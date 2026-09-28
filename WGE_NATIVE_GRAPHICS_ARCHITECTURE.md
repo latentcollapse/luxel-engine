@@ -102,6 +102,8 @@ for it. Its validator must check:
 - world, layout, spatial-field, and gameplay identity equality;
 - buffer sizes, strides, formats, and source digests;
 - camera/capture dimensions and deterministic settings;
+- non-degenerate, non-collinear camera bases and directional vectors;
+- non-zero authored normals and unit instance quaternions;
 - material ranges, texture color-space declarations, and alpha policy;
 - marker positions against the certified world;
 - no unknown fields or producer-supplied “passed” fields.
@@ -122,7 +124,9 @@ The worker response is also closed and typed. It has four possible classes:
 - `failed`: protocol, compile, device, validation, or runtime failure with a
   bounded diagnostic and no pass-shaped output.
 
-The Rust side independently checks the response. At minimum it recomputes:
+The Rust side independently checks the response. Requests use a bounded response
+deadline; timeout clears the validated worker capability state and requires a
+fresh handshake after restart. At minimum Rust recomputes:
 
 - packet and capture-request digests;
 - output bytes and declared dimensions/format;

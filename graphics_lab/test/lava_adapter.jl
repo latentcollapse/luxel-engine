@@ -126,6 +126,42 @@ end
     @test perspective_center[1] ≈ 0.0f0
     @test perspective_center[2] ≈ 0.0f0
     @test 0.0f0 < perspective_center[3] < 1.0f0
+
+    @test LavaAdapter._distance_between(
+        Vec4f(10.0f0, 2.0f0, -4.0f0, 0.0f0),
+        Vec4f(2.0f0, 2.0f0, -4.0f0, 0.0f0),
+    ) ≈ 8.0f0
+
+    degenerate_camera = WGEGraphics.CameraPacket(
+        "degenerate",
+        WGEGraphics.OrthographicProjection(20.0f0),
+        (0.0f0, 10.0f0, 0.0f0),
+        (0.0f0, 0.0f0, 0.0f0),
+        (0.0f0, 1.0f0, 0.0f0),
+        0.1f0,
+        100.0f0,
+        UInt32(320),
+        UInt32(240),
+    )
+    @test_throws LavaAdapter.AdapterError LavaAdapter._camera_frame(degenerate_camera)
+
+    collinear_camera = WGEGraphics.CameraPacket(
+        "collinear",
+        WGEGraphics.OrthographicProjection(20.0f0),
+        (0.0f0, 10.0f0, 0.0f0),
+        (0.0f0, -1.0f0, 0.0f0),
+        (0.0f0, 2.0f0, 0.0f0),
+        0.1f0,
+        100.0f0,
+        UInt32(320),
+        UInt32(240),
+    )
+    @test_throws LavaAdapter.AdapterError LavaAdapter._camera_frame(collinear_camera)
+
+    @test LavaAdapter._shadow_up_hint(Vec4f(0.0f0, 0.0f0, 1.0f0, 0.0f0)) ==
+        Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)
+    @test LavaAdapter._shadow_up_hint(Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0)) ==
+        Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0)
 end
 
 @testset "persistent Lava adapter" begin

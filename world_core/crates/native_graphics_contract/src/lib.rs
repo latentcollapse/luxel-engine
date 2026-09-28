@@ -15,7 +15,7 @@ use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artif
 pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v5";
 pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
 pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
-pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v3";
+pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v4";
 pub const LAVA_BACKEND_ID: &str = "lava-vulkan";
 pub const LAVA_REVISION: &str = "11c7e31bdf62408d22bf379e9e59510f69d2103e";
 pub const MAX_PACKET_ELEMENTS: usize = 16 * 1024 * 1024;
@@ -26,6 +26,9 @@ const MAX_TELEMETRY_COUNTER: usize = 1 << 40;
 const MAX_FRAME_TIME_US: u64 = 60_000_000;
 const MIN_NATIVE_LUMINANCE_STDDEV: f64 = 0.01;
 const MIN_NATIVE_DISTINCT_COLORS: usize = 3;
+const MIN_VECTOR_LENGTH_SQUARED: f32 = 1.0e-8;
+const UNIT_QUATERNION_TOLERANCE: f32 = 1.0e-3;
+const MAX_BASIS_COSINE: f32 = 0.999;
 
 pub mod supervisor;
 
@@ -2502,8 +2505,13 @@ fn validate_camera(camera: &GraphicsCamera) -> Result<(), GraphicsContractError>
     ] {
         finite_values(values, label)?;
     }
-    if camera.near_plane_m.is_nan()
-        || camera.far_plane_m.is_nan()
+    validate_basis(
+        &camera.forward_xyz,
+        &camera.up_xyz,
+        "camera forward/up basis",
+    )?;
+    if !camera.near_plane_m.is_finite()
+        || !camera.far_plane_m.is_finite()
         || camera.near_plane_m <= 0.0
         || camera.far_plane_m <= camera.near_plane_m
     {
@@ -2766,6 +2774,13 @@ fn validate_mesh(
     }
     for normal in &mesh.normals {
         finite_values(normal, "mesh normal")?;
+        let normal_norm_squared = squared_norm(normal);
+        if !normal_norm_squared.is_finite() || normal_norm_squared <= MIN_VECTOR_LENGTH_SQUARED {
+            return Err(GraphicsContractError::malformed(format!(
+                "mesh {} contains a degenerate normal",
+                mesh.mesh_id
+            )));
+        }
     }
     for uv in &mesh.uv0 {
         finite_values(uv, "mesh uv0")?;
@@ -2793,6 +2808,11 @@ fn validate_transform(transform: &Transform3d) -> Result<(), GraphicsContractErr
             "instance rotation must be non-degenerate",
         ));
     }
+    if (rotation_norm_squared - 1.0).abs() > UNIT_QUATERNION_TOLERANCE {
+        return Err(GraphicsContractError::malformed(
+            "instance rotation must be a unit quaternion",
+        ));
+    }
     if transform.scale_xyz.iter().any(|value| *value <= 0.0) {
         return Err(GraphicsContractError::malformed(
             "instance scale must be positive",
@@ -2815,6 +2835,14 @@ fn validate_light(light: &LightIntent) -> Result<(), GraphicsContractError> {
     match &light.kind {
         LightKind::Directional { direction_xyz } => {
             finite_values(direction_xyz, "directional light direction")?;
+            let direction_norm_squared = squared_norm(direction_xyz);
+            if !direction_norm_squared.is_finite()
+                || direction_norm_squared <= MIN_VECTOR_LENGTH_SQUARED
+            {
+                return Err(GraphicsContractError::malformed(
+                    "directional light direction must be non-degenerate",
+                ));
+            }
         }
         LightKind::Point {
             position_xyz_m,
@@ -3165,6 +3193,41 @@ fn finite_values<const N: usize>(
     }
 }
 
+fn squared_norm<const N: usize>(values: &[f32; N]) -> f32 {
+    values.iter().map(|value| value * value).sum()
+}
+
+fn validate_basis(
+    forward: &[f32; 3],
+    up: &[f32; 3],
+    label: &str,
+) -> Result<(), GraphicsContractError> {
+    let forward_norm_squared = squared_norm(forward);
+    let up_norm_squared = squared_norm(up);
+    if !forward_norm_squared.is_finite()
+        || !up_norm_squared.is_finite()
+        || forward_norm_squared <= MIN_VECTOR_LENGTH_SQUARED
+        || up_norm_squared <= MIN_VECTOR_LENGTH_SQUARED
+    {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} contains a degenerate direction"
+        )));
+    }
+    let forward_norm = forward_norm_squared.sqrt();
+    let up_norm = up_norm_squared.sqrt();
+    let cosine = forward
+        .iter()
+        .zip(up.iter())
+        .map(|(forward, up)| (forward / forward_norm) * (up / up_norm))
+        .sum::<f32>();
+    if !cosine.is_finite() || cosine.abs() >= MAX_BASIS_COSINE {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} directions must not be collinear"
+        )));
+    }
+    Ok(())
+}
+
 fn finite_f32(value: f64, label: &str) -> Result<f32, GraphicsContractError> {
     if !value.is_finite() {
         return Err(GraphicsContractError::provenance(format!(
@@ -3393,6 +3456,64 @@ mod tests {
             indices: vec![0, 1, 2],
             material_id: "terrain".into(),
         }];
+        assert!(seal_scene_packet(body).is_err());
+    }
+
+    #[test]
+    fn camera_basis_rejects_degenerate_and_collinear_directions() {
+        validate_scene_packet(&packet()).expect("known-good camera basis validates");
+
+        let mut body = packet().body;
+        body.camera.forward_xyz = [0.0, 0.0, 0.0];
+        assert!(seal_scene_packet(body).is_err());
+
+        let mut body = packet().body;
+        body.camera.up_xyz = [0.0, -2.0, 0.0];
+        assert!(seal_scene_packet(body).is_err());
+    }
+
+    #[test]
+    fn authored_mesh_normals_must_be_non_degenerate() {
+        let mut body = packet().body;
+        body.meshes = vec![MeshPacket {
+            mesh_id: "mesh".into(),
+            positions_m: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            normals: vec![[0.0, 1.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            uv0: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            indices: vec![0, 1, 2],
+            material_id: "terrain".into(),
+        }];
+        assert!(seal_scene_packet(body).is_err());
+    }
+
+    #[test]
+    fn instance_rotations_and_directional_lights_have_valid_bases() {
+        let mut body = packet().body;
+        body.meshes = vec![MeshPacket {
+            mesh_id: "mesh".into(),
+            positions_m: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            normals: vec![[0.0, 1.0, 0.0]; 3],
+            uv0: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            indices: vec![0, 1, 2],
+            material_id: "terrain".into(),
+        }];
+        body.instances = vec![InstancePacket {
+            instance_id: "instance".into(),
+            mesh_id: "mesh".into(),
+            material_id: "terrain".into(),
+            importance: InstanceImportance::Background,
+            transform: Transform3d {
+                translation_xyz_m: [0.0, 0.0, 0.0],
+                rotation_xyzw: [0.0, 0.0, 0.0, 2.0],
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        }];
+        assert!(seal_scene_packet(body).is_err());
+
+        let mut body = packet().body;
+        body.lights[0].kind = LightKind::Directional {
+            direction_xyz: [0.0, 0.0, 0.0],
+        };
         assert!(seal_scene_packet(body).is_err());
     }
 

@@ -626,6 +626,8 @@ function _parse_meshes(value::JSON3.Array, material_ids::Set{String})::Vector{Me
             _uint32(index, "mesh.indices") for index in _array(object["indices"], "mesh.indices")
         ]
         isempty(positions) && throw(ProtocolError("malformed_packet", "mesh needs positions"))
+        all(normal -> isfinite(_squared_norm(normal)) && _squared_norm(normal) > eps(Float32), normals) ||
+            throw(ProtocolError("malformed_packet", "mesh normals must be non-degenerate"))
         !isempty(indices) && length(indices) % 3 == 0 ||
             throw(ProtocolError("malformed_packet", "mesh indices must form triangles"))
         all(index -> Int(index) < length(positions), indices) ||
@@ -670,8 +672,11 @@ function _parse_instances(
         translation = _tuple(transform["translation_xyz_m"], Val(3), "instance.transform.translation_xyz_m")
         rotation = _tuple(transform["rotation_xyzw"], Val(4), "instance.transform.rotation_xyzw")
         scale = _tuple(transform["scale_xyz"], Val(3), "instance.transform.scale_xyz")
-        sum(value * value for value in rotation) > eps(Float32) ||
+        rotation_norm_squared = _squared_norm(rotation)
+        isfinite(rotation_norm_squared) && rotation_norm_squared > eps(Float32) ||
             throw(ProtocolError("malformed_packet", "instance rotation is degenerate"))
+        abs(rotation_norm_squared - 1.0f0) <= 1.0f-3 ||
+            throw(ProtocolError("malformed_packet", "instance rotation must be a unit quaternion"))
         all(value -> value > 0.0f0, scale) ||
             throw(ProtocolError("malformed_packet", "instance scale must be positive"))
         push!(instances, InstancePacket(id, mesh_id, material_id, importance, TransformPacket(translation, rotation, scale)))
@@ -746,7 +751,10 @@ end
 
 function _parse_light_kind(::Val{:directional}, value::JSON3.Object)::DirectionalLightPacket
     _exact_keys(value, Set(("kind", "direction_xyz")), "light.kind")
-    return DirectionalLightPacket(_tuple(value["direction_xyz"], Val(3), "light.kind.direction_xyz"))
+    direction = _tuple(value["direction_xyz"], Val(3), "light.kind.direction_xyz")
+    isfinite(_squared_norm(direction)) && _squared_norm(direction) > eps(Float32) ||
+        throw(ProtocolError("malformed_packet", "directional light direction is degenerate"))
+    return DirectionalLightPacket(direction)
 end
 
 function _parse_light_kind(::Val{:point}, value::JSON3.Object)::PointLightPacket
@@ -884,6 +892,10 @@ function _parse_camera(value::JSON3.Object)::CameraPacket
     )
     camera_id = _string(value["camera_id"], "camera.camera_id")
     _valid_id(camera_id, "camera_id")
+    position = _tuple(value["position_xyz_m"], Val(3), "camera.position_xyz_m")
+    forward = _tuple(value["forward_xyz"], Val(3), "camera.forward_xyz")
+    up = _tuple(value["up_xyz"], Val(3), "camera.up_xyz")
+    _validate_basis(forward, up, "camera forward/up basis")
     near = _finite_float32(value["near_plane_m"], "camera.near_plane_m")
     far = _finite_float32(value["far_plane_m"], "camera.far_plane_m")
     near > 0.0f0 && far > near || throw(ProtocolError("malformed_packet", "camera planes are invalid"))
@@ -893,9 +905,9 @@ function _parse_camera(value::JSON3.Object)::CameraPacket
     return CameraPacket(
         camera_id,
         _parse_projection(_object(value["projection"], "camera.projection")),
-        _tuple(value["position_xyz_m"], Val(3), "camera.position_xyz_m"),
-        _tuple(value["forward_xyz"], Val(3), "camera.forward_xyz"),
-        _tuple(value["up_xyz"], Val(3), "camera.up_xyz"),
+        position,
+        forward,
+        up,
         near,
         far,
         UInt32(width),
@@ -974,6 +986,28 @@ function _tuple(value, ::Val{N}, label::String)::NTuple{N,Float32} where {N}
     array = _array(value, label)
     length(array) == N || throw(ProtocolError("malformed_packet", "$label has the wrong arity"))
     return ntuple(index -> _finite_float32(array[index], "$label[$index]"), N)
+end
+
+function _squared_norm(values::NTuple{N,Float32})::Float32 where {N}
+    return sum(value * value for value in values)
+end
+
+function _validate_basis(
+    forward::NTuple{3,Float32},
+    up::NTuple{3,Float32},
+    label::String,
+)::Nothing
+    forward_norm_squared = _squared_norm(forward)
+    up_norm_squared = _squared_norm(up)
+    isfinite(forward_norm_squared) && isfinite(up_norm_squared) &&
+        forward_norm_squared > eps(Float32) && up_norm_squared > eps(Float32) ||
+        throw(ProtocolError("malformed_packet", "$label contains a degenerate direction"))
+    forward_norm = sqrt(forward_norm_squared)
+    up_norm = sqrt(up_norm_squared)
+    cosine = abs(sum((first / forward_norm) * (second / up_norm) for (first, second) in zip(forward, up)))
+    isfinite(cosine) && cosine < 0.999f0 ||
+        throw(ProtocolError("malformed_packet", "$label directions must not be collinear"))
+    return nothing
 end
 
 function _exact_keys(value::JSON3.Object, expected::Set{String}, label::String)::Nothing

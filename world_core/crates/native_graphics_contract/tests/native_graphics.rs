@@ -2,11 +2,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use wge_native_graphics_contract::{
-    GraphicsReady, GraphicsWorkerSupervisor, lower_dense_benchmark_packet,
-    lower_objective_close_packet, lower_reference_world, lower_showcase_packet, seal_scene_packet,
-    validate_frame_receipt, validate_ready, validate_scene_packet,
+    ADAPTER_REVISION, GraphicsReady, GraphicsWorkerSupervisor, LAVA_REVISION,
+    lower_dense_benchmark_packet, lower_objective_close_packet, lower_reference_world,
+    lower_showcase_packet, seal_scene_packet, validate_frame_receipt, validate_ready,
+    validate_scene_packet,
 };
 use wge_reference_runtime::build_from_layout_path;
 
@@ -251,6 +253,62 @@ fn rust_supervisor_restarts_the_persistent_worker() {
         .expect("restarted worker includes script identity");
     assert_eq!(first_script, second_script);
     assert!(supervisor.ready().is_none());
+}
+
+#[test]
+fn rust_supervisor_times_out_and_recovers_from_a_stalled_worker() {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let workspace_root = manifest_dir
+        .ancestors()
+        .nth(3)
+        .expect("crate is inside the workspace");
+    let graphics_lab = workspace_root.join("graphics_lab");
+    let output_dir = std::env::temp_dir().join(format!(
+        "wge-native-graphics-timeout-{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&output_dir).expect("test output directory is writable");
+    let worker = output_dir.join("stalled_worker.jl");
+    let script = format!(
+        r#"
+using SHA
+
+function write_frame(payload)
+    bytes = Vector{{UInt8}}(payload)
+    length_bytes = UInt32(length(bytes))
+    write(stdout, UInt8[(length_bytes >> 24) & 0xff, (length_bytes >> 16) & 0xff, (length_bytes >> 8) & 0xff, length_bytes & 0xff])
+    write(stdout, bytes)
+    flush(stdout)
+end
+
+script_sha256 = "sha256:" * bytes2hex(sha256(read(PROGRAM_FILE)))
+write_frame("{{\"schema\":\"wge.graphics-worker/v1\",\"kind\":\"ready\",\"script_sha256\":\"" * script_sha256 * "\",\"lava_revision\":\"{}\",\"adapter_revision\":\"{}\"}}")
+sleep(120.0)
+"#,
+        LAVA_REVISION, ADAPTER_REVISION
+    );
+    fs::write(&worker, script).expect("stalled worker writes");
+
+    let mut supervisor = GraphicsWorkerSupervisor::start_with_timeout(
+        julia_executable(),
+        &graphics_lab,
+        &worker,
+        Duration::from_secs(10),
+    )
+    .expect("stalled worker starts and emits ready");
+    supervisor.set_response_timeout(Duration::from_millis(250));
+    let error = supervisor
+        .request(serde_json::json!({"op": "probe_capabilities"}))
+        .expect_err("stalled worker must hit the response deadline");
+    assert_eq!(error.code, "worker_timeout");
+    assert!(supervisor.ready().is_none());
+
+    supervisor
+        .restart()
+        .expect("supervisor can revive the stalled worker");
+    assert!(supervisor.ready().is_none());
+    drop(supervisor);
+    fs::remove_dir_all(output_dir).expect("test output directory is removed");
 }
 
 #[test]

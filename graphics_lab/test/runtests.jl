@@ -38,3 +38,39 @@ end
     @test fake["kind"] == "failed"
     @test fake["code"] in ("malformed_packet", "unsupported_schema")
 end
+
+@testset "protocol parser rejects degenerate graphics bases" begin
+    camera = JSON3.read(
+        """
+        {
+          "camera_id": "bad-camera",
+          "projection": {"kind": "orthographic", "span_m": 20.0},
+          "position_xyz_m": [0.0, 10.0, 0.0],
+          "forward_xyz": [0.0, 0.0, 0.0],
+          "up_xyz": [0.0, 1.0, 0.0],
+          "near_plane_m": 0.1,
+          "far_plane_m": 100.0,
+          "width_px": 320,
+          "height_px": 240
+        }
+        """,
+    )
+    @test_throws ProtocolError WGEGraphics._parse_camera(camera)
+
+    light = JSON3.read("{\"kind\":\"directional\",\"direction_xyz\":[0.0,0.0,0.0]}")
+    @test_throws ProtocolError WGEGraphics._parse_light_kind(light)
+
+    mesh = JSON3.read(
+        """
+        [{
+          "mesh_id": "bad-mesh",
+          "positions_m": [[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,0.0,1.0]],
+          "normals": [[0.0,1.0,0.0],[0.0,0.0,0.0],[0.0,1.0,0.0]],
+          "uv0": [[0.0,0.0],[1.0,0.0],[0.0,1.0]],
+          "indices": [0,1,2],
+          "material_id": "terrain"
+        }]
+        """,
+    )
+    @test_throws ProtocolError WGEGraphics._parse_meshes(mesh, Set(["terrain"]))
+end

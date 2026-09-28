@@ -1,7 +1,10 @@
 use std::fs;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Deserialize;
@@ -17,6 +20,7 @@ use crate::{
 
 pub const WORKER_SCHEMA: &str = "wge.graphics-worker/v1";
 const MAX_WORKER_FRAME_BYTES: usize = 64 * 1024 * 1024;
+const DEFAULT_WORKER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphicsWorkerError {
@@ -28,6 +32,13 @@ impl GraphicsWorkerError {
     fn io(message: impl Into<String>) -> Self {
         Self {
             code: "worker_io",
+            message: message.into(),
+        }
+    }
+
+    fn timeout(message: impl Into<String>) -> Self {
+        Self {
+            code: "worker_timeout",
             message: message.into(),
         }
     }
@@ -89,7 +100,9 @@ pub struct PromotedFrame {
 pub struct GraphicsWorkerSupervisor {
     child: Child,
     stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    responses: Receiver<Result<Vec<u8>, String>>,
+    reader: Option<JoinHandle<()>>,
+    response_timeout: Duration,
     ready_message: Value,
     ready: Option<GraphicsReady>,
     julia: PathBuf,
@@ -102,6 +115,15 @@ impl GraphicsWorkerSupervisor {
         julia: impl AsRef<Path>,
         project: impl AsRef<Path>,
         worker: impl AsRef<Path>,
+    ) -> Result<Self, GraphicsWorkerError> {
+        Self::start_with_timeout(julia, project, worker, DEFAULT_WORKER_RESPONSE_TIMEOUT)
+    }
+
+    pub fn start_with_timeout(
+        julia: impl AsRef<Path>,
+        project: impl AsRef<Path>,
+        worker: impl AsRef<Path>,
+        response_timeout: Duration,
     ) -> Result<Self, GraphicsWorkerError> {
         let julia = julia.as_ref().to_owned();
         let project = project.as_ref().to_owned();
@@ -125,10 +147,36 @@ impl GraphicsWorkerSupervisor {
             .stdout
             .take()
             .ok_or_else(|| GraphicsWorkerError::io("Julia worker stdout was not captured"))?;
+        let (response_sender, responses) = mpsc::channel();
+        let reader = thread::Builder::new()
+            .name("wge-lava-worker-reader".into())
+            .spawn(move || {
+                let mut stdout = BufReader::new(stdout);
+                loop {
+                    match read_worker_frame(&mut stdout) {
+                        Ok(payload) => {
+                            if response_sender.send(Ok(payload)).is_err() {
+                                break;
+                            }
+                        }
+                        Err(error) => {
+                            let _ = response_sender.send(Err(error));
+                            break;
+                        }
+                    }
+                }
+            })
+            .map_err(|error| {
+                let _ = child.kill();
+                let _ = child.wait();
+                GraphicsWorkerError::io(format!("failed to start worker reader: {error}"))
+            })?;
         let mut supervisor = Self {
             child,
             stdin,
-            stdout: BufReader::new(stdout),
+            responses,
+            reader: Some(reader),
+            response_timeout,
             ready_message: Value::Null,
             ready: None,
             julia,
@@ -147,6 +195,10 @@ impl GraphicsWorkerSupervisor {
 
     pub fn ready(&self) -> Option<&GraphicsReady> {
         self.ready.as_ref()
+    }
+
+    pub fn set_response_timeout(&mut self, response_timeout: Duration) {
+        self.response_timeout = response_timeout;
     }
 
     pub fn restart(&mut self) -> Result<(), GraphicsWorkerError> {
@@ -305,7 +357,9 @@ impl GraphicsWorkerSupervisor {
             GraphicsWorkerError::protocol(format!("request JSON serialization failed: {error}"))
         })?;
         self.write_frame(&payload)?;
-        let response = self.read_frame_json()?;
+        let response = self.read_frame_json().inspect_err(|_error| {
+            self.ready = None;
+        })?;
         if response.get("schema").and_then(Value::as_str) != Some(WORKER_SCHEMA) {
             return Err(GraphicsWorkerError::protocol(
                 "worker response schema is unsupported",
@@ -411,35 +465,48 @@ impl GraphicsWorkerSupervisor {
     }
 
     fn read_frame_json(&mut self) -> Result<Value, GraphicsWorkerError> {
-        let payload = self.read_frame()?;
+        let payload = match self.responses.recv_timeout(self.response_timeout) {
+            Ok(Ok(payload)) => payload,
+            Ok(Err(error)) => return Err(GraphicsWorkerError::io(error)),
+            Err(RecvTimeoutError::Timeout) => {
+                return Err(GraphicsWorkerError::timeout(format!(
+                    "worker did not answer within {} ms",
+                    self.response_timeout.as_millis()
+                )));
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                return Err(GraphicsWorkerError::io("worker reader disconnected"));
+            }
+        };
         serde_json::from_slice(&payload).map_err(|error| {
             GraphicsWorkerError::protocol(format!("worker frame is not JSON: {error}"))
         })
     }
 
-    fn read_frame(&mut self) -> Result<Vec<u8>, GraphicsWorkerError> {
-        let mut header = [0u8; 4];
-        self.stdout.read_exact(&mut header).map_err(|error| {
-            GraphicsWorkerError::io(format!("failed to read worker frame header: {error}"))
-        })?;
-        let length = usize::try_from(u32::from_be_bytes(header))
-            .map_err(|_| GraphicsWorkerError::protocol("worker frame length overflows usize"))?;
-        if length > MAX_WORKER_FRAME_BYTES {
-            return Err(GraphicsWorkerError::protocol(
-                "worker frame exceeds size bound",
-            ));
-        }
-        let mut payload = vec![0u8; length];
-        self.stdout.read_exact(&mut payload).map_err(|error| {
-            GraphicsWorkerError::io(format!("failed to read worker frame body: {error}"))
-        })?;
-        Ok(payload)
-    }
-
     fn stop_child(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        if let Some(reader) = self.reader.take() {
+            let _ = reader.join();
+        }
     }
+}
+
+fn read_worker_frame(reader: &mut impl Read) -> Result<Vec<u8>, String> {
+    let mut header = [0u8; 4];
+    reader
+        .read_exact(&mut header)
+        .map_err(|error| format!("failed to read worker frame header: {error}"))?;
+    let length = usize::try_from(u32::from_be_bytes(header))
+        .map_err(|_| "worker frame length overflows usize".to_owned())?;
+    if length > MAX_WORKER_FRAME_BYTES {
+        return Err("worker frame exceeds size bound".into());
+    }
+    let mut payload = vec![0u8; length];
+    reader
+        .read_exact(&mut payload)
+        .map_err(|error| format!("failed to read worker frame body: {error}"))?;
+    Ok(payload)
 }
 
 fn sha256_file(path: &Path) -> Result<String, GraphicsWorkerError> {
