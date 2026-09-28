@@ -13,10 +13,10 @@ visual bar.
    simple obstacle geometry, diagnostic gameplay markers, and opaque crossed
    foliage. Its luminance and color-diversity gates pass, but those metrics do
    not establish material richness, silhouette quality, or composition.
-2. The current canonical material contract has one content-addressed albedo
-   role plus scalar metallic/roughness. Normal, occlusion, emissive, alpha,
-   clearcoat, transmission, texture transforms, mip policy, and material-graph
-   identity are not yet represented.
+2. The canonical material contract now has digest-bound albedo, normal,
+   roughness, occlusion, and emissive roles plus scalar controls. Alpha,
+   clearcoat, transmission, texture transforms, mip policy, independent
+   per-material profiles, and material-graph identity are not yet represented.
 3. Lighting uses one directional shadow map with fixed resolution and PCF.
    Cascades, contact shadows, soft-shadow filtering, many-light clustering,
    prefiltered image-based lighting, reflection probes, and robust atmospheric

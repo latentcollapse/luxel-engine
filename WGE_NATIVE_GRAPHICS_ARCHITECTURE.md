@@ -63,7 +63,7 @@ set.
 
 ## Typed packet boundary
 
-The first Rust contract is `wge.graphics-scene-packet/v3`. It is a closed,
+The current Rust contract is `wge.graphics-scene-packet/v4`. It is a closed,
 `deny_unknown_fields` structure with a canonical body digest. Its shape is:
 
 ```text
@@ -270,16 +270,17 @@ independently recomputed visual measurements before promoting a receipt.
 
 The supported scene profile is intentionally fail-closed while quality systems
 are being built: the Lava adapter accepts one directional light, opaque
-material intents with one shared, content-addressed inline RGBA8
-albedo payload, orthographic and perspective native terrain projections, and typed
-sky/horizon/ground/fog/exposure intent. Instances also carry closed
+material intents with shared, content-addressed inline RGBA8 albedo, normal,
+roughness, occlusion, and emissive roles, orthographic and perspective native
+terrain projections, and typed sky/horizon/ground/fog/exposure intent. Instances also carry closed
 `background`, `landmark`, or `gameplay_critical` importance, which controls a
 typed culling margin and is independently balanced in the promoted telemetry.
 The payload is dimension-checked and digest-checked in
-both Rust and Julia before Lava creates a sampler binding. Point lights,
-multiple texture sets, and blend/mask materials are typed and
+both Rust and Julia before Lava creates sampler bindings. Point lights,
+multiple texture profiles, and blend/mask materials are typed and
 validated at the boundary but rejected by the adapter until their semantics
-are implemented. Metallic/roughness response and orientation-aware analytic
+are implemented. Metallic/roughness response, role-sampled normal/roughness/
+occlusion/emissive maps, and orientation-aware analytic
 sky/ground environment lighting are supported by the bounded material path,
 but it is not yet a complete production PBR graph or prefiltered image-based
 lighting system. The current
@@ -292,8 +293,8 @@ exact. Cascades, contact refinement, soft shadows, prefiltered IBL, temporal AA,
 and many-light shadow budgets remain quality gaps. This keeps
 the packet extensible
 without silently rendering less than the model requested; prefiltered
-environment maps, richer foliage/material texture roles, and richer material graphs remain
-explicit quality-gap work.
+environment maps, richer foliage/material profiles, and richer material graphs
+remain explicit quality-gap work.
 
 The supervised integration test also restarts Julia and proves the same packet
 produces byte-identical RGBA8 capture bytes after a clean GPU-context rebuild.

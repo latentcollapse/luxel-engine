@@ -30,6 +30,12 @@ end
     srgb = LavaAdapter._texture_matrix(UInt8[128, 128, 128, 255], UInt32(1), UInt32(1), :srgb)
     @test srgb[1, 1][1] ≈ 0.2158605f0 atol = 1.0f-5
     @test srgb[1, 1][4] == 1.0f0
+
+    normal = LavaAdapter._texture_matrix(UInt8[128, 64, 255, 255], UInt32(1), UInt32(1), :normal_map)
+    @test normal[1, 1] == (128.0f0 / 255.0f0, 64.0f0 / 255.0f0, 1.0f0, 1.0f0)
+
+    data = LavaAdapter._texture_matrix(UInt8[64, 128, 192, 255], UInt32(1), UInt32(1), :data)
+    @test data[1, 1] == (64.0f0 / 255.0f0, 128.0f0 / 255.0f0, 192.0f0 / 255.0f0, 1.0f0)
 end
 
 @testset "analytic environment lighting" begin

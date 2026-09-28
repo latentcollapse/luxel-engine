@@ -6,7 +6,7 @@ using SHA
 
 export GraphicsScenePacket, ProtocolError, validate_scene_packet, packet_summary
 
-const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v3"
+const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v4"
 const MAX_PACKET_ELEMENTS = 16 * 1024 * 1024
 const MAX_CAPTURE_DIMENSION = 8192
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
@@ -60,6 +60,13 @@ struct MaterialPacket
     roughness::Float32
     alpha_mode::Symbol
     texture_ids::Vector{String}
+    normal_texture_id::Union{Nothing,String}
+    roughness_texture_id::Union{Nothing,String}
+    occlusion_texture_id::Union{Nothing,String}
+    emissive_texture_id::Union{Nothing,String}
+    normal_scale::Float32
+    occlusion_strength::Float32
+    emissive_factor_rgb::NTuple{3,Float32}
 end
 
 struct TexturePacket
@@ -423,11 +430,26 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
     sizehint!(materials, length(array))
     for material in array
         object = _object(material, "material")
-        _exact_keys(
-            object,
-            Set(("material_id", "base_color_rgba", "metallic", "roughness", "alpha_mode", "texture_ids")),
-            "material",
-        )
+        required_keys = Set((
+            "material_id",
+            "base_color_rgba",
+            "metallic",
+            "roughness",
+            "alpha_mode",
+            "texture_ids",
+            "normal_scale",
+            "occlusion_strength",
+            "emissive_factor_rgb",
+        ))
+        optional_keys = Set((
+            "normal_texture_id",
+            "roughness_texture_id",
+            "occlusion_texture_id",
+            "emissive_texture_id",
+        ))
+        actual_keys = Set(String(key) for key in keys(object))
+        issubset(required_keys, actual_keys) && issubset(setdiff(actual_keys, required_keys), optional_keys) ||
+            throw(ProtocolError("malformed_packet", "material has an unexpected or missing field"))
         id = _string(object["material_id"], "material.material_id")
         _valid_id(id, "material_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate material $id"))
@@ -450,7 +472,37 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
             _valid_id(texture_id, "material.texture_id")
             push!(texture_ids, texture_id)
         end
-        push!(materials, MaterialPacket(id, color, metallic, roughness, alpha_mode, texture_ids))
+        normal_texture_id = _optional_string(object, "normal_texture_id", "material.normal_texture_id")
+        roughness_texture_id = _optional_string(object, "roughness_texture_id", "material.roughness_texture_id")
+        occlusion_texture_id = _optional_string(object, "occlusion_texture_id", "material.occlusion_texture_id")
+        emissive_texture_id = _optional_string(object, "emissive_texture_id", "material.emissive_texture_id")
+        normal_scale = _finite_float32(object["normal_scale"], "material.normal_scale")
+        0.0f0 <= normal_scale <= 2.0f0 ||
+            throw(ProtocolError("malformed_packet", "material normal scale is outside [0, 2]"))
+        occlusion_strength = _finite_float32(object["occlusion_strength"], "material.occlusion_strength")
+        0.0f0 <= occlusion_strength <= 1.0f0 ||
+            throw(ProtocolError("malformed_packet", "material occlusion strength is outside [0, 1]"))
+        emissive_factor_rgb = _tuple(object["emissive_factor_rgb"], Val(3), "material.emissive_factor_rgb")
+        all(channel -> 0.0f0 <= channel <= 16.0f0, emissive_factor_rgb) ||
+            throw(ProtocolError("malformed_packet", "material emissive factor is outside [0, 16]"))
+        push!(
+            materials,
+            MaterialPacket(
+                id,
+                color,
+                metallic,
+                roughness,
+                alpha_mode,
+                texture_ids,
+                normal_texture_id,
+                roughness_texture_id,
+                occlusion_texture_id,
+                emissive_texture_id,
+                normal_scale,
+                occlusion_strength,
+                emissive_factor_rgb,
+            ),
+        )
     end
     return materials
 end
@@ -521,9 +573,21 @@ end
 function _validate_material_texture_links(materials::Vector{MaterialPacket}, textures::Vector{TexturePacket})
     isempty(materials) && throw(ProtocolError("malformed_packet", "packet needs a material"))
     texture_ids = Set(texture.texture_id for texture in textures)
-    for material in materials, texture_id in material.texture_ids
-        texture_id in texture_ids ||
-            throw(ProtocolError("provenance", "material references unknown texture $texture_id"))
+    for material in materials
+        for texture_id in material.texture_ids
+            texture_id in texture_ids ||
+                throw(ProtocolError("provenance", "material references unknown texture $texture_id"))
+        end
+        for texture_id in (
+            material.normal_texture_id,
+            material.roughness_texture_id,
+            material.occlusion_texture_id,
+            material.emissive_texture_id,
+        )
+            texture_id === nothing && continue
+            texture_id in texture_ids ||
+                throw(ProtocolError("provenance", "material references unknown texture $texture_id"))
+        end
     end
 end
 
@@ -916,6 +980,19 @@ end
 function _string(value, label::String)::String
     value isa AbstractString || throw(ProtocolError("malformed_packet", "$label must be a string"))
     return String(value)
+end
+
+function _optional_string(
+    object::JSON3.Object,
+    key::String,
+    label::String,
+)::Union{Nothing,String}
+    haskey(object, key) || return nothing
+    value = object[key]
+    value === nothing && return nothing
+    result = _string(value, label)
+    _valid_id(result, label)
+    return result
 end
 
 function _bool(value, label::String)::Bool

@@ -9,15 +9,15 @@ complete for a commercial game.
 
 | Capability | Status | Evidence / boundary |
 | --- | --- | --- |
-| Rust-owned graphics packet | green | Closed `wge.graphics-scene-packet/v3`; exact-key parsing and Rust lowering |
+| Rust-owned graphics packet | green | Closed `wge.graphics-scene-packet/v4`; exact-key parsing and Rust lowering |
 | Rust receipt promotion | green | Native supervisor independently validates packet, backend identity, capture, measurements, and telemetry |
 | Persistent Julia process | green | Typed worker protocol and persistent `LavaBackend` resource caches |
 | Pinned Lava/Vulkan device | green | Lava commit and device identity are bound into the native receipt |
 | Offscreen color/depth rendering | green | Real Lava framebuffer, depth attachment, readback, and deterministic PPM capture |
 | sRGB texture handling | green | Typed RGBA8 upload, exact transfer conversion, and focused Julia tests |
 | Terrain geometry | green | Rust-owned world heightfield lowered to deterministic GPU mesh |
-| Opaque mesh materials | partial | Bounded albedo, metallic, roughness, Cook–Torrance-style response; richer material roles remain |
-| Normal/occlusion/emissive material roles | absent | Not yet represented in the canonical packet |
+| Opaque mesh materials | partial | Bounded albedo, metallic, roughness, Cook–Torrance-style response, and role-sampled surface maps; richer graph semantics remain |
+| Normal/roughness/occlusion/emissive material roles | green | Rust/Julia role-typed IDs, color-space validation, digest-bound procedural maps, and Lava descriptor bindings |
 | Directional lighting | green | Typed light intent and Lava shader lowering |
 | Analytic environment lighting | green | Typed sky-top, horizon, ground, fog, and exposure intent |
 | HDR scene target and resolve | green | Linear HDR target, deterministic 2x resolve, tone mapping at final boundary |

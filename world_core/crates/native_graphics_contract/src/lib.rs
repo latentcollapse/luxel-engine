@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
 
-pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v3";
+pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v4";
 pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
 pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
-pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v1";
+pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v2";
 pub const LAVA_BACKEND_ID: &str = "lava-vulkan";
 pub const LAVA_REVISION: &str = "11c7e31bdf62408d22bf379e9e59510f69d2103e";
 pub const MAX_PACKET_ELEMENTS: usize = 16 * 1024 * 1024;
@@ -245,6 +245,17 @@ pub struct MaterialIntent {
     pub roughness: f32,
     pub alpha_mode: AlphaMode,
     pub texture_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_texture_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roughness_texture_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occlusion_texture_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emissive_texture_id: Option<String>,
+    pub normal_scale: f32,
+    pub occlusion_strength: f32,
+    pub emissive_factor_rgb: [f32; 3],
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -578,6 +589,31 @@ pub fn validate_scene_packet(packet: &GraphicsScenePacket) -> Result<(), Graphic
                     "material {} references unknown texture {}",
                     material.material_id, texture_id
                 )));
+            }
+        }
+        for (role, texture_id) in [
+            ("normal_texture_id", material.normal_texture_id.as_deref()),
+            (
+                "roughness_texture_id",
+                material.roughness_texture_id.as_deref(),
+            ),
+            (
+                "occlusion_texture_id",
+                material.occlusion_texture_id.as_deref(),
+            ),
+            (
+                "emissive_texture_id",
+                material.emissive_texture_id.as_deref(),
+            ),
+        ] {
+            if let Some(texture_id) = texture_id {
+                valid_id(texture_id, role)?;
+                if !texture_ids.contains(texture_id) {
+                    return Err(GraphicsContractError::provenance(format!(
+                        "material {} references unknown {} {}",
+                        material.material_id, role, texture_id
+                    )));
+                }
             }
         }
     }
@@ -1166,29 +1202,135 @@ fn append_mesh_face(
     indices.extend([first, first + 1, first + 2, first, first + 2, first + 3]);
 }
 
+fn procedural_texture(
+    texture_id: &str,
+    source_artifact_id: &str,
+    color_space: TextureColorSpace,
+    width_px: u32,
+    height_px: u32,
+    bytes: Vec<u8>,
+) -> TextureReference {
+    TextureReference {
+        texture_id: texture_id.into(),
+        source_artifact_id: source_artifact_id.into(),
+        sha256: sha256_prefixed(&bytes),
+        width_px,
+        height_px,
+        mip_levels: 1,
+        color_space,
+        payload: Some(TexturePayload::Rgba8(STANDARD.encode(bytes))),
+    }
+}
+
 fn procedural_albedo_texture() -> TextureReference {
-    let mut bytes = Vec::with_capacity(4 * 4 * 4);
-    for row in 0..4 {
-        for column in 0..4 {
-            let bright = (row + column) % 2 == 0;
-            let color = if bright {
-                [214, 196, 156, 255]
+    let width = 8;
+    let height = 8;
+    let mut bytes = Vec::with_capacity(width * height * 4);
+    for row in 0..height {
+        for column in 0..width {
+            let grain = ((row * 13 + column * 29 + row * column * 7) % 24) as u8;
+            let vein = (row + 2 * column) % 7 == 0;
+            let color = if vein {
+                [112 + grain / 2, 100 + grain / 2, 76 + grain / 3, 255]
             } else {
-                [92, 112, 78, 255]
+                [142 + grain, 126 + grain / 2, 94 + grain / 3, 255]
             };
             bytes.extend(color);
         }
     }
-    TextureReference {
-        texture_id: "riverwatch-albedo".into(),
-        source_artifact_id: "procedural-riverwatch-albedo".into(),
-        sha256: sha256_prefixed(&bytes),
-        width_px: 4,
-        height_px: 4,
-        mip_levels: 1,
-        color_space: TextureColorSpace::Srgb,
-        payload: Some(TexturePayload::Rgba8(STANDARD.encode(bytes))),
+    procedural_texture(
+        "riverwatch-albedo",
+        "procedural-riverwatch-albedo-v2",
+        TextureColorSpace::Srgb,
+        width as u32,
+        height as u32,
+        bytes,
+    )
+}
+
+fn procedural_normal_texture() -> TextureReference {
+    let width = 8;
+    let height = 8;
+    let mut bytes = Vec::with_capacity(width * height * 4);
+    for row in 0..height {
+        for column in 0..width {
+            let x = 128 + (((row * 17 + column * 11) % 31) as i32 - 15);
+            let y = 128 + (((row * 7 + column * 19) % 27) as i32 - 13);
+            bytes.extend([x as u8, y as u8, 246, 255]);
+        }
     }
+    procedural_texture(
+        "riverwatch-normal",
+        "procedural-riverwatch-normal-v1",
+        TextureColorSpace::NormalMap,
+        width as u32,
+        height as u32,
+        bytes,
+    )
+}
+
+fn procedural_roughness_texture() -> TextureReference {
+    let width = 8;
+    let height = 8;
+    let mut bytes = Vec::with_capacity(width * height * 4);
+    for row in 0..height {
+        for column in 0..width {
+            let value = 176 + ((row * 23 + column * 13) % 64) as u8;
+            bytes.extend([value, value, value, 255]);
+        }
+    }
+    procedural_texture(
+        "riverwatch-roughness",
+        "procedural-riverwatch-roughness-v1",
+        TextureColorSpace::Data,
+        width as u32,
+        height as u32,
+        bytes,
+    )
+}
+
+fn procedural_occlusion_texture() -> TextureReference {
+    let width = 8;
+    let height = 8;
+    let mut bytes = Vec::with_capacity(width * height * 4);
+    for row in 0..height {
+        for column in 0..width {
+            let value = 208 + ((row * 11 + column * 5) % 32) as u8;
+            bytes.extend([value, value, value, 255]);
+        }
+    }
+    procedural_texture(
+        "riverwatch-occlusion",
+        "procedural-riverwatch-occlusion-v1",
+        TextureColorSpace::Data,
+        width as u32,
+        height as u32,
+        bytes,
+    )
+}
+
+fn procedural_emissive_texture() -> TextureReference {
+    let width = 8;
+    let height = 8;
+    let mut bytes = Vec::with_capacity(width * height * 4);
+    for row in 0..height {
+        for column in 0..width {
+            let glow = (row * 5 + column * 3) % 19 == 0;
+            bytes.extend(if glow {
+                [220, 128, 32, 255]
+            } else {
+                [0, 0, 0, 255]
+            });
+        }
+    }
+    procedural_texture(
+        "riverwatch-emissive",
+        "procedural-riverwatch-emissive-v1",
+        TextureColorSpace::Srgb,
+        width as u32,
+        height as u32,
+        bytes,
+    )
 }
 
 pub fn lower_reference_world(
@@ -1226,6 +1368,14 @@ pub fn lower_reference_world(
 
     let mut overlays = Vec::new();
     let albedo_texture = procedural_albedo_texture();
+    let normal_texture = procedural_normal_texture();
+    let roughness_texture = procedural_roughness_texture();
+    let occlusion_texture = procedural_occlusion_texture();
+    let emissive_texture = procedural_emissive_texture();
+    let normal_texture_id = Some(normal_texture.texture_id.clone());
+    let roughness_texture_id = Some(roughness_texture.texture_id.clone());
+    let occlusion_texture_id = Some(occlusion_texture.texture_id.clone());
+    let emissive_texture_id = Some(emissive_texture.texture_id.clone());
     let mut materials = vec![MaterialIntent {
         material_id: "terrain-default".into(),
         base_color_rgba: [0.29, 0.38, 0.28, 1.0],
@@ -1233,6 +1383,13 @@ pub fn lower_reference_world(
         roughness: 0.92,
         alpha_mode: AlphaMode::Opaque,
         texture_ids: vec![albedo_texture.texture_id.clone()],
+        normal_texture_id: normal_texture_id.clone(),
+        roughness_texture_id: roughness_texture_id.clone(),
+        occlusion_texture_id: occlusion_texture_id.clone(),
+        emissive_texture_id: emissive_texture_id.clone(),
+        normal_scale: 0.35,
+        occlusion_strength: 0.65,
+        emissive_factor_rgb: [0.0, 0.0, 0.0],
     }];
     let mut meshes = Vec::new();
     let mut instances = Vec::new();
@@ -1244,6 +1401,13 @@ pub fn lower_reference_world(
             roughness: 0.78,
             alpha_mode: AlphaMode::Opaque,
             texture_ids: vec![albedo_texture.texture_id.clone()],
+            normal_texture_id: normal_texture_id.clone(),
+            roughness_texture_id: roughness_texture_id.clone(),
+            occlusion_texture_id: occlusion_texture_id.clone(),
+            emissive_texture_id: emissive_texture_id.clone(),
+            normal_scale: 0.85,
+            occlusion_strength: 0.8,
+            emissive_factor_rgb: [0.035, 0.012, 0.002],
         });
         meshes.push(obstacle_mesh());
         for obstacle in &layout.obstacles {
@@ -1279,6 +1443,13 @@ pub fn lower_reference_world(
             roughness: 0.88,
             alpha_mode: AlphaMode::Opaque,
             texture_ids: vec![albedo_texture.texture_id.clone()],
+            normal_texture_id: normal_texture_id.clone(),
+            roughness_texture_id: roughness_texture_id.clone(),
+            occlusion_texture_id: occlusion_texture_id.clone(),
+            emissive_texture_id: emissive_texture_id.clone(),
+            normal_scale: 0.22,
+            occlusion_strength: 0.5,
+            emissive_factor_rgb: [0.0, 0.0, 0.0],
         });
         meshes.push(foliage_mesh());
         instances.extend(foliage_instances);
@@ -1396,7 +1567,13 @@ pub fn lower_reference_world(
             ),
         },
         materials,
-        textures: vec![albedo_texture],
+        textures: vec![
+            albedo_texture,
+            normal_texture,
+            roughness_texture,
+            occlusion_texture,
+            emissive_texture,
+        ],
         meshes,
         instances,
         lights: vec![LightIntent {
@@ -1565,6 +1742,25 @@ fn validate_material(material: &MaterialIntent) -> Result<(), GraphicsContractEr
     {
         return Err(GraphicsContractError::malformed(
             "material metallic and roughness must be in [0, 1]",
+        ));
+    }
+    if !material.normal_scale.is_finite()
+        || !(0.0..=2.0).contains(&material.normal_scale)
+        || !material.occlusion_strength.is_finite()
+        || !(0.0..=1.0).contains(&material.occlusion_strength)
+    {
+        return Err(GraphicsContractError::malformed(
+            "material normal scale or occlusion strength is outside its bounds",
+        ));
+    }
+    finite_values(&material.emissive_factor_rgb, "material emissive factor")?;
+    if material
+        .emissive_factor_rgb
+        .iter()
+        .any(|value| !(0.0..=16.0).contains(value))
+    {
+        return Err(GraphicsContractError::malformed(
+            "material emissive factor must be in [0, 16]",
         ));
     }
     Ok(())
@@ -2104,6 +2300,13 @@ mod tests {
                 roughness: 0.9,
                 alpha_mode: AlphaMode::Opaque,
                 texture_ids: Vec::new(),
+                normal_texture_id: None,
+                roughness_texture_id: None,
+                occlusion_texture_id: None,
+                emissive_texture_id: None,
+                normal_scale: 1.0,
+                occlusion_strength: 1.0,
+                emissive_factor_rgb: [0.0, 0.0, 0.0],
             }],
             textures: Vec::new(),
             meshes: Vec::new(),
@@ -2191,6 +2394,13 @@ mod tests {
             .as_mut()
             .expect("texture payload exists");
         encoded.replace_range(..4, "AAAA");
+        assert!(validate_scene_packet(&packet).is_err());
+    }
+
+    #[test]
+    fn material_texture_roles_reject_unknown_provenance() {
+        let mut packet = packet();
+        packet.body.materials[0].normal_texture_id = Some("missing-normal".into());
         assert!(validate_scene_packet(&packet).is_err());
     }
 

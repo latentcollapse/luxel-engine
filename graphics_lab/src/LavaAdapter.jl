@@ -18,7 +18,7 @@ export AdapterError,
     render_texture_probe,
     render_scene
 
-const ADAPTER_REVISION = "wge.lava-adapter/v1"
+const ADAPTER_REVISION = "wge.lava-adapter/v2"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 const VULKAN_REVISION = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"
 const VULKAN_CORE_REVISION = "1d02829e8fa92da430d879db4dd7bf564a872035"
@@ -54,6 +54,7 @@ struct MeshBatchResources
     scales::Lava.LavaArray{Vec4f,1}
     colors::Lava.LavaArray{Vec4f,1}
     material_parameters::Lava.LavaArray{Vec4f,1}
+    emissive_parameters::Lava.LavaArray{Vec4f,1}
     vertex_count::Int
     instance_count::Int
 end
@@ -87,7 +88,11 @@ end
 
 struct MaterialTextureResources
     packet_sha256::String
-    texture::Lava.LavaTexture2D{NTuple{4,Float32}}
+    albedo_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
+    normal_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
+    roughness_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
+    occlusion_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
+    emissive_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
     sampler::Lava.LavaSampler
     bindings::Lava.TextureBindings
 end
@@ -312,6 +317,43 @@ function _reflect_vector(incident::Vec4f, normal::Vec4f)::Vec4f
     )
 end
 
+function _cross_vector(first::Vec4f, second::Vec4f)::Vec4f
+    return Vec4f(
+        first[2] * second[3] - first[3] * second[2],
+        first[3] * second[1] - first[1] * second[3],
+        first[1] * second[2] - first[2] * second[1],
+        0.0f0,
+    )
+end
+
+function _perturbed_normal(
+    normal::Vec4f,
+    uv::Vec2f,
+    normal_scale::Float32,
+)::Vec4f
+    surface_normal = _normalize_vector(normal)
+    normal_sample = _sample_texture(UInt32(1), uv)
+    tangent_space = Vec4f(
+        (normal_sample[1] * 2.0f0 - 1.0f0) * clamp(normal_scale, 0.0f0, 2.0f0),
+        (normal_sample[2] * 2.0f0 - 1.0f0) * clamp(normal_scale, 0.0f0, 2.0f0),
+        max(normal_sample[3] * 2.0f0 - 1.0f0, 0.05f0),
+        0.0f0,
+    )
+    reference = abs(surface_normal[3]) < 0.9f0 ?
+        Vec4f(0.0f0, 0.0f0, 1.0f0, 0.0f0) :
+        Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)
+    tangent = _normalize_vector(_cross_vector(reference, surface_normal))
+    bitangent = _normalize_vector(_cross_vector(surface_normal, tangent))
+    return _normalize_vector(
+        Vec4f(
+            tangent[1] * tangent_space[1] + bitangent[1] * tangent_space[2] + surface_normal[1] * tangent_space[3],
+            tangent[2] * tangent_space[1] + bitangent[2] * tangent_space[2] + surface_normal[2] * tangent_space[3],
+            tangent[3] * tangent_space[1] + bitangent[3] * tangent_space[2] + surface_normal[3] * tangent_space[3],
+            0.0f0,
+        ),
+    )
+end
+
 function _material_response(
     base_color::Vec4f,
     normal::Vec4f,
@@ -325,6 +367,11 @@ function _material_response(
     roughness::Float32,
     shadow_visibility::Float32,
     view_direction::Vec4f,
+    roughness_sample::Float32,
+    occlusion_sample::Float32,
+    occlusion_strength::Float32,
+    emissive_factor::Vec4f,
+    emissive_sample::Vec4f,
 )::Vec4f
     surface_normal = _normalize_vector(normal)
     light_vector = _normalize_vector(
@@ -344,7 +391,11 @@ function _material_response(
     normal_half = max(_dot_vector(surface_normal, half_vector), 0.0f0)
     view_half = max(_dot_vector(view_vector, half_vector), 0.0f0)
     metalness = clamp(metallic, 0.0f0, 1.0f0)
-    surface_roughness = clamp(roughness, 0.045f0, 1.0f0)
+    surface_roughness = clamp(
+        roughness * clamp(roughness_sample, 0.0f0, 1.0f0),
+        0.045f0,
+        1.0f0,
+    )
     alpha = surface_roughness * surface_roughness
     alpha_squared = alpha * alpha
     normal_half_squared = normal_half * normal_half
@@ -386,35 +437,44 @@ function _material_response(
         environment_horizon,
         environment_ground,
     )
-    ambient_diffuse_scale = (1.0f0 - metalness) * 0.52f0
-    ambient_specular_scale = 0.08f0 + 0.16f0 * (1.0f0 - surface_roughness)
+    occlusion = 1.0f0 -
+        clamp(occlusion_strength, 0.0f0, 1.0f0) *
+        (1.0f0 - clamp(occlusion_sample, 0.0f0, 1.0f0))
+    ambient_diffuse_scale = (1.0f0 - metalness) * 0.52f0 * occlusion
+    ambient_specular_scale = (0.08f0 + 0.16f0 * (1.0f0 - surface_roughness)) * occlusion
+    emissive_red = emissive_factor[1] * emissive_sample[1]
+    emissive_green = emissive_factor[2] * emissive_sample[2]
+    emissive_blue = emissive_factor[3] * emissive_sample[3]
     red = (
         (base_color[1] * diffuse_scale + fresnel_red * specular_scale) *
                 light_color[1] * direct_scale +
             base_color[1] * ambient_diffuse_scale * environment_diffuse[1] +
-            fresnel_red * ambient_specular_scale * environment_specular[1]
+            fresnel_red * ambient_specular_scale * environment_specular[1] +
+            emissive_red
     )
     green = (
         (base_color[2] * diffuse_scale + fresnel_green * specular_scale) *
                 light_color[2] * direct_scale +
             base_color[2] * ambient_diffuse_scale * environment_diffuse[2] +
-            fresnel_green * ambient_specular_scale * environment_specular[2]
+            fresnel_green * ambient_specular_scale * environment_specular[2] +
+            emissive_green
     )
     blue = (
         (base_color[3] * diffuse_scale + fresnel_blue * specular_scale) *
                 light_color[3] * direct_scale +
             base_color[3] * ambient_diffuse_scale * environment_diffuse[3] +
-            fresnel_blue * ambient_specular_scale * environment_specular[3]
+            fresnel_blue * ambient_specular_scale * environment_specular[3] +
+            emissive_blue
     )
     return Vec4f(max(red, 0.0f0), max(green, 0.0f0), max(blue, 0.0f0), base_color[4])
 end
 
-function _sample_texture(uv::Vec2f)::Vec4f
+function _sample_texture(binding::UInt32, uv::Vec2f)::Vec4f
     return Vec4f(
-        Lava.sample_texture_2d(UInt32(0), uv[1], uv[2], UInt32(0)),
-        Lava.sample_texture_2d(UInt32(0), uv[1], uv[2], UInt32(1)),
-        Lava.sample_texture_2d(UInt32(0), uv[1], uv[2], UInt32(2)),
-        Lava.sample_texture_2d(UInt32(0), uv[1], uv[2], UInt32(3)),
+        Lava.sample_texture_2d(binding, uv[1], uv[2], UInt32(0)),
+        Lava.sample_texture_2d(binding, uv[1], uv[2], UInt32(1)),
+        Lava.sample_texture_2d(binding, uv[1], uv[2], UInt32(2)),
+        Lava.sample_texture_2d(binding, uv[1], uv[2], UInt32(3)),
     )
 end
 
@@ -423,7 +483,7 @@ function _textured_color(
     uv::Vec2f,
     texture_enabled::Float32,
 )::Vec4f
-    sampled = _sample_texture(uv)
+    sampled = _sample_texture(UInt32(0), uv)
     weight = clamp(texture_enabled, 0.0f0, 1.0f0)
     return Vec4f(
         base_color[1] * (1.0f0 - weight + weight * sampled[1]),
@@ -543,6 +603,8 @@ function _terrain_vertex(
     base_color::Vec4f,
     metallic::Float32,
     roughness::Float32,
+    normal_scale::Float32,
+    occlusion_strength::Float32,
     light_direction::Vec4f,
     light_color::Vec4f,
     light_intensity::Float32,
@@ -553,6 +615,7 @@ function _terrain_vertex(
     fog_density::Float32,
     exposure::Float32,
     texture_enabled::Float32,
+    emissive_factor::Vec4f,
 )
     vertex_id = Lava.vertex_index() - Int32(1)
     cells_per_axis = resolution - Int32(1)
@@ -598,7 +661,7 @@ function _terrain_vertex(
     Lava.gfx_output(1, _terrain_normal(heights, resolution, sample_x, sample_z, width_m, length_m))
     Lava.gfx_output(2, world_position)
     Lava.gfx_output(3, uv)
-    Lava.gfx_output(4, Vec4f(metallic, roughness, 0.0f0, 0.0f0))
+    Lava.gfx_output(4, Vec4f(metallic, roughness, normal_scale, occlusion_strength))
     Lava.gfx_output(5, light_direction)
     Lava.gfx_output(6, light_color)
     Lava.gfx_output(7, Vec4f(light_intensity, fog_density, exposure, texture_enabled))
@@ -619,6 +682,7 @@ function _terrain_vertex(
             light_mode,
         ),
     )
+    Lava.gfx_output(14, emissive_factor)
     return nothing
 end
 
@@ -630,6 +694,7 @@ function _mesh_vertex(
     scales::Lava.LavaDeviceArray{Vec4f,1},
     colors::Lava.LavaDeviceArray{Vec4f,1},
     material_parameters::Lava.LavaDeviceArray{Vec4f,1},
+    emissive_parameters::Lava.LavaDeviceArray{Vec4f,1},
     camera_position::Vec4f,
     camera_right::Vec4f,
     camera_up::Vec4f,
@@ -716,6 +781,7 @@ function _mesh_vertex(
             light_mode,
         ),
     )
+    Lava.gfx_output(14, emissive_parameters[instance_id])
     return nothing
 end
 
@@ -817,7 +883,7 @@ function _shadow_fragment()
 end
 
 function _shadow_depth(u::Float32, v::Float32)::Float32
-    return Lava.sample_texture_2d(UInt32(1), u, v, UInt32(0))
+    return Lava.sample_texture_2d(UInt32(5), u, v, UInt32(0))
 end
 
 function _shadow_visibility(light_space::Vec4f)::Float32
@@ -893,6 +959,7 @@ function _terrain_fragment()
     fog_color = Lava.gfx_input(Vec4f, 11)
     camera_position = Lava.gfx_input(Vec4f, 12)
     light_space = Lava.gfx_input(Vec4f, 13)
+    material_emissive = Lava.gfx_input(Vec4f, 14)
     light_intensity = lighting_parameters[1]
     fog_density = lighting_parameters[2]
     exposure = lighting_parameters[3]
@@ -903,9 +970,12 @@ function _terrain_fragment()
         camera_position[3] - world_position[3],
         0.0f0,
     )
+    roughness_sample = _sample_texture(UInt32(2), uv)[1]
+    occlusion_sample = _sample_texture(UInt32(3), uv)[1]
+    emissive_sample = _sample_texture(UInt32(4), uv)
     lit_color = _material_response(
         _textured_color(base_color, uv, texture_enabled),
-        normal,
+        _perturbed_normal(normal, uv, material[3]),
         light_direction,
         light_color,
         light_intensity,
@@ -916,6 +986,11 @@ function _terrain_fragment()
         material[2],
         _shadow_visibility(light_space),
         view_direction,
+        roughness_sample,
+        occlusion_sample,
+        material[4],
+        material_emissive,
+        emissive_sample,
     )
     fogged_color = _apply_fog(
         lit_color,
@@ -1301,6 +1376,14 @@ function _decode_texture_channel(::Val{:srgb}, channel::Float32)::Float32
     return _srgb_to_linear(channel)
 end
 
+function _decode_texture_channel(::Val{:normal_map}, channel::Float32)::Float32
+    return channel
+end
+
+function _decode_texture_channel(::Val{:data}, channel::Float32)::Float32
+    return channel
+end
+
 function _texture_matrix(
     bytes::Vector{UInt8},
     width::UInt32,
@@ -1309,6 +1392,8 @@ function _texture_matrix(
 )::Matrix{NTuple{4,Float32}}
     color_space == :linear && return _texture_matrix(bytes, width, height, Val{:linear}())
     color_space == :srgb && return _texture_matrix(bytes, width, height, Val{:srgb}())
+    color_space == :normal_map && return _texture_matrix(bytes, width, height, Val{:normal_map}())
+    color_space == :data && return _texture_matrix(bytes, width, height, Val{:data}())
     throw(AdapterError("unsupported_texture", "texture color space is not a color payload"))
 end
 
@@ -1340,6 +1425,104 @@ function _texture_matrix(
     return data
 end
 
+function _material_texture_id(
+    material::WGEGraphics.MaterialPacket,
+    ::Val{:albedo},
+)::Union{Nothing,String}
+    length(material.texture_ids) <= 1 ||
+        throw(AdapterError("unsupported_material", "native path supports one albedo texture per material"))
+    return isempty(material.texture_ids) ? nothing : only(material.texture_ids)
+end
+
+_material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:normal}) = material.normal_texture_id
+_material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:roughness}) = material.roughness_texture_id
+_material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:occlusion}) = material.occlusion_texture_id
+_material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:emissive}) = material.emissive_texture_id
+
+function _shared_material_texture_id(
+    packet::WGEGraphics.GraphicsScenePacket,
+    role::Val,
+)::Union{Nothing,String}
+    ids = Set{String}()
+    for material in packet.materials
+        texture_id = _material_texture_id(material, role)
+        texture_id === nothing || push!(ids, texture_id)
+    end
+    length(ids) <= 1 ||
+        throw(AdapterError(
+            "unsupported_material",
+            "native path requires one shared $(typeof(role).parameters[1]) texture profile",
+        ))
+    shared = isempty(ids) ? nothing : only(ids)
+    for material in packet.materials
+        _material_texture_id(material, role) == shared ||
+            throw(AdapterError(
+                "unsupported_material",
+                "native path requires every material to use the same $(typeof(role).parameters[1]) texture profile",
+            ))
+    end
+    return shared
+end
+
+function _default_texture_payload(::Val{:albedo})
+    return (bytes=UInt8[255, 255, 255, 255], width=UInt32(1), height=UInt32(1), color_space=:linear)
+end
+
+function _default_texture_payload(::Val{:normal})
+    return (bytes=UInt8[128, 128, 255, 255], width=UInt32(1), height=UInt32(1), color_space=:normal_map)
+end
+
+function _default_texture_payload(::Val{:roughness})
+    return (bytes=UInt8[255, 255, 255, 255], width=UInt32(1), height=UInt32(1), color_space=:data)
+end
+
+function _default_texture_payload(::Val{:occlusion})
+    return (bytes=UInt8[255, 255, 255, 255], width=UInt32(1), height=UInt32(1), color_space=:data)
+end
+
+function _default_texture_payload(::Val{:emissive})
+    return (bytes=UInt8[0, 0, 0, 255], width=UInt32(1), height=UInt32(1), color_space=:linear)
+end
+
+function _texture_payload(
+    packet::WGEGraphics.GraphicsScenePacket,
+    ::Nothing,
+    role::Val,
+)
+    return _default_texture_payload(role)
+end
+
+_texture_color_spaces(::Val{:albedo}) = (:srgb, :linear)
+_texture_color_spaces(::Val{:normal}) = (:normal_map,)
+_texture_color_spaces(::Val{:roughness}) = (:data, :linear)
+_texture_color_spaces(::Val{:occlusion}) = (:data, :linear)
+_texture_color_spaces(::Val{:emissive}) = (:srgb, :linear)
+
+function _texture_payload(
+    packet::WGEGraphics.GraphicsScenePacket,
+    texture_id::String,
+    role::Val,
+)
+    texture_index = findfirst(texture -> texture.texture_id == texture_id, packet.textures)
+    texture_index === nothing &&
+        throw(AdapterError("provenance", "material texture $texture_id is absent from the packet"))
+    texture = packet.textures[texture_index]
+    allowed_color_spaces = _texture_color_spaces(role)
+    texture.color_space in allowed_color_spaces ||
+        throw(AdapterError(
+            "unsupported_texture",
+            "texture $texture_id has an invalid color space for $(typeof(role).parameters[1])",
+        ))
+    texture.payload === nothing &&
+        throw(AdapterError("unsupported_texture", "native path requires inline texture payloads"))
+    return (
+        bytes=texture.payload::Vector{UInt8},
+        width=texture.width_px,
+        height=texture.height_px,
+        color_space=texture.color_space,
+    )
+end
+
 function _material_texture_resources!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
@@ -1347,48 +1530,40 @@ function _material_texture_resources!(
 )
     current = state.material_texture_resources
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
-    texture_ids = Set(
-        texture_id for material in packet.materials for texture_id in material.texture_ids
+    roles = (
+        Val{:albedo}(),
+        Val{:normal}(),
+        Val{:roughness}(),
+        Val{:occlusion}(),
+        Val{:emissive}(),
     )
-    length(texture_ids) <= 1 ||
-        throw(AdapterError("unsupported_material", "native path currently supports one shared albedo texture"))
-    shared_texture_id = isempty(texture_ids) ? nothing : only(texture_ids)
-    expected_ids = shared_texture_id === nothing ? String[] : String[shared_texture_id]
-    for material in packet.materials
-        material.texture_ids == expected_ids ||
-            throw(AdapterError(
-                "unsupported_material",
-                "native path requires every material to use the same albedo texture profile",
-            ))
-    end
-
-    if isempty(texture_ids)
-        bytes = UInt8[255, 255, 255, 255]
-        width = UInt32(1)
-        height = UInt32(1)
-        color_space = :linear
-    else
-        texture_id = only(texture_ids)
-        texture_index = findfirst(texture -> texture.texture_id == texture_id, packet.textures)
-        texture_index === nothing &&
-            throw(AdapterError("provenance", "material texture is absent from the packet"))
-        texture = packet.textures[texture_index]
-        texture.color_space in (:srgb, :linear) ||
-            throw(AdapterError("unsupported_texture", "native path requires color albedo textures"))
-        texture.payload === nothing &&
-            throw(AdapterError("unsupported_texture", "native path requires an inline texture payload"))
-        bytes = texture.payload::Vector{UInt8}
-        width = texture.width_px
-        height = texture.height_px
-        color_space = texture.color_space
-    end
-    data = _texture_matrix(bytes, width, height, color_space)
-    gpu_texture = Lava.LavaTexture2D(data; ctx=state.context, filter=:linear, wrap=:clamp)
+    payloads = map(role -> _texture_payload(packet, _shared_material_texture_id(packet, role), role), roles)
+    matrices = map(
+        payload -> _texture_matrix(payload.bytes, payload.width, payload.height, payload.color_space),
+        payloads,
+    )
+    textures = map(data -> Lava.LavaTexture2D(data; ctx=state.context, filter=:linear, wrap=:clamp), matrices)
     sampler = Lava.LavaSampler(ctx=state.context, filter=:linear, wrap=:clamp)
-    bindings = Lava.bind_textures([gpu_texture * sampler, shadow.texture * shadow.sampler])
-    created = MaterialTextureResources(packet.packet_sha256, gpu_texture, sampler, bindings)
+    bindings = Lava.bind_textures([
+        textures[1] * sampler,
+        textures[2] * sampler,
+        textures[3] * sampler,
+        textures[4] * sampler,
+        textures[5] * sampler,
+        shadow.texture * shadow.sampler,
+    ])
+    created = MaterialTextureResources(
+        packet.packet_sha256,
+        textures[1],
+        textures[2],
+        textures[3],
+        textures[4],
+        textures[5],
+        sampler,
+        bindings,
+    )
     state.material_texture_resources = created
-    state.upload_bytes += UInt64(length(bytes))
+    state.upload_bytes += UInt64(sum(length(payload.bytes) for payload in payloads))
     return created
 end
 
@@ -1879,7 +2054,10 @@ function _mesh_resources!(
         scales = Vec4f[Vec4f(instance.transform.scale_xyz..., 0.0f0) for instance in batch_instances]
         colors = Vec4f[Vec4f(material.base_color_rgba...) for _ in batch_instances]
         material_parameters = Vec4f[
-            Vec4f(material.metallic, material.roughness, 0.0f0, 0.0f0) for _ in batch_instances
+            Vec4f(material.metallic, material.roughness, material.normal_scale, material.occlusion_strength) for _ in batch_instances
+        ]
+        emissive_parameters = Vec4f[
+            Vec4f(material.emissive_factor_rgb..., 1.0f0) for _ in batch_instances
         ]
         gpu_positions = Lava.LavaArray{Vec4f,1}(positions; bq=state.queue)
         gpu_normals = Lava.LavaArray{Vec4f,1}(normals; bq=state.queue)
@@ -1888,11 +2066,12 @@ function _mesh_resources!(
         gpu_scales = Lava.LavaArray{Vec4f,1}(scales; bq=state.queue)
         gpu_colors = Lava.LavaArray{Vec4f,1}(colors; bq=state.queue)
         gpu_material_parameters = Lava.LavaArray{Vec4f,1}(material_parameters; bq=state.queue)
+        gpu_emissive_parameters = Lava.LavaArray{Vec4f,1}(emissive_parameters; bq=state.queue)
         state.upload_bytes += UInt64(
             sizeof(Vec4f) *
                 (length(positions) + length(normals) + length(translations) +
                 length(rotations) + length(scales) + length(colors) +
-                length(material_parameters)),
+                length(material_parameters) + length(emissive_parameters)),
         )
         push!(
             batches,
@@ -1904,6 +2083,7 @@ function _mesh_resources!(
                 gpu_scales,
                 gpu_colors,
                 gpu_material_parameters,
+                gpu_emissive_parameters,
                 length(positions),
                 length(batch_instances),
             ),
@@ -2169,6 +2349,8 @@ function render_scene(
             Vec4f(material.base_color_rgba...),
             material.metallic,
             material.roughness,
+            material.normal_scale,
+            material.occlusion_strength,
             lighting.direction,
             lighting.color,
             Float32(lighting.intensity),
@@ -2179,6 +2361,7 @@ function render_scene(
             packet.environment.fog_density,
             packet.environment.exposure,
             texture_enabled,
+            Vec4f(material.emissive_factor_rgb..., 1.0f0),
         ),
         descriptor_set_layout=texture_resources.bindings.layout,
         descriptor_set=texture_resources.bindings.set,
@@ -2204,6 +2387,7 @@ function render_scene(
                     batch.scales,
                     batch.colors,
                     batch.material_parameters,
+                    batch.emissive_parameters,
                     camera_frame.position,
                     camera_frame.right,
                     camera_frame.up,
