@@ -5313,6 +5313,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wge-native-graphics-contract"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "wge-reference-runtime",
+]
+
+[[package]]
 name = "wge-project-ledger"
 version = "0.1.0"
 dependencies = [

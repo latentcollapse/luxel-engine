@@ -1,0 +1,1451 @@
+//! Typed, engine-neutral input and evidence contracts for the native WGE
+//! graphics path.
+//!
+//! This crate owns no Vulkan handles and imports no renderer-specific types.
+//! It lowers an already validated reference world into one coarse packet that
+//! a supervised graphics worker can consume and independently revalidate.
+
+use std::collections::BTreeSet;
+
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
+
+pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v1";
+pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
+pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
+pub const MAX_PACKET_ELEMENTS: usize = 16 * 1024 * 1024;
+pub const MAX_CAPTURE_DIMENSION: u32 = 8192;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GraphicsContractError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl GraphicsContractError {
+    fn malformed(message: impl Into<String>) -> Self {
+        Self {
+            code: "malformed",
+            message: message.into(),
+        }
+    }
+
+    fn provenance(message: impl Into<String>) -> Self {
+        Self {
+            code: "provenance",
+            message: message.into(),
+        }
+    }
+
+    fn unsupported(message: impl Into<String>) -> Self {
+        Self {
+            code: "unsupported",
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for GraphicsContractError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}: {}", self.code, self.message)
+    }
+}
+
+impl std::error::Error for GraphicsContractError {}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsScenePacket {
+    pub body: GraphicsScenePacketBody,
+    pub packet_sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsScenePacketBody {
+    pub schema_version: String,
+    pub packet_id: String,
+    pub world_artifact_id: String,
+    pub world_artifact_sha256: String,
+    pub spatial_fields_sha256: String,
+    pub frame_seed: u64,
+    pub coordinate_system: CoordinateSystem,
+    pub camera: GraphicsCamera,
+    pub terrain: TerrainPacket,
+    pub materials: Vec<MaterialIntent>,
+    pub textures: Vec<TextureReference>,
+    pub meshes: Vec<MeshPacket>,
+    pub instances: Vec<InstancePacket>,
+    pub lights: Vec<LightIntent>,
+    pub overlays: Vec<SemanticOverlay>,
+    pub capture: GraphicsCaptureRequest,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Axis {
+    X,
+    Y,
+    Z,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Handedness {
+    Right,
+    Left,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct CoordinateSystem {
+    pub up_axis: Axis,
+    pub handedness: Handedness,
+    pub units_per_meter: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsCamera {
+    pub camera_id: String,
+    pub projection: CameraProjection,
+    pub position_xyz_m: [f32; 3],
+    pub forward_xyz: [f32; 3],
+    pub up_xyz: [f32; 3],
+    pub near_plane_m: f32,
+    pub far_plane_m: f32,
+    pub width_px: u32,
+    pub height_px: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CameraProjection {
+    Perspective { fov_y_degrees: f32 },
+    Orthographic { span_m: f32 },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TerrainPacket {
+    pub terrain_id: String,
+    pub width_m: f32,
+    pub length_m: f32,
+    pub resolution: usize,
+    pub material_id: String,
+    pub heights_m: BufferReference,
+    pub slope_grade: BufferReference,
+    pub region_codes: BufferReference,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct BufferReference {
+    pub buffer_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_artifact_id: Option<String>,
+    pub byte_length: usize,
+    pub count: usize,
+    pub stride_bytes: usize,
+    pub sha256: String,
+    pub payload: BufferPayload,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "encoding", content = "values", rename_all = "snake_case")]
+pub enum BufferPayload {
+    F32(Vec<f32>),
+    U8(Vec<u8>),
+    U32(Vec<u32>),
+}
+
+impl BufferReference {
+    pub fn inline_f32(buffer_id: impl Into<String>, values: Vec<f32>) -> Self {
+        Self::from_payload(buffer_id.into(), BufferPayload::F32(values))
+    }
+
+    pub fn inline_u8(buffer_id: impl Into<String>, values: Vec<u8>) -> Self {
+        Self::from_payload(buffer_id.into(), BufferPayload::U8(values))
+    }
+
+    pub fn inline_u32(buffer_id: impl Into<String>, values: Vec<u32>) -> Self {
+        Self::from_payload(buffer_id.into(), BufferPayload::U32(values))
+    }
+
+    fn from_payload(buffer_id: String, payload: BufferPayload) -> Self {
+        let (byte_length, count, stride_bytes) = payload.layout();
+        let sha256 = sha256_prefixed(&payload.le_bytes());
+        Self {
+            buffer_id,
+            source_artifact_id: None,
+            byte_length,
+            count,
+            stride_bytes,
+            sha256,
+            payload,
+        }
+    }
+}
+
+impl BufferPayload {
+    fn layout(&self) -> (usize, usize, usize) {
+        match self {
+            Self::F32(values) => (values.len() * 4, values.len(), 4),
+            Self::U8(values) => (values.len(), values.len(), 1),
+            Self::U32(values) => (values.len() * 4, values.len(), 4),
+        }
+    }
+
+    fn le_bytes(&self) -> Vec<u8> {
+        match self {
+            Self::F32(values) => values
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect(),
+            Self::U8(values) => values.clone(),
+            Self::U32(values) => values
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect(),
+        }
+    }
+
+    fn finite(&self) -> bool {
+        match self {
+            Self::F32(values) => values.iter().all(|value| value.is_finite()),
+            Self::U8(_) | Self::U32(_) => true,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MaterialIntent {
+    pub material_id: String,
+    pub base_color_rgba: [f32; 4],
+    pub metallic: f32,
+    pub roughness: f32,
+    pub alpha_mode: AlphaMode,
+    pub texture_ids: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AlphaMode {
+    Opaque,
+    Mask,
+    Blend,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TextureReference {
+    pub texture_id: String,
+    pub source_artifact_id: String,
+    pub sha256: String,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub mip_levels: u32,
+    pub color_space: TextureColorSpace,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TextureColorSpace {
+    Srgb,
+    Linear,
+    NormalMap,
+    Data,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct MeshPacket {
+    pub mesh_id: String,
+    pub positions_m: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub indices: Vec<u32>,
+    pub material_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct InstancePacket {
+    pub instance_id: String,
+    pub mesh_id: String,
+    pub material_id: String,
+    pub transform: Transform3d,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Transform3d {
+    pub translation_xyz_m: [f32; 3],
+    pub rotation_xyzw: [f32; 4],
+    pub scale_xyz: [f32; 3],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct LightIntent {
+    pub light_id: String,
+    pub kind: LightKind,
+    pub color_rgb: [f32; 3],
+    pub intensity: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LightKind {
+    Directional {
+        direction_xyz: [f32; 3],
+    },
+    Point {
+        position_xyz_m: [f32; 3],
+        range_m: f32,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SemanticOverlay {
+    Point {
+        marker_id: String,
+        role: MarkerRole,
+        position_xyz_m: [f32; 3],
+        radius_m: f32,
+        color_rgba: [f32; 4],
+    },
+    Circle {
+        marker_id: String,
+        role: MarkerRole,
+        center_xyz_m: [f32; 3],
+        radius_m: f32,
+        color_rgba: [f32; 4],
+    },
+    Polyline {
+        marker_id: String,
+        role: MarkerRole,
+        points_xyz_m: Vec<[f32; 3]>,
+        thickness_m: f32,
+        color_rgba: [f32; 4],
+    },
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkerRole {
+    Route,
+    PlayerSpawn,
+    OpponentSpawn,
+    Encounter,
+    Objective,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsCaptureRequest {
+    pub capture_id: String,
+    pub camera_id: String,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub format: CaptureFormat,
+    pub include_depth: bool,
+    pub deterministic: bool,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CaptureFormat {
+    Rgba8Srgb,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsReady {
+    pub schema_version: String,
+    pub backend_id: String,
+    pub adapter_revision: String,
+    pub lava_revision: String,
+    pub julia_version: String,
+    pub vulkan_api_version: String,
+    pub device_name: String,
+    pub device_uuid: String,
+    pub features: GraphicsFeatures,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsFeatures {
+    pub offscreen_raster: bool,
+    pub depth_attachment: bool,
+    pub texture_sampling: bool,
+    pub readback: bool,
+    pub hardware_ray_tracing: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsFrameReceipt {
+    pub body: GraphicsFrameReceiptBody,
+    pub receipt_sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsFrameReceiptBody {
+    pub schema_version: String,
+    pub packet_sha256: String,
+    pub capture_id: String,
+    pub backend_id: String,
+    pub status: FrameStatus,
+    pub format: CaptureFormat,
+    pub width_px: u32,
+    pub height_px: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_sha256: Option<String>,
+    pub measurements: GraphicsFrameMeasurements,
+    pub telemetry: GraphicsTelemetry,
+    pub detail: String,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FrameStatus {
+    Passed,
+    Failed,
+    Unsupported,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsFrameMeasurements {
+    pub terrain_luminance_stddev: f64,
+    pub distinct_terrain_colors: usize,
+    pub route_visible_pixels: usize,
+    pub player_spawn_visible_pixels: usize,
+    pub opponent_spawn_visible_pixels: usize,
+    pub encounter_visible_pixels: usize,
+    pub objective_visible_pixels: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsTelemetry {
+    pub upload_bytes: usize,
+    pub readback_bytes: usize,
+    pub draw_calls: usize,
+    pub dispatch_calls: usize,
+    pub pipeline_compilations: usize,
+    pub frame_time_us: u64,
+}
+
+pub fn sha256_prefixed(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(64);
+    for byte in digest {
+        use std::fmt::Write;
+        write!(&mut hex, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    format!("sha256:{hex}")
+}
+
+pub fn canonical_json<T: Serialize>(value: &T) -> Result<Vec<u8>, GraphicsContractError> {
+    serde_json::to_vec(value).map_err(|error| {
+        GraphicsContractError::malformed(format!("canonical JSON failed: {error}"))
+    })
+}
+
+pub fn seal_scene_packet(
+    body: GraphicsScenePacketBody,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    let packet_sha256 = sha256_prefixed(&canonical_json(&body)?);
+    let packet = GraphicsScenePacket {
+        body,
+        packet_sha256,
+    };
+    validate_scene_packet(&packet)?;
+    Ok(packet)
+}
+
+pub fn validate_scene_packet(packet: &GraphicsScenePacket) -> Result<(), GraphicsContractError> {
+    let body_digest = sha256_prefixed(&canonical_json(&packet.body)?);
+    if packet.packet_sha256 != body_digest {
+        return Err(GraphicsContractError::provenance(
+            "scene packet digest does not match its canonical body",
+        ));
+    }
+    if packet.body.schema_version != SCENE_PACKET_SCHEMA {
+        return Err(GraphicsContractError::unsupported(format!(
+            "unsupported scene packet schema {}",
+            packet.body.schema_version
+        )));
+    }
+    valid_id(&packet.body.packet_id, "packet_id")?;
+    valid_id(&packet.body.world_artifact_id, "world_artifact_id")?;
+    valid_sha(&packet.body.world_artifact_sha256, "world_artifact_sha256")?;
+    valid_sha(&packet.body.spatial_fields_sha256, "spatial_fields_sha256")?;
+    validate_coordinate_system(&packet.body.coordinate_system)?;
+    validate_camera(&packet.body.camera)?;
+    validate_terrain(&packet.body.terrain, &packet.body.materials)?;
+
+    let mut material_ids = BTreeSet::new();
+    for material in &packet.body.materials {
+        validate_material(material)?;
+        if !material_ids.insert(material.material_id.as_str()) {
+            return Err(GraphicsContractError::malformed(format!(
+                "duplicate material {}",
+                material.material_id
+            )));
+        }
+    }
+    let mut texture_ids = BTreeSet::new();
+    for texture in &packet.body.textures {
+        validate_texture(texture)?;
+        if !texture_ids.insert(texture.texture_id.as_str()) {
+            return Err(GraphicsContractError::malformed(format!(
+                "duplicate texture {}",
+                texture.texture_id
+            )));
+        }
+    }
+    for material in &packet.body.materials {
+        for texture_id in &material.texture_ids {
+            if !texture_ids.contains(texture_id.as_str()) {
+                return Err(GraphicsContractError::provenance(format!(
+                    "material {} references unknown texture {}",
+                    material.material_id, texture_id
+                )));
+            }
+        }
+    }
+
+    let mut mesh_ids = BTreeSet::new();
+    for mesh in &packet.body.meshes {
+        validate_mesh(mesh, &material_ids)?;
+        if !mesh_ids.insert(mesh.mesh_id.as_str()) {
+            return Err(GraphicsContractError::malformed(format!(
+                "duplicate mesh {}",
+                mesh.mesh_id
+            )));
+        }
+    }
+    let mut instance_ids = BTreeSet::new();
+    for instance in &packet.body.instances {
+        valid_id(&instance.instance_id, "instance_id")?;
+        if !mesh_ids.contains(instance.mesh_id.as_str()) {
+            return Err(GraphicsContractError::provenance(format!(
+                "instance {} references unknown mesh {}",
+                instance.instance_id, instance.mesh_id
+            )));
+        }
+        if !material_ids.contains(instance.material_id.as_str()) {
+            return Err(GraphicsContractError::provenance(format!(
+                "instance {} references unknown material {}",
+                instance.instance_id, instance.material_id
+            )));
+        }
+        validate_transform(&instance.transform)?;
+        if !instance_ids.insert(instance.instance_id.as_str()) {
+            return Err(GraphicsContractError::malformed(format!(
+                "duplicate instance {}",
+                instance.instance_id
+            )));
+        }
+    }
+
+    if packet.body.lights.is_empty() {
+        return Err(GraphicsContractError::malformed(
+            "scene packet needs at least one light intent",
+        ));
+    }
+    let mut light_ids = BTreeSet::new();
+    for light in &packet.body.lights {
+        validate_light(light)?;
+        if !light_ids.insert(light.light_id.as_str()) {
+            return Err(GraphicsContractError::malformed(format!(
+                "duplicate light {}",
+                light.light_id
+            )));
+        }
+    }
+    let mut marker_ids = BTreeSet::new();
+    for overlay in &packet.body.overlays {
+        let marker_id = validate_overlay(overlay)?;
+        if !marker_ids.insert(marker_id) {
+            return Err(GraphicsContractError::malformed(format!(
+                "duplicate semantic overlay {marker_id}"
+            )));
+        }
+    }
+    validate_capture(&packet.body.capture, &packet.body.camera)?;
+    Ok(())
+}
+
+pub fn seal_frame_receipt(
+    body: GraphicsFrameReceiptBody,
+) -> Result<GraphicsFrameReceipt, GraphicsContractError> {
+    let receipt_sha256 = sha256_prefixed(&canonical_json(&body)?);
+    let receipt = GraphicsFrameReceipt {
+        body,
+        receipt_sha256,
+    };
+    validate_frame_receipt(&receipt, &[])?;
+    Ok(receipt)
+}
+
+pub fn validate_frame_receipt(
+    receipt: &GraphicsFrameReceipt,
+    capture_bytes: &[u8],
+) -> Result<(), GraphicsContractError> {
+    let body_digest = sha256_prefixed(&canonical_json(&receipt.body)?);
+    if receipt.receipt_sha256 != body_digest {
+        return Err(GraphicsContractError::provenance(
+            "frame receipt digest does not match its canonical body",
+        ));
+    }
+    let body = &receipt.body;
+    if body.schema_version != FRAME_RECEIPT_SCHEMA {
+        return Err(GraphicsContractError::unsupported(format!(
+            "unsupported frame receipt schema {}",
+            body.schema_version
+        )));
+    }
+    valid_sha(&body.packet_sha256, "packet_sha256")?;
+    valid_id(&body.capture_id, "capture_id")?;
+    valid_id(&body.backend_id, "backend_id")?;
+    validate_dimensions(body.width_px, body.height_px, "frame receipt")?;
+    validate_measurements(&body.measurements)?;
+    if body.detail.trim().is_empty() {
+        return Err(GraphicsContractError::malformed(
+            "frame receipt detail must not be empty",
+        ));
+    }
+
+    match body.status {
+        FrameStatus::Passed => {
+            if capture_bytes.is_empty() {
+                return Err(GraphicsContractError::provenance(
+                    "passed frame receipt has no capture bytes",
+                ));
+            }
+            let declared = body.capture_sha256.as_deref().ok_or_else(|| {
+                GraphicsContractError::provenance("passed frame receipt has no capture digest")
+            })?;
+            valid_sha(declared, "capture_sha256")?;
+            if declared != sha256_prefixed(capture_bytes) {
+                return Err(GraphicsContractError::provenance(
+                    "capture bytes do not match frame receipt digest",
+                ));
+            }
+        }
+        FrameStatus::Failed | FrameStatus::Unsupported => {
+            if body.capture_sha256.is_some() || !capture_bytes.is_empty() {
+                return Err(GraphicsContractError::provenance(
+                    "failed or unsupported frame cannot carry pass-shaped capture bytes",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_ready(ready: &GraphicsReady) -> Result<(), GraphicsContractError> {
+    if ready.schema_version != READY_SCHEMA {
+        return Err(GraphicsContractError::unsupported(format!(
+            "unsupported ready schema {}",
+            ready.schema_version
+        )));
+    }
+    for (value, label) in [
+        (&ready.backend_id, "backend_id"),
+        (&ready.adapter_revision, "adapter_revision"),
+        (&ready.lava_revision, "lava_revision"),
+        (&ready.julia_version, "julia_version"),
+        (&ready.vulkan_api_version, "vulkan_api_version"),
+        (&ready.device_name, "device_name"),
+        (&ready.device_uuid, "device_uuid"),
+    ] {
+        if value.trim().is_empty() {
+            return Err(GraphicsContractError::malformed(format!(
+                "ready {label} must not be empty"
+            )));
+        }
+    }
+    if !ready.features.offscreen_raster
+        || !ready.features.depth_attachment
+        || !ready.features.texture_sampling
+        || !ready.features.readback
+    {
+        return Err(GraphicsContractError::unsupported(
+            "ready backend lacks the required offscreen raster profile",
+        ));
+    }
+    Ok(())
+}
+
+pub fn lower_reference_world(
+    world: &WorldArtifact,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    validate_world_artifact(world)
+        .map_err(|error| GraphicsContractError::provenance(error.to_string()))?;
+    let layout = &world.body.authored_layout;
+    let resolution = world.body.fields.resolution;
+    let heights = world
+        .body
+        .fields
+        .heights_m
+        .iter()
+        .map(|value| finite_f32(*value, "terrain height"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let slope_grade = world
+        .body
+        .fields
+        .slope_grade
+        .iter()
+        .map(|value| finite_f32(*value, "terrain slope"))
+        .collect::<Result<Vec<_>, _>>()?;
+    let terrain_material_id = "terrain-default".to_owned();
+    let camera = lower_camera(&layout.reference_camera, layout.width_m, layout.length_m);
+    let capture = GraphicsCaptureRequest {
+        capture_id: format!("capture-{}", world.artifact_id.trim_start_matches("world-")),
+        camera_id: camera.camera_id.clone(),
+        width_px: camera.width_px,
+        height_px: camera.height_px,
+        format: CaptureFormat::Rgba8Srgb,
+        include_depth: true,
+        deterministic: true,
+    };
+
+    let mut overlays = Vec::new();
+    let route_points = world
+        .body
+        .navigation
+        .route_cells
+        .iter()
+        .map(|cell| {
+            let [x, z] = cell_position(layout.width_m, layout.length_m, resolution, *cell);
+            let height = world.body.fields.heights_m[*cell];
+            Ok([
+                finite_f32(x, "route x")?,
+                finite_f32(height, "route height")?,
+                finite_f32(z, "route z")?,
+            ])
+        })
+        .collect::<Result<Vec<_>, GraphicsContractError>>()?;
+    overlays.push(SemanticOverlay::Polyline {
+        marker_id: "route".into(),
+        role: MarkerRole::Route,
+        points_xyz_m: route_points,
+        thickness_m: 0.35,
+        color_rgba: [0.05, 0.86, 0.91, 1.0],
+    });
+    for spawn in &world.body.spawns {
+        let [x, z] = spawn.position_xz_m;
+        let cell = spawn.grid_cell;
+        let y = world.body.fields.heights_m[cell];
+        let (role, color) = match spawn.role {
+            wge_reference_runtime::SpawnRole::PlayerStart => {
+                (MarkerRole::PlayerSpawn, [0.28, 0.94, 0.42, 1.0])
+            }
+            wge_reference_runtime::SpawnRole::Opponent => {
+                (MarkerRole::OpponentSpawn, [0.88, 0.20, 0.47, 1.0])
+            }
+        };
+        overlays.push(SemanticOverlay::Point {
+            marker_id: spawn.spawn_id.clone(),
+            role,
+            position_xyz_m: [
+                finite_f32(x, "spawn x")?,
+                finite_f32(y, "spawn height")?,
+                finite_f32(z, "spawn z")?,
+            ],
+            radius_m: 0.8,
+            color_rgba: color,
+        });
+    }
+    for encounter in &world.body.encounters {
+        let [x, z] = encounter.center_xz_m;
+        let cell = nearest_cell(layout.width_m, layout.length_m, resolution, [x, z]);
+        overlays.push(SemanticOverlay::Circle {
+            marker_id: encounter.encounter_id.clone(),
+            role: MarkerRole::Encounter,
+            center_xyz_m: [
+                finite_f32(x, "encounter x")?,
+                finite_f32(world.body.fields.heights_m[cell], "encounter height")?,
+                finite_f32(z, "encounter z")?,
+            ],
+            radius_m: finite_f32(encounter.radius_m, "encounter radius")?,
+            color_rgba: [0.93, 0.32, 0.28, 1.0],
+        });
+    }
+    let [objective_x, objective_z] = layout.traversal.objective_position_xz_m;
+    let objective_cell = nearest_cell(
+        layout.width_m,
+        layout.length_m,
+        resolution,
+        [objective_x, objective_z],
+    );
+    overlays.push(SemanticOverlay::Point {
+        marker_id: layout.traversal.objective_id.clone(),
+        role: MarkerRole::Objective,
+        position_xyz_m: [
+            finite_f32(objective_x, "objective x")?,
+            finite_f32(
+                world.body.fields.heights_m[objective_cell],
+                "objective height",
+            )?,
+            finite_f32(objective_z, "objective z")?,
+        ],
+        radius_m: 1.0,
+        color_rgba: [1.0, 0.72, 0.24, 1.0],
+    });
+
+    let body = GraphicsScenePacketBody {
+        schema_version: SCENE_PACKET_SCHEMA.into(),
+        packet_id: format!(
+            "graphics-packet-{}",
+            world.artifact_id.trim_start_matches("world-")
+        ),
+        world_artifact_id: world.artifact_id.clone(),
+        world_artifact_sha256: world.artifact_sha256.clone(),
+        spatial_fields_sha256: world.body.fields.spatial_sha256.clone(),
+        frame_seed: layout.seed,
+        coordinate_system: CoordinateSystem {
+            up_axis: Axis::Y,
+            handedness: Handedness::Right,
+            units_per_meter: 1.0,
+        },
+        camera,
+        terrain: TerrainPacket {
+            terrain_id: layout.world_id.clone(),
+            width_m: finite_f32(layout.width_m, "terrain width")?,
+            length_m: finite_f32(layout.length_m, "terrain length")?,
+            resolution,
+            material_id: terrain_material_id.clone(),
+            heights_m: BufferReference::inline_f32("terrain-heights", heights),
+            slope_grade: BufferReference::inline_f32("terrain-slope", slope_grade),
+            region_codes: BufferReference::inline_u8(
+                "terrain-regions",
+                world.body.fields.region_codes.clone(),
+            ),
+        },
+        materials: vec![MaterialIntent {
+            material_id: terrain_material_id,
+            base_color_rgba: [0.29, 0.38, 0.28, 1.0],
+            metallic: 0.0,
+            roughness: 0.92,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: Vec::new(),
+        }],
+        textures: Vec::new(),
+        meshes: Vec::new(),
+        instances: Vec::new(),
+        lights: vec![LightIntent {
+            light_id: "key-directional".into(),
+            kind: LightKind::Directional {
+                direction_xyz: [0.35, -1.0, 0.25],
+            },
+            color_rgb: [1.0, 0.97, 0.92],
+            intensity: 2.0,
+        }],
+        overlays,
+        capture,
+    };
+    seal_scene_packet(body)
+}
+
+fn validate_coordinate_system(
+    coordinate_system: &CoordinateSystem,
+) -> Result<(), GraphicsContractError> {
+    if !coordinate_system.units_per_meter.is_finite()
+        || coordinate_system.units_per_meter <= 0.0
+        || (coordinate_system.units_per_meter - 1.0).abs() > f32::EPSILON
+    {
+        return Err(GraphicsContractError::unsupported(
+            "native graphics requires finite one-unit-per-meter coordinates",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_camera(camera: &GraphicsCamera) -> Result<(), GraphicsContractError> {
+    valid_id(&camera.camera_id, "camera_id")?;
+    for (values, label) in [
+        (&camera.position_xyz_m, "camera position"),
+        (&camera.forward_xyz, "camera forward"),
+        (&camera.up_xyz, "camera up"),
+    ] {
+        finite_values(values, label)?;
+    }
+    if camera.near_plane_m.is_nan()
+        || camera.far_plane_m.is_nan()
+        || camera.near_plane_m <= 0.0
+        || camera.far_plane_m <= camera.near_plane_m
+    {
+        return Err(GraphicsContractError::malformed(
+            "camera planes must be finite, positive, and ordered",
+        ));
+    }
+    validate_dimensions(camera.width_px, camera.height_px, "camera")?;
+    match camera.projection {
+        CameraProjection::Perspective { fov_y_degrees } => {
+            if !fov_y_degrees.is_finite() || !(1.0..=179.0).contains(&fov_y_degrees) {
+                return Err(GraphicsContractError::malformed(
+                    "perspective camera field of view is invalid",
+                ));
+            }
+        }
+        CameraProjection::Orthographic { span_m } => {
+            if !span_m.is_finite() || span_m <= 0.0 {
+                return Err(GraphicsContractError::malformed(
+                    "orthographic camera span must be finite and positive",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_terrain(
+    terrain: &TerrainPacket,
+    materials: &[MaterialIntent],
+) -> Result<(), GraphicsContractError> {
+    valid_id(&terrain.terrain_id, "terrain_id")?;
+    if !terrain.width_m.is_finite()
+        || !terrain.length_m.is_finite()
+        || terrain.width_m <= 0.0
+        || terrain.length_m <= 0.0
+    {
+        return Err(GraphicsContractError::malformed(
+            "terrain dimensions must be finite and positive",
+        ));
+    }
+    if !(3..=2049).contains(&terrain.resolution)
+        || terrain.resolution * terrain.resolution > MAX_PACKET_ELEMENTS
+    {
+        return Err(GraphicsContractError::malformed(
+            "terrain resolution is outside the bounded graphics packet range",
+        ));
+    }
+    valid_id(&terrain.material_id, "terrain material_id")?;
+    if !materials
+        .iter()
+        .any(|material| material.material_id == terrain.material_id)
+    {
+        return Err(GraphicsContractError::provenance(
+            "terrain references an unknown material",
+        ));
+    }
+    let expected_count = terrain.resolution * terrain.resolution;
+    validate_buffer(&terrain.heights_m, expected_count, "terrain heights")?;
+    validate_buffer(&terrain.slope_grade, expected_count, "terrain slope")?;
+    validate_buffer(&terrain.region_codes, expected_count, "terrain regions")?;
+    Ok(())
+}
+
+fn validate_buffer(
+    buffer: &BufferReference,
+    expected_count: usize,
+    label: &str,
+) -> Result<(), GraphicsContractError> {
+    valid_id(&buffer.buffer_id, label)?;
+    if buffer.count != expected_count {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} count {} does not match expected {expected_count}",
+            buffer.count
+        )));
+    }
+    if buffer.payload.layout() != (buffer.byte_length, buffer.count, buffer.stride_bytes) {
+        return Err(GraphicsContractError::provenance(format!(
+            "{label} layout does not match its payload"
+        )));
+    }
+    if buffer.byte_length == 0 || buffer.byte_length > MAX_PACKET_ELEMENTS * 4 {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} byte length is outside the bounded packet range"
+        )));
+    }
+    if !buffer.payload.finite() {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} contains a non-finite value"
+        )));
+    }
+    valid_sha(&buffer.sha256, &format!("{label} sha256"))?;
+    if buffer.sha256 != sha256_prefixed(&buffer.payload.le_bytes()) {
+        return Err(GraphicsContractError::provenance(format!(
+            "{label} digest does not match its payload"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_material(material: &MaterialIntent) -> Result<(), GraphicsContractError> {
+    valid_id(&material.material_id, "material_id")?;
+    finite_values(&material.base_color_rgba, "material base color")?;
+    if material
+        .base_color_rgba
+        .iter()
+        .any(|value| !(0.0..=1.0).contains(value))
+    {
+        return Err(GraphicsContractError::malformed(
+            "material base color must be in [0, 1]",
+        ));
+    }
+    if !material.metallic.is_finite()
+        || !material.roughness.is_finite()
+        || !(0.0..=1.0).contains(&material.metallic)
+        || !(0.0..=1.0).contains(&material.roughness)
+    {
+        return Err(GraphicsContractError::malformed(
+            "material metallic and roughness must be in [0, 1]",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_texture(texture: &TextureReference) -> Result<(), GraphicsContractError> {
+    valid_id(&texture.texture_id, "texture_id")?;
+    valid_id(&texture.source_artifact_id, "texture source_artifact_id")?;
+    valid_sha(&texture.sha256, "texture sha256")?;
+    if texture.width_px == 0
+        || texture.height_px == 0
+        || texture.mip_levels == 0
+        || texture.width_px > MAX_CAPTURE_DIMENSION
+        || texture.height_px > MAX_CAPTURE_DIMENSION
+    {
+        return Err(GraphicsContractError::malformed(
+            "texture dimensions or mip count are invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_mesh(
+    mesh: &MeshPacket,
+    material_ids: &BTreeSet<&str>,
+) -> Result<(), GraphicsContractError> {
+    valid_id(&mesh.mesh_id, "mesh_id")?;
+    if mesh.positions_m.is_empty() || mesh.positions_m.len() != mesh.normals.len() {
+        return Err(GraphicsContractError::malformed(format!(
+            "mesh {} needs matching non-empty position and normal arrays",
+            mesh.mesh_id
+        )));
+    }
+    if mesh.indices.is_empty() || mesh.indices.len() % 3 != 0 {
+        return Err(GraphicsContractError::malformed(format!(
+            "mesh {} needs a non-empty triangle index array",
+            mesh.mesh_id
+        )));
+    }
+    if mesh
+        .indices
+        .iter()
+        .any(|index| *index as usize >= mesh.positions_m.len())
+    {
+        return Err(GraphicsContractError::malformed(format!(
+            "mesh {} contains an out-of-range index",
+            mesh.mesh_id
+        )));
+    }
+    for position in &mesh.positions_m {
+        finite_values(position, "mesh position")?;
+    }
+    for normal in &mesh.normals {
+        finite_values(normal, "mesh normal")?;
+    }
+    if !material_ids.contains(mesh.material_id.as_str()) {
+        return Err(GraphicsContractError::provenance(format!(
+            "mesh {} references unknown material {}",
+            mesh.mesh_id, mesh.material_id
+        )));
+    }
+    Ok(())
+}
+
+fn validate_transform(transform: &Transform3d) -> Result<(), GraphicsContractError> {
+    finite_values(&transform.translation_xyz_m, "instance translation")?;
+    finite_values(&transform.rotation_xyzw, "instance rotation")?;
+    finite_values(&transform.scale_xyz, "instance scale")?;
+    if transform.scale_xyz.iter().any(|value| *value <= 0.0) {
+        return Err(GraphicsContractError::malformed(
+            "instance scale must be positive",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_light(light: &LightIntent) -> Result<(), GraphicsContractError> {
+    valid_id(&light.light_id, "light_id")?;
+    finite_values(&light.color_rgb, "light color")?;
+    if light.color_rgb.iter().any(|value| *value < 0.0)
+        || !light.intensity.is_finite()
+        || light.intensity < 0.0
+    {
+        return Err(GraphicsContractError::malformed(
+            "light color and intensity must be finite and non-negative",
+        ));
+    }
+    match &light.kind {
+        LightKind::Directional { direction_xyz } => {
+            finite_values(direction_xyz, "directional light direction")?;
+        }
+        LightKind::Point {
+            position_xyz_m,
+            range_m,
+        } => {
+            finite_values(position_xyz_m, "point light position")?;
+            if !range_m.is_finite() || *range_m <= 0.0 {
+                return Err(GraphicsContractError::malformed(
+                    "point light range must be finite and positive",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_overlay(overlay: &SemanticOverlay) -> Result<&str, GraphicsContractError> {
+    match overlay {
+        SemanticOverlay::Point {
+            marker_id,
+            position_xyz_m,
+            radius_m,
+            color_rgba,
+            ..
+        } => {
+            valid_id(marker_id, "marker_id")?;
+            finite_values(position_xyz_m, "point marker position")?;
+            validate_marker_style(*radius_m, color_rgba)?;
+            Ok(marker_id)
+        }
+        SemanticOverlay::Circle {
+            marker_id,
+            center_xyz_m,
+            radius_m,
+            color_rgba,
+            ..
+        } => {
+            valid_id(marker_id, "marker_id")?;
+            finite_values(center_xyz_m, "circle marker center")?;
+            validate_marker_style(*radius_m, color_rgba)?;
+            Ok(marker_id)
+        }
+        SemanticOverlay::Polyline {
+            marker_id,
+            points_xyz_m,
+            thickness_m,
+            color_rgba,
+            ..
+        } => {
+            valid_id(marker_id, "marker_id")?;
+            if points_xyz_m.len() < 2 {
+                return Err(GraphicsContractError::malformed(
+                    "polyline marker needs at least two points",
+                ));
+            }
+            for point in points_xyz_m {
+                finite_values(point, "polyline marker point")?;
+            }
+            validate_marker_style(*thickness_m, color_rgba)?;
+            Ok(marker_id)
+        }
+    }
+}
+
+fn validate_marker_style(
+    radius_or_thickness: f32,
+    color_rgba: &[f32; 4],
+) -> Result<(), GraphicsContractError> {
+    if !radius_or_thickness.is_finite() || radius_or_thickness <= 0.0 {
+        return Err(GraphicsContractError::malformed(
+            "marker radius/thickness must be finite and positive",
+        ));
+    }
+    finite_values(color_rgba, "marker color")?;
+    if color_rgba.iter().any(|value| !(0.0..=1.0).contains(value)) {
+        return Err(GraphicsContractError::malformed(
+            "marker color must be in [0, 1]",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_capture(
+    capture: &GraphicsCaptureRequest,
+    camera: &GraphicsCamera,
+) -> Result<(), GraphicsContractError> {
+    valid_id(&capture.capture_id, "capture_id")?;
+    if capture.camera_id != camera.camera_id
+        || capture.width_px != camera.width_px
+        || capture.height_px != camera.height_px
+    {
+        return Err(GraphicsContractError::provenance(
+            "capture request is detached from its packet camera",
+        ));
+    }
+    validate_dimensions(capture.width_px, capture.height_px, "capture")?;
+    if !capture.deterministic {
+        return Err(GraphicsContractError::unsupported(
+            "native certification requires deterministic captures",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_measurements(
+    measurements: &GraphicsFrameMeasurements,
+) -> Result<(), GraphicsContractError> {
+    if !measurements.terrain_luminance_stddev.is_finite()
+        || measurements.terrain_luminance_stddev < 0.0
+    {
+        return Err(GraphicsContractError::malformed(
+            "frame luminance measurement must be finite and non-negative",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_dimensions(
+    width_px: u32,
+    height_px: u32,
+    label: &str,
+) -> Result<(), GraphicsContractError> {
+    if width_px == 0
+        || height_px == 0
+        || width_px > MAX_CAPTURE_DIMENSION
+        || height_px > MAX_CAPTURE_DIMENSION
+    {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} dimensions are outside the bounded capture range"
+        )));
+    }
+    Ok(())
+}
+
+fn valid_id(value: &str, label: &str) -> Result<(), GraphicsContractError> {
+    if value.is_empty()
+        || value.len() > 256
+        || value.chars().any(|character| character.is_whitespace())
+    {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} is empty, too long, or contains whitespace"
+        )));
+    }
+    Ok(())
+}
+
+fn valid_sha(value: &str, label: &str) -> Result<(), GraphicsContractError> {
+    if value.len() != 71
+        || !value.starts_with("sha256:")
+        || !value[7..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} is not a sha256: digest"
+        )));
+    }
+    Ok(())
+}
+
+fn finite_values<const N: usize>(
+    values: &[f32; N],
+    label: &str,
+) -> Result<(), GraphicsContractError> {
+    if values.iter().all(|value| value.is_finite()) {
+        Ok(())
+    } else {
+        Err(GraphicsContractError::malformed(format!(
+            "{label} contains a non-finite value"
+        )))
+    }
+}
+
+fn finite_f32(value: f64, label: &str) -> Result<f32, GraphicsContractError> {
+    if !value.is_finite() {
+        return Err(GraphicsContractError::provenance(format!(
+            "{label} is non-finite"
+        )));
+    }
+    let value = value as f32;
+    if value.is_finite() {
+        Ok(value)
+    } else {
+        Err(GraphicsContractError::provenance(format!(
+            "{label} cannot be represented as finite f32"
+        )))
+    }
+}
+
+fn lower_camera(camera: &ReferenceCamera, width_m: f64, length_m: f64) -> GraphicsCamera {
+    GraphicsCamera {
+        camera_id: "reference-overview".into(),
+        projection: CameraProjection::Orthographic {
+            span_m: camera.orthographic_span_m as f32,
+        },
+        position_xyz_m: [0.0, camera.distance_m as f32, 0.0],
+        forward_xyz: [0.0, -1.0, 0.0],
+        up_xyz: [0.0, 0.0, -1.0],
+        near_plane_m: 0.1,
+        far_plane_m: (width_m.max(length_m) * 4.0 + camera.distance_m) as f32,
+        width_px: camera.width_px,
+        height_px: camera.height_px,
+    }
+}
+
+fn cell_position(width_m: f64, length_m: f64, resolution: usize, cell: usize) -> [f64; 2] {
+    let row = cell / resolution;
+    let column = cell % resolution;
+    let denominator = (resolution - 1) as f64;
+    [
+        -width_m / 2.0 + column as f64 * width_m / denominator,
+        length_m / 2.0 - row as f64 * length_m / denominator,
+    ]
+}
+
+fn nearest_cell(width_m: f64, length_m: f64, resolution: usize, point: [f64; 2]) -> usize {
+    let denominator = (resolution - 1) as f64;
+    let column = (((point[0] + width_m / 2.0) / width_m) * denominator)
+        .round()
+        .clamp(0.0, denominator) as usize;
+    let row = (((length_m / 2.0 - point[1]) / length_m) * denominator)
+        .round()
+        .clamp(0.0, denominator) as usize;
+    row * resolution + column
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn packet() -> GraphicsScenePacket {
+        let camera = GraphicsCamera {
+            camera_id: "camera".into(),
+            projection: CameraProjection::Orthographic { span_m: 16.0 },
+            position_xyz_m: [0.0, 10.0, 0.0],
+            forward_xyz: [0.0, -1.0, 0.0],
+            up_xyz: [0.0, 0.0, -1.0],
+            near_plane_m: 0.1,
+            far_plane_m: 100.0,
+            width_px: 32,
+            height_px: 32,
+        };
+        seal_scene_packet(GraphicsScenePacketBody {
+            schema_version: SCENE_PACKET_SCHEMA.into(),
+            packet_id: "packet-test".into(),
+            world_artifact_id: "world-test".into(),
+            world_artifact_sha256: sha256_prefixed(b"world"),
+            spatial_fields_sha256: sha256_prefixed(b"fields"),
+            frame_seed: 7,
+            coordinate_system: CoordinateSystem {
+                up_axis: Axis::Y,
+                handedness: Handedness::Right,
+                units_per_meter: 1.0,
+            },
+            camera: camera.clone(),
+            terrain: TerrainPacket {
+                terrain_id: "terrain".into(),
+                width_m: 8.0,
+                length_m: 8.0,
+                resolution: 3,
+                material_id: "terrain".into(),
+                heights_m: BufferReference::inline_f32("heights", vec![0.0; 9]),
+                slope_grade: BufferReference::inline_f32("slope", vec![0.0; 9]),
+                region_codes: BufferReference::inline_u8("regions", vec![1; 9]),
+            },
+            materials: vec![MaterialIntent {
+                material_id: "terrain".into(),
+                base_color_rgba: [0.3, 0.4, 0.3, 1.0],
+                metallic: 0.0,
+                roughness: 0.9,
+                alpha_mode: AlphaMode::Opaque,
+                texture_ids: Vec::new(),
+            }],
+            textures: Vec::new(),
+            meshes: Vec::new(),
+            instances: Vec::new(),
+            lights: vec![LightIntent {
+                light_id: "sun".into(),
+                kind: LightKind::Directional {
+                    direction_xyz: [0.0, -1.0, 0.0],
+                },
+                color_rgb: [1.0, 1.0, 1.0],
+                intensity: 1.0,
+            }],
+            overlays: vec![SemanticOverlay::Polyline {
+                marker_id: "route".into(),
+                role: MarkerRole::Route,
+                points_xyz_m: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 1.0]],
+                thickness_m: 0.2,
+                color_rgba: [0.0, 1.0, 1.0, 1.0],
+            }],
+            capture: GraphicsCaptureRequest {
+                capture_id: "capture-test".into(),
+                camera_id: camera.camera_id,
+                width_px: 32,
+                height_px: 32,
+                format: CaptureFormat::Rgba8Srgb,
+                include_depth: true,
+                deterministic: true,
+            },
+        })
+        .expect("test packet is valid")
+    }
+
+    #[test]
+    fn packet_identity_is_content_bound() {
+        let packet = packet();
+        validate_scene_packet(&packet).expect("packet validates");
+        let mut tampered = packet.clone();
+        tampered.body.frame_seed += 1;
+        assert!(validate_scene_packet(&tampered).is_err());
+    }
+
+    #[test]
+    fn buffer_identity_rejects_resealed_payload() {
+        let mut packet = packet();
+        if let BufferPayload::F32(values) = &mut packet.body.terrain.heights_m.payload {
+            values[0] = 1.0;
+        }
+        assert!(validate_scene_packet(&packet).is_err());
+    }
+
+    #[test]
+    fn pass_receipt_requires_capture_bytes() {
+        let body = GraphicsFrameReceiptBody {
+            schema_version: FRAME_RECEIPT_SCHEMA.into(),
+            packet_sha256: sha256_prefixed(b"packet"),
+            capture_id: "capture".into(),
+            backend_id: "wge.lava".into(),
+            status: FrameStatus::Passed,
+            format: CaptureFormat::Rgba8Srgb,
+            width_px: 2,
+            height_px: 2,
+            capture_sha256: Some(sha256_prefixed(b"frame")),
+            measurements: GraphicsFrameMeasurements {
+                terrain_luminance_stddev: 4.0,
+                distinct_terrain_colors: 3,
+                route_visible_pixels: 2,
+                player_spawn_visible_pixels: 2,
+                opponent_spawn_visible_pixels: 2,
+                encounter_visible_pixels: 2,
+                objective_visible_pixels: 2,
+            },
+            telemetry: GraphicsTelemetry {
+                upload_bytes: 1,
+                readback_bytes: 1,
+                draw_calls: 1,
+                dispatch_calls: 0,
+                pipeline_compilations: 1,
+                frame_time_us: 1,
+            },
+            detail: "measured".into(),
+        };
+        let receipt = GraphicsFrameReceipt {
+            receipt_sha256: sha256_prefixed(&canonical_json(&body).expect("body JSON")),
+            body,
+        };
+        assert!(validate_frame_receipt(&receipt, &[]).is_err());
+        validate_frame_receipt(&receipt, b"frame").expect("matching capture validates");
+    }
+}
