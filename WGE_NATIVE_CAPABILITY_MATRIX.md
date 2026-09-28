@@ -18,6 +18,7 @@ complete for a commercial game.
 | Terrain geometry | green | Rust-owned world heightfield lowered to deterministic GPU mesh |
 | Opaque mesh materials | partial | Bounded albedo, metallic, roughness, Cook–Torrance-style response, and role-sampled surface maps; richer graph semantics remain |
 | Normal/roughness/occlusion/emissive material roles | green | Rust/Julia role-typed IDs, color-space validation, digest-bound procedural maps, and Lava descriptor bindings |
+| Independent material profiles | green | Riverwatch lowers distinct terrain, stone, and foliage albedo identities; each mesh batch resolves its own typed descriptor set |
 | Directional lighting | green | Typed light intent and Lava shader lowering |
 | Analytic environment lighting | green | Typed sky-top, horizon, ground, fog, and exposure intent |
 | HDR scene target and resolve | green | Linear HDR target, deterministic 2x resolve, tone mapping at final boundary |

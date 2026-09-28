@@ -61,6 +61,26 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
             wge_native_graphics_contract::InstanceImportance::Background
         )
     }));
+    let terrain_albedo = packet
+        .body
+        .materials
+        .iter()
+        .find(|material| material.material_id == "terrain-default")
+        .expect("terrain material exists")
+        .texture_ids
+        .first()
+        .expect("terrain albedo exists");
+    let obstacle_albedo = packet
+        .body
+        .materials
+        .iter()
+        .find(|material| material.material_id == "obstacle-default")
+        .expect("obstacle material exists")
+        .texture_ids
+        .first()
+        .expect("obstacle albedo exists");
+    assert_ne!(terrain_albedo, obstacle_albedo);
+    assert!(packet.body.textures.len() >= 7);
     validate_scene_packet(&packet).expect("lowered packet validates");
     assert_eq!(packet.body.terrain.resolution, 49);
     assert_eq!(packet.body.capture.width_px, 320);

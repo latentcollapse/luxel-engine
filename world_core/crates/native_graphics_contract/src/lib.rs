@@ -1222,7 +1222,12 @@ fn procedural_texture(
     }
 }
 
-fn procedural_albedo_texture() -> TextureReference {
+fn procedural_material_albedo_texture(
+    texture_id: &str,
+    source_artifact_id: &str,
+    base: [u8; 3],
+    accent: [u8; 3],
+) -> TextureReference {
     let width = 8;
     let height = 8;
     let mut bytes = Vec::with_capacity(width * height * 4);
@@ -1231,20 +1236,57 @@ fn procedural_albedo_texture() -> TextureReference {
             let grain = ((row * 13 + column * 29 + row * column * 7) % 24) as u8;
             let vein = (row + 2 * column) % 7 == 0;
             let color = if vein {
-                [112 + grain / 2, 100 + grain / 2, 76 + grain / 3, 255]
+                [
+                    accent[0].saturating_add(grain / 2),
+                    accent[1].saturating_add(grain / 2),
+                    accent[2].saturating_add(grain / 3),
+                    255,
+                ]
             } else {
-                [142 + grain, 126 + grain / 2, 94 + grain / 3, 255]
+                [
+                    base[0].saturating_add(grain),
+                    base[1].saturating_add(grain / 2),
+                    base[2].saturating_add(grain / 3),
+                    255,
+                ]
             };
             bytes.extend(color);
         }
     }
     procedural_texture(
-        "riverwatch-albedo",
-        "procedural-riverwatch-albedo-v2",
+        texture_id,
+        source_artifact_id,
         TextureColorSpace::Srgb,
         width as u32,
         height as u32,
         bytes,
+    )
+}
+
+fn procedural_terrain_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "riverwatch-terrain-albedo",
+        "procedural-riverwatch-terrain-albedo-v1",
+        [142, 126, 94],
+        [112, 100, 76],
+    )
+}
+
+fn procedural_stone_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "riverwatch-stone-albedo",
+        "procedural-riverwatch-stone-albedo-v1",
+        [128, 128, 124],
+        [72, 73, 70],
+    )
+}
+
+fn procedural_foliage_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "riverwatch-foliage-albedo",
+        "procedural-riverwatch-foliage-albedo-v1",
+        [50, 104, 28],
+        [18, 53, 14],
     )
 }
 
@@ -1367,7 +1409,9 @@ pub fn lower_reference_world(
     };
 
     let mut overlays = Vec::new();
-    let albedo_texture = procedural_albedo_texture();
+    let terrain_albedo_texture = procedural_terrain_albedo_texture();
+    let stone_albedo_texture = procedural_stone_albedo_texture();
+    let foliage_albedo_texture = procedural_foliage_albedo_texture();
     let normal_texture = procedural_normal_texture();
     let roughness_texture = procedural_roughness_texture();
     let occlusion_texture = procedural_occlusion_texture();
@@ -1382,7 +1426,7 @@ pub fn lower_reference_world(
         metallic: 0.0,
         roughness: 0.92,
         alpha_mode: AlphaMode::Opaque,
-        texture_ids: vec![albedo_texture.texture_id.clone()],
+        texture_ids: vec![terrain_albedo_texture.texture_id.clone()],
         normal_texture_id: normal_texture_id.clone(),
         roughness_texture_id: roughness_texture_id.clone(),
         occlusion_texture_id: occlusion_texture_id.clone(),
@@ -1400,7 +1444,7 @@ pub fn lower_reference_world(
             metallic: 0.35,
             roughness: 0.78,
             alpha_mode: AlphaMode::Opaque,
-            texture_ids: vec![albedo_texture.texture_id.clone()],
+            texture_ids: vec![stone_albedo_texture.texture_id.clone()],
             normal_texture_id: normal_texture_id.clone(),
             roughness_texture_id: roughness_texture_id.clone(),
             occlusion_texture_id: occlusion_texture_id.clone(),
@@ -1442,7 +1486,7 @@ pub fn lower_reference_world(
             metallic: 0.0,
             roughness: 0.88,
             alpha_mode: AlphaMode::Opaque,
-            texture_ids: vec![albedo_texture.texture_id.clone()],
+            texture_ids: vec![foliage_albedo_texture.texture_id.clone()],
             normal_texture_id: normal_texture_id.clone(),
             roughness_texture_id: roughness_texture_id.clone(),
             occlusion_texture_id: occlusion_texture_id.clone(),
@@ -1568,7 +1612,9 @@ pub fn lower_reference_world(
         },
         materials,
         textures: vec![
-            albedo_texture,
+            terrain_albedo_texture,
+            stone_albedo_texture,
+            foliage_albedo_texture,
             normal_texture,
             roughness_texture,
             occlusion_texture,

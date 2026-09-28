@@ -270,8 +270,8 @@ independently recomputed visual measurements before promoting a receipt.
 
 The supported scene profile is intentionally fail-closed while quality systems
 are being built: the Lava adapter accepts one directional light, opaque
-material intents with shared, content-addressed inline RGBA8 albedo, normal,
-roughness, occlusion, and emissive roles, orthographic and perspective native
+material intents with role-specific, content-addressed inline RGBA8 albedo,
+normal, roughness, occlusion, and emissive roles, orthographic and perspective native
 terrain projections, and typed sky/horizon/ground/fog/exposure intent. Instances also carry closed
 `background`, `landmark`, or `gameplay_critical` importance, which controls a
 typed culling margin and is independently balanced in the promoted telemetry.

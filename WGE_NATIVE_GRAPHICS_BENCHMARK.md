@@ -13,7 +13,7 @@ intentionally not part of this checkpoint.
   `11c7e31bdf62408d22bf379e9e59510f69d2103e`, Vulkan offscreen rendering.
 - Rust authority: `wge-native-graphics-contract` and the reference runtime.
 - World: `riverwatch.layout.json`, lowered to graphics packet
-  `wge.graphics-scene-packet/v3`.
+  `wge.graphics-scene-packet/v4`.
 - Native packet contents: deterministic terrain, one gameplay-critical
   obstacle instance in the Riverwatch fixture, thirty background foliage
   instances, route/spawn/
@@ -32,9 +32,9 @@ intentionally not part of this checkpoint.
 | --- | ---: | ---: | --- | --- |
 | Reference-runtime `build` | 3.49 s | 383,604 KiB | passed | 78 traversal steps; gameplay won; visual gate passed |
 | Reference-runtime `verify` | 0.75 s | — | passed | independently revalidated world, traversal, gameplay, and visual evidence hashes |
-| Native Lava `render-layout` (cold CLI) | 105.43 s | 1,902,468 KiB | passed | Rust lowered, supervised, rendered, measured, and promoted the v4 receipt |
-| Persistent Lava worker, first frame | 53.178 s frame time | 1,939,764 KiB process | passed | lazy device/pipeline/scene initialization |
-| Persistent Lava worker, second frame | 23.103 ms frame time | same process | passed | byte-identical capture digest; seven pipelines, no new compilation |
+| Native Lava `render-layout` (cold CLI) | 105.97 s | 1,905,076 KiB | passed | Rust lowered, supervised, rendered, measured, and promoted the v4 receipt |
+| Persistent Lava worker, first frame | 55.049 s frame time | 1,927,676 KiB process | passed | lazy device/pipeline/scene initialization |
+| Persistent Lava worker, second frame | 20.285 ms frame time | same process | passed | byte-identical capture digest; seven pipelines, no new compilation |
 | Bevy native inspection capture (cold) | 155.52 s | 6,104,240 KiB | provenance passed | artifact revalidated; visual representation remains coarse and is not used as Lava parity evidence |
 
 The persistent-worker values are deliberately separated from the cold CLI
@@ -44,17 +44,17 @@ deployment/startup measurement, not a steady-state frame-time claim.
 
 The warm replay produced the same capture digest on both frames:
 
-`sha256:d76481b4383bf21bb7da67f13940c4f27c3241de8793e5dd8f8117cf4d1a8ed4`
+`sha256:bc02eb81b7ef47d8cd2e7fe354346dbe3bc979ffe851861432e135485f8e0e5c`
 
 The native Rust receipt for the promoted Riverwatch frame reported:
 
 - 31 instances: 30 background, 1 gameplay-critical in the current Riverwatch
   fixture after deterministic foliage placement;
-- 13 draw calls, 10 pipeline compilations, 36,297 uploaded bytes, and 308,224
+- 13 draw calls, 10 pipeline compilations, 41,065 uploaded bytes, and 308,224
   readback bytes;
 - 31 visible and 0 culled instances for this camera;
 - terrain vertex count 13,824 and mesh vertex count 48;
-- visual measurements: luminance standard deviation `0.0822096961`, 2,628
+- visual measurements: luminance standard deviation `0.0822154355`, 2,631
   distinct colors, route pixels 290, player pixels 7, opponent pixels 6,
   encounter pixels 69, objective pixels 7.
 

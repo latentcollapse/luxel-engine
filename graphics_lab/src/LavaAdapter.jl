@@ -47,6 +47,7 @@ struct OverlayResources
 end
 
 struct MeshBatchResources
+    material_id::String
     positions::Lava.LavaArray{Vec4f,1}
     normals::Lava.LavaArray{Vec4f,1}
     translations::Lava.LavaArray{Vec4f,1}
@@ -88,6 +89,7 @@ end
 
 struct MaterialTextureResources
     packet_sha256::String
+    material_id::String
     albedo_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
     normal_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
     roughness_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
@@ -155,7 +157,7 @@ mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
     shadow_resources::Union{Nothing,ShadowResources}
     resolve_resources::Union{Nothing,ResolveResources}
     texture_resources::Union{Nothing,TextureProbeResources}
-    material_texture_resources::Union{Nothing,MaterialTextureResources}
+    material_texture_resources::Dict{String,MaterialTextureResources}
     upload_bytes::UInt64
     draw_calls::UInt64
     readback_bytes::UInt64
@@ -1125,7 +1127,7 @@ function backend()::LavaBackend
             nothing,
             nothing,
             nothing,
-            nothing,
+            Dict{String,MaterialTextureResources}(),
             UInt64(0),
             UInt64(0),
             UInt64(0),
@@ -1439,31 +1441,6 @@ _material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:roughness}) = 
 _material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:occlusion}) = material.occlusion_texture_id
 _material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:emissive}) = material.emissive_texture_id
 
-function _shared_material_texture_id(
-    packet::WGEGraphics.GraphicsScenePacket,
-    role::Val,
-)::Union{Nothing,String}
-    ids = Set{String}()
-    for material in packet.materials
-        texture_id = _material_texture_id(material, role)
-        texture_id === nothing || push!(ids, texture_id)
-    end
-    length(ids) <= 1 ||
-        throw(AdapterError(
-            "unsupported_material",
-            "native path requires one shared $(typeof(role).parameters[1]) texture profile",
-        ))
-    shared = isempty(ids) ? nothing : only(ids)
-    for material in packet.materials
-        _material_texture_id(material, role) == shared ||
-            throw(AdapterError(
-                "unsupported_material",
-                "native path requires every material to use the same $(typeof(role).parameters[1]) texture profile",
-            ))
-    end
-    return shared
-end
-
 function _default_texture_payload(::Val{:albedo})
     return (bytes=UInt8[255, 255, 255, 255], width=UInt32(1), height=UInt32(1), color_space=:linear)
 end
@@ -1527,9 +1504,13 @@ function _material_texture_resources!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
     shadow::ShadowResources,
+    material::WGEGraphics.MaterialPacket,
 )
-    current = state.material_texture_resources
-    current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
+    cache = state.material_texture_resources
+    if any(resource -> resource.packet_sha256 != packet.packet_sha256, values(cache))
+        empty!(cache)
+    end
+    haskey(cache, material.material_id) && return cache[material.material_id]
     roles = (
         Val{:albedo}(),
         Val{:normal}(),
@@ -1537,7 +1518,10 @@ function _material_texture_resources!(
         Val{:occlusion}(),
         Val{:emissive}(),
     )
-    payloads = map(role -> _texture_payload(packet, _shared_material_texture_id(packet, role), role), roles)
+    payloads = map(
+        role -> _texture_payload(packet, _material_texture_id(material, role), role),
+        roles,
+    )
     matrices = map(
         payload -> _texture_matrix(payload.bytes, payload.width, payload.height, payload.color_space),
         payloads,
@@ -1554,6 +1538,7 @@ function _material_texture_resources!(
     ])
     created = MaterialTextureResources(
         packet.packet_sha256,
+        material.material_id,
         textures[1],
         textures[2],
         textures[3],
@@ -1562,7 +1547,7 @@ function _material_texture_resources!(
         sampler,
         bindings,
     )
-    state.material_texture_resources = created
+    cache[material.material_id] = created
     state.upload_bytes += UInt64(sum(length(payload.bytes) for payload in payloads))
     return created
 end
@@ -2076,6 +2061,7 @@ function _mesh_resources!(
         push!(
             batches,
             MeshBatchResources(
+                material.material_id,
                 gpu_positions,
                 gpu_normals,
                 gpu_translations,
@@ -2295,7 +2281,7 @@ function render_scene(
     lighting = _lighting(packet)
     resources = _terrain_resources!(state, packet)
     shadow_resources = _shadow_resources!(state, packet, lighting)
-    texture_resources = _material_texture_resources!(state, packet, shadow_resources)
+    texture_resources = _material_texture_resources!(state, packet, shadow_resources, material)
     visibility = _mesh_visibility(packet, camera_frame)
     mesh_resources = _mesh_resources!(state, packet, camera_frame, visibility)
     overlay_resources = _overlay_resources!(state, packet, camera_frame)
@@ -2374,6 +2360,14 @@ function render_scene(
     end
     if mesh_resources !== nothing
         for batch in mesh_resources.batches
+            batch_material = _material(packet, batch.material_id)
+            batch_texture_resources = _material_texture_resources!(
+                state,
+                packet,
+                shadow_resources,
+                batch_material,
+            )
+            batch_texture_enabled = _material_texture_enabled(batch_material)
             draw!(
                 state.queue,
                 state.mesh_pipeline,
@@ -2409,11 +2403,11 @@ function render_scene(
                     Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
                     packet.environment.fog_density,
                     packet.environment.exposure,
-                    texture_enabled,
+                    batch_texture_enabled,
                 ),
                 instances=batch.instance_count,
-                descriptor_set_layout=texture_resources.bindings.layout,
-                descriptor_set=texture_resources.bindings.set,
+                descriptor_set_layout=batch_texture_resources.bindings.layout,
+                descriptor_set=batch_texture_resources.bindings.set,
                 clear_color=nothing,
                 depth_clear=nothing,
             )
