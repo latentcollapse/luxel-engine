@@ -1055,6 +1055,104 @@ fn obstacle_mesh() -> MeshPacket {
     }
 }
 
+fn foliage_mesh() -> MeshPacket {
+    let mut positions = Vec::with_capacity(8);
+    let mut normals = Vec::with_capacity(8);
+    let mut indices = Vec::with_capacity(12);
+    append_mesh_face(
+        &mut positions,
+        &mut normals,
+        &mut indices,
+        [
+            [-0.55, 0.0, 0.0],
+            [0.55, 0.0, 0.0],
+            [0.55, 1.8, 0.0],
+            [-0.55, 1.8, 0.0],
+        ],
+        [0.0, 0.0, 1.0],
+    );
+    append_mesh_face(
+        &mut positions,
+        &mut normals,
+        &mut indices,
+        [
+            [0.0, 0.0, -0.55],
+            [0.0, 0.0, 0.55],
+            [0.0, 1.8, 0.55],
+            [0.0, 1.8, -0.55],
+        ],
+        [1.0, 0.0, 0.0],
+    );
+    MeshPacket {
+        mesh_id: "foliage-cross".into(),
+        positions_m: positions,
+        normals,
+        indices,
+        material_id: "foliage-default".into(),
+    }
+}
+
+fn deterministic_foliage_instances(
+    world: &WorldArtifact,
+) -> Result<Vec<InstancePacket>, GraphicsContractError> {
+    let layout = &world.body.authored_layout;
+    let resolution = world.body.fields.resolution;
+    let mut instances = Vec::new();
+    for row in 0..5 {
+        for column in 0..7 {
+            let slot = row * 7 + column;
+            let x = -layout.width_m * 0.42 + (column as f64 + 0.5) * layout.width_m * 0.84 / 7.0;
+            let z = layout.length_m * 0.38 - (row as f64 + 0.5) * layout.length_m * 0.76 / 5.0;
+            let cell = nearest_cell(layout.width_m, layout.length_m, resolution, [x, z]);
+            if world.body.fields.region_codes[cell] != 0 {
+                continue;
+            }
+            let route_clear = world.body.navigation.route_cells.iter().all(|route_cell| {
+                let [route_x, route_z] =
+                    cell_position(layout.width_m, layout.length_m, resolution, *route_cell);
+                let dx = route_x - x;
+                let dz = route_z - z;
+                dx * dx + dz * dz > 16.0
+            });
+            if !route_clear {
+                continue;
+            }
+            let obstacle_clear = layout.obstacles.iter().all(|obstacle| {
+                let dx = obstacle.center_xz_m[0] - x;
+                let dz = obstacle.center_xz_m[1] - z;
+                dx * dx + dz * dz > (obstacle.radius_m + 1.5).powi(2)
+            });
+            if !obstacle_clear {
+                continue;
+            }
+            let phase = (layout.seed.wrapping_add((slot as u64).wrapping_mul(37)) % 360) as f32
+                * std::f32::consts::PI
+                / 180.0;
+            let height_scale = 0.85 + ((slot * 17) % 5) as f32 * 0.12;
+            instances.push(InstancePacket {
+                instance_id: format!("foliage-{slot:02}"),
+                mesh_id: "foliage-cross".into(),
+                material_id: "foliage-default".into(),
+                importance: InstanceImportance::Background,
+                transform: Transform3d {
+                    translation_xyz_m: [
+                        finite_f32(x, "foliage x")?,
+                        finite_f32(world.body.fields.heights_m[cell], "foliage height")?,
+                        finite_f32(z, "foliage z")?,
+                    ],
+                    rotation_xyzw: [0.0, (phase * 0.5).sin(), 0.0, (phase * 0.5).cos()],
+                    scale_xyz: [
+                        0.8 + height_scale * 0.15,
+                        height_scale,
+                        0.8 + height_scale * 0.15,
+                    ],
+                },
+            });
+        }
+    }
+    Ok(instances)
+}
+
 fn append_mesh_face(
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
@@ -1171,6 +1269,19 @@ pub fn lower_reference_world(
                 },
             });
         }
+    }
+    let foliage_instances = deterministic_foliage_instances(world)?;
+    if !foliage_instances.is_empty() {
+        materials.push(MaterialIntent {
+            material_id: "foliage-default".into(),
+            base_color_rgba: [0.16, 0.34, 0.10, 1.0],
+            metallic: 0.0,
+            roughness: 0.88,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![albedo_texture.texture_id.clone()],
+        });
+        meshes.push(foliage_mesh());
+        instances.extend(foliage_instances);
     }
     let route_points = world
         .body

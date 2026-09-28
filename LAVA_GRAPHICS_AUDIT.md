@@ -79,7 +79,7 @@ our own reproducible probes and Rust-owned receipts.
 | Raster state | depth, blending, culling, topology, attachments, viewport/scissor-related state | EXISTS UPSTREAM | Sufficient primitives for a first forward/deferred experiment; WGE render intent is missing. |
 | PBR/material graph | WGE now has a narrow typed opaque material intent with bounded metallic/roughness response, one content-addressed albedo role, and a Cook–Torrance-style Lava lowering; it is not a complete production graph | PARTIAL | Keep the bounded material contract canonical while adding normal/roughness/occlusion/emissive roles and richer graph semantics behind independent evidence. Do not make Hikari’s scene representation canonical. |
 | Lights, shadows, IBL, HDR, AA, fog | typed directional-light/environment intent, orientation-aware analytic sky/horizon/ground lighting, one deterministic directional shadow map, a linear-HDR scene target with 2× spatial resolve, and tone-mapped fog now exist in the native adapter | PARTIAL | Keep the fixed shadow/resolve profile behind the authority boundary; cascades/contact shadows, prefiltered image-based lighting, HDR history, temporal AA, and richer atmosphere remain quality-gap work. |
-| Terrain, foliage, decals, particles, water, post-processing | no WGE/game-level implementation in Lava | MISSING | These are downstream renderer systems, not upstream Lava features. Start with terrain plus instancing and a measurable capture path. |
+| Terrain, foliage, decals, particles, water, post-processing | certified terrain now renders with deterministic opaque background foliage cross-mesh instances and Rust-checked instancing; decals, particles, water, and broad post-processing remain absent | PARTIAL | Keep the bounded foliage proof behind typed semantic importance and telemetry; add density/alpha/LOD/ecology systems only with their own evidence. |
 | GPU scene, culling, LOD, meshlets, streaming | Lava-backed instanced batches now consume closed WGE importance hints (`background`, `landmark`, `gameplay_critical`), use typed culling margins, and report per-class visibility/culling totals; LOD/meshlets/residency/streaming remain absent | PARTIAL | Keep semantic visibility and capture priorities Rust-owned; add LOD/residency only through the same typed packet and independently balanced telemetry. |
 | BLAS/TLAS and hardware RT | `HardwareAccel`, HWTLAS, BLAS/TLAS update/refit paths, RT shader pipeline, Raycore compatibility | EXISTS UPSTREAM | Optional capability lane, fail-closed; not a prerequisite for the first certified raster vertical slice. |
 | Hikari/Raycore integration | Raycore source entry and Hikari-oriented integration/tests/examples | EXISTS UPSTREAM | Evidence that RT is viable, not evidence that a WGE gameplay renderer exists. Keep it behind an optional adapter. |
@@ -322,7 +322,8 @@ worker script digest, and a digest of the validated capability/worker identity.
 The inspected `render-layout` capture is deliberately recorded as a quality
 gap, not a success-by-appearance claim: it is a coarse height/slope terrain
 diagnostic with line-based semantic overlays and one fixed 512² directional
-shadow map. Cascades, contact/soft shadows, prefiltered IBL, foliage, particle, water,
+shadow map. Cascades, contact/soft shadows, prefiltered IBL, production foliage density/alpha/LOD,
+particle, water,
 post-processing, and asset-rich quality work remain downstream of this
 certified substrate. No rigging, Unity, Bevy canonicalization, or broad
 text-to-3D work was used to close this checkpoint.

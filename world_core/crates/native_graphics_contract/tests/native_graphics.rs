@@ -46,11 +46,21 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
     let build = build_from_layout_path(&input, &julia_executable(), &terrain_lab)
         .expect("reference world builds");
     let packet = lower_reference_world(&build.world).expect("world lowers to graphics packet");
-    assert_eq!(packet.body.meshes.len(), 1);
-    assert_eq!(
-        packet.body.instances.len(),
-        build.world.body.authored_layout.obstacles.len()
+    assert!(packet.body.meshes.len() >= 2);
+    assert!(
+        packet
+            .body
+            .meshes
+            .iter()
+            .any(|mesh| mesh.mesh_id == "foliage-cross")
     );
+    assert!(packet.body.instances.len() > build.world.body.authored_layout.obstacles.len());
+    assert!(packet.body.instances.iter().any(|instance| {
+        matches!(
+            instance.importance,
+            wge_native_graphics_contract::InstanceImportance::Background
+        )
+    }));
     validate_scene_packet(&packet).expect("lowered packet validates");
     assert_eq!(packet.body.terrain.resolution, 49);
     assert_eq!(packet.body.capture.width_px, 320);
@@ -185,12 +195,11 @@ fn rust_packet_renders_through_the_pinned_lava_worker() {
     duplicate.instance_id = "obstacle-duplicate".into();
     duplicate.transform.translation_xyz_m[0] += 2.0;
     body.instances.push(duplicate);
-    let base_mesh_vertex_count = body
+    let expected_mesh_vertex_count = body
         .meshes
-        .first()
-        .expect("reference scene has a mesh")
-        .indices
-        .len() as u64;
+        .iter()
+        .map(|mesh| mesh.indices.len() as u64)
+        .sum::<u64>();
     let packet = seal_scene_packet(body).expect("instanced packet seals");
     let mut perspective_body = packet.body.clone();
     perspective_body.camera.projection = CameraProjection::Perspective {
@@ -290,7 +299,17 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
         frame["telemetry"]["gameplay_critical_visible_instance_count"]
             .as_u64()
             .unwrap(),
-        packet.body.instances.len() as u64
+        packet
+            .body
+            .instances
+            .iter()
+            .filter(|instance| {
+                matches!(
+                    instance.importance,
+                    wge_native_graphics_contract::InstanceImportance::GameplayCritical
+                )
+            })
+            .count() as u64
     );
     assert_eq!(
         frame["telemetry"]["gameplay_critical_culled_instance_count"]
@@ -302,7 +321,17 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
         frame["telemetry"]["background_visible_instance_count"]
             .as_u64()
             .unwrap(),
-        0
+        packet
+            .body
+            .instances
+            .iter()
+            .filter(|instance| {
+                matches!(
+                    instance.importance,
+                    wge_native_graphics_contract::InstanceImportance::Background
+                )
+            })
+            .count() as u64
     );
     assert_eq!(
         frame["telemetry"]["landmark_visible_instance_count"]
@@ -314,7 +343,7 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
     assert!(frame["telemetry"]["mesh_vertex_count"].as_u64().unwrap() > 0);
     assert_eq!(
         frame["telemetry"]["mesh_vertex_count"].as_u64().unwrap(),
-        base_mesh_vertex_count
+        expected_mesh_vertex_count
     );
     let perspective_frame = &frames["perspective"];
     assert_eq!(perspective_frame["schema"], "wge.lava-frame/v1");

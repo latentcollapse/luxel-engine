@@ -148,18 +148,21 @@ The first native frame is intentionally bounded:
 1. certified terrain heightfield and semantic region colors/material layers;
 2. deterministic terrain mesh and normals;
 3. one canonical terrain material family with explicit color space;
-4. certified route, player/opponent spawn, encounter, and objective markers;
-5. fixed camera, linear-HDR offscreen scene target, deterministic 2× spatial
+4. deterministic opaque background foliage cross-mesh instances using the
+   semantic-importance/culling path;
+5. certified route, player/opponent spawn, encounter, and objective markers;
+6. fixed camera, linear-HDR offscreen scene target, deterministic 2× spatial
    resolve, and final color/depth evidence target;
-6. one directional light plus typed sky/horizon/ground environment intent,
+7. one directional light plus typed sky/horizon/ground environment intent,
    orientation-aware analytic environment lighting, deterministic directional
    shadow map, and depth-tested opaque raster path;
-7. capture, readback, Rust measurement, and repeatability evidence.
+8. capture, readback, Rust measurement, and repeatability evidence.
 
 This proves the entire authority and process path without pretending that a
 single triangle is an Elden Ring renderer. PBR breadth beyond the bounded
-material path, shadow quality beyond one fixed directional map, IBL, temporal
-techniques beyond the deterministic spatial resolve, foliage, particles, water,
+material path, shadow quality beyond one fixed directional map, prefiltered IBL,
+temporal techniques beyond the deterministic spatial resolve, production foliage
+systems beyond the opaque diagnostic cross-mesh, particles, water,
 post-processing, and optional RT come only after this path has real evidence and
 a quality-gap report.
 
@@ -289,7 +292,7 @@ exact. Cascades, contact refinement, soft shadows, prefiltered IBL, temporal AA,
 and many-light shadow budgets remain quality gaps. This keeps
 the packet extensible
 without silently rendering less than the model requested; prefiltered
-environment maps, texture-role breadth, and richer material graphs remain
+environment maps, richer foliage/material texture roles, and richer material graphs remain
 explicit quality-gap work.
 
 The supervised integration test also restarts Julia and proves the same packet
@@ -313,7 +316,8 @@ terrain shading derives finite-difference normals from the certified height
 field and uses slope/region tinting, overlays are line primitives, and the
 shadow profile is one fixed directional map with four-tap percentage-closer
 sampling followed by a deterministic spatial HDR resolve. Cascades,
-contact/soft shadows, prefiltered IBL, temporal AA, foliage, particles, post-processing,
+contact/soft shadows, prefiltered IBL, production foliage density/alpha/LOD,
+particles, post-processing,
 and Elden-Ring-level visual quality remain quality-gap work
 behind this native authority boundary, not reasons to weaken the current
 evidence gate.
