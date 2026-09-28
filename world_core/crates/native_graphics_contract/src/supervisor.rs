@@ -43,6 +43,13 @@ impl GraphicsWorkerError {
         }
     }
 
+    fn restart_required(message: impl Into<String>) -> Self {
+        Self {
+            code: "worker_restart_required",
+            message: message.into(),
+        }
+    }
+
     fn protocol(message: impl Into<String>) -> Self {
         Self {
             code: "worker_protocol",
@@ -103,6 +110,7 @@ pub struct GraphicsWorkerSupervisor {
     responses: Receiver<Result<Vec<u8>, String>>,
     reader: Option<JoinHandle<()>>,
     response_timeout: Duration,
+    restart_required: bool,
     ready_message: Value,
     ready: Option<GraphicsReady>,
     julia: PathBuf,
@@ -177,6 +185,7 @@ impl GraphicsWorkerSupervisor {
             responses,
             reader: Some(reader),
             response_timeout,
+            restart_required: false,
             ready_message: Value::Null,
             ready: None,
             julia,
@@ -353,13 +362,24 @@ impl GraphicsWorkerSupervisor {
     }
 
     pub fn request(&mut self, request: Value) -> Result<Value, GraphicsWorkerError> {
+        if self.restart_required {
+            return Err(GraphicsWorkerError::restart_required(
+                "worker transport is invalid; restart the graphics worker before issuing another request",
+            ));
+        }
         let payload = serde_json::to_vec(&request).map_err(|error| {
             GraphicsWorkerError::protocol(format!("request JSON serialization failed: {error}"))
         })?;
         self.write_frame(&payload)?;
-        let response = self.read_frame_json().inspect_err(|_error| {
-            self.ready = None;
-        })?;
+        let response = match self.read_frame_json() {
+            Ok(response) => response,
+            Err(error) => {
+                self.ready = None;
+                self.restart_required = true;
+                self.stop_child();
+                return Err(error);
+            }
+        };
         if response.get("schema").and_then(Value::as_str) != Some(WORKER_SCHEMA) {
             return Err(GraphicsWorkerError::protocol(
                 "worker response schema is unsupported",

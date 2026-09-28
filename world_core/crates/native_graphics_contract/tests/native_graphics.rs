@@ -302,6 +302,10 @@ sleep(120.0)
         .expect_err("stalled worker must hit the response deadline");
     assert_eq!(error.code, "worker_timeout");
     assert!(supervisor.ready().is_none());
+    let reuse_error = supervisor
+        .request(serde_json::json!({"op": "probe_capabilities"}))
+        .expect_err("timed-out worker transport must be fenced");
+    assert_eq!(reuse_error.code, "worker_restart_required");
 
     supervisor
         .restart()
