@@ -15,12 +15,13 @@ use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artif
 pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v5";
 pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
 pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
-pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v2";
+pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v3";
 pub const LAVA_BACKEND_ID: &str = "lava-vulkan";
 pub const LAVA_REVISION: &str = "11c7e31bdf62408d22bf379e9e59510f69d2103e";
 pub const MAX_PACKET_ELEMENTS: usize = 16 * 1024 * 1024;
 pub const MAX_CAPTURE_DIMENSION: u32 = 8192;
 pub const MAX_CAPTURE_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_DENSE_BENCHMARK_INSTANCES: usize = 4096;
 const MAX_TELEMETRY_COUNTER: usize = 1 << 40;
 const MAX_FRAME_TIME_US: u64 = 60_000_000;
 const MIN_NATIVE_LUMINANCE_STDDEV: f64 = 0.01;
@@ -515,6 +516,25 @@ pub struct GraphicsTelemetry {
     pub frame_time_us: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu_frame_time_us: Option<u64>,
+    pub pass_timings: GraphicsPassTimings,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsPassTimings {
+    pub prepare_us: u64,
+    pub scene_raster_us: u64,
+    pub resolve_us: u64,
+    pub overlay_us: u64,
+    pub flush_readback_us: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_prepare_us: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_scene_raster_us: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_resolve_us: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_overlay_us: Option<u64>,
 }
 
 pub fn sha256_prefixed(bytes: &[u8]) -> String {
@@ -1902,6 +1922,96 @@ pub fn lower_objective_close_packet(
     seal_scene_packet(body)
 }
 
+/// Derive a deterministic, explicitly synthetic dense-scene packet for
+/// renderer scalability measurements. The added instances are not authored
+/// world content and must never be promoted as semantic evidence.
+pub fn lower_dense_benchmark_packet(
+    packet: &GraphicsScenePacket,
+    background_instance_count: usize,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    validate_scene_packet(packet)?;
+    if !(1..=MAX_DENSE_BENCHMARK_INSTANCES).contains(&background_instance_count) {
+        return Err(GraphicsContractError::malformed(format!(
+            "dense benchmark instance count must be between 1 and {MAX_DENSE_BENCHMARK_INSTANCES}"
+        )));
+    }
+    let has_foliage_mesh = packet
+        .body
+        .meshes
+        .iter()
+        .any(|mesh| mesh.mesh_id == "foliage-cross");
+    let has_foliage_material = packet
+        .body
+        .materials
+        .iter()
+        .any(|material| material.material_id == "foliage-default");
+    if !has_foliage_mesh || !has_foliage_material {
+        return Err(GraphicsContractError::provenance(
+            "dense benchmark requires the bounded foliage mesh/material profile",
+        ));
+    }
+    let heights = match &packet.body.terrain.heights_m.payload {
+        BufferPayload::F32(values) => values,
+        BufferPayload::U8(_) | BufferPayload::U32(_) => {
+            return Err(GraphicsContractError::unsupported(
+                "dense benchmark requires f32 terrain heights",
+            ));
+        }
+    };
+    let grid_width = (background_instance_count as f64).sqrt().ceil() as usize;
+    let grid_depth = background_instance_count.div_ceil(grid_width);
+    let mut body = packet.body.clone();
+    body.packet_id = format!("{}-dense-{background_instance_count}", body.packet_id);
+    body.capture.capture_id = format!(
+        "{}-dense-{background_instance_count}",
+        body.capture.capture_id
+    );
+    body.instances.reserve(background_instance_count);
+    for index in 0..background_instance_count {
+        let column = index % grid_width;
+        let row = index / grid_width;
+        let u = (column as f64 + 0.5) / grid_width as f64;
+        let v = (row as f64 + 0.5) / grid_depth as f64;
+        let x =
+            -0.42 * f64::from(body.terrain.width_m) + 0.84 * f64::from(body.terrain.width_m) * u;
+        let z =
+            -0.42 * f64::from(body.terrain.length_m) + 0.84 * f64::from(body.terrain.length_m) * v;
+        let cell = nearest_cell(
+            f64::from(body.terrain.width_m),
+            f64::from(body.terrain.length_m),
+            body.terrain.resolution,
+            [x, z],
+        );
+        let phase = (body
+            .frame_seed
+            .wrapping_add((index as u64).wrapping_mul(37))
+            % 360) as f32
+            * std::f32::consts::PI
+            / 180.0;
+        let height_scale = 0.75 + ((index * 17) % 7) as f32 * 0.08;
+        body.instances.push(InstancePacket {
+            instance_id: format!("benchmark-foliage-{index:04}"),
+            mesh_id: "foliage-cross".into(),
+            material_id: "foliage-default".into(),
+            importance: InstanceImportance::Background,
+            transform: Transform3d {
+                translation_xyz_m: [
+                    finite_f32(x, "dense benchmark x")?,
+                    finite_f32(f64::from(heights[cell]), "dense benchmark height")?,
+                    finite_f32(z, "dense benchmark z")?,
+                ],
+                rotation_xyzw: [0.0, (phase * 0.5).sin(), 0.0, (phase * 0.5).cos()],
+                scale_xyz: [
+                    0.8 + height_scale * 0.15,
+                    height_scale,
+                    0.8 + height_scale * 0.15,
+                ],
+            },
+        });
+    }
+    seal_scene_packet(body)
+}
+
 fn validate_coordinate_system(
     coordinate_system: &CoordinateSystem,
 ) -> Result<(), GraphicsContractError> {
@@ -2462,6 +2572,75 @@ fn validate_telemetry(telemetry: &GraphicsTelemetry) -> Result<(), GraphicsContr
             "telemetry GPU frame time exceeds the bounded limit",
         ));
     }
+    let cpu_pass_total = [
+        telemetry.pass_timings.prepare_us,
+        telemetry.pass_timings.scene_raster_us,
+        telemetry.pass_timings.resolve_us,
+        telemetry.pass_timings.overlay_us,
+        telemetry.pass_timings.flush_readback_us,
+    ]
+    .into_iter()
+    .try_fold(0u64, |total, value| total.checked_add(value))
+    .ok_or_else(|| GraphicsContractError::malformed("telemetry CPU pass timings overflow"))?;
+    if cpu_pass_total > telemetry.frame_time_us {
+        return Err(GraphicsContractError::provenance(
+            "telemetry CPU pass timings exceed total frame time",
+        ));
+    }
+    if let (Some(frame_time), Some(values)) = (
+        telemetry.gpu_frame_time_us,
+        [
+            telemetry.pass_timings.gpu_prepare_us,
+            telemetry.pass_timings.gpu_scene_raster_us,
+            telemetry.pass_timings.gpu_resolve_us,
+            telemetry.pass_timings.gpu_overlay_us,
+        ]
+        .into_iter()
+        .collect::<Option<Vec<_>>>(),
+    ) {
+        let gpu_pass_total = values
+            .into_iter()
+            .try_fold(0u64, |total, value| total.checked_add(value))
+            .ok_or_else(|| {
+                GraphicsContractError::malformed("telemetry GPU pass timings overflow")
+            })?;
+        if gpu_pass_total > frame_time.saturating_add(16) {
+            return Err(GraphicsContractError::provenance(
+                "telemetry GPU pass timings exceed total GPU frame time",
+            ));
+        }
+    }
+    for (value, label) in [
+        (telemetry.pass_timings.prepare_us, "prepare_us"),
+        (telemetry.pass_timings.scene_raster_us, "scene_raster_us"),
+        (telemetry.pass_timings.resolve_us, "resolve_us"),
+        (telemetry.pass_timings.overlay_us, "overlay_us"),
+        (
+            telemetry.pass_timings.flush_readback_us,
+            "flush_readback_us",
+        ),
+    ] {
+        if value > MAX_FRAME_TIME_US {
+            return Err(GraphicsContractError::malformed(format!(
+                "telemetry pass {label} exceeds the bounded limit"
+            )));
+        }
+    }
+    for (value, label) in [
+        (telemetry.pass_timings.gpu_prepare_us, "gpu_prepare_us"),
+        (
+            telemetry.pass_timings.gpu_scene_raster_us,
+            "gpu_scene_raster_us",
+        ),
+        (telemetry.pass_timings.gpu_resolve_us, "gpu_resolve_us"),
+        (telemetry.pass_timings.gpu_overlay_us, "gpu_overlay_us"),
+    ] {
+        if value.is_some_and(|value| value > MAX_FRAME_TIME_US) {
+            return Err(GraphicsContractError::malformed(format!(
+                "telemetry GPU pass {label} exceeds the bounded limit"
+            )));
+        }
+    }
     Ok(())
 }
 
@@ -2795,6 +2974,17 @@ mod tests {
                 mesh_vertex_count: 0,
                 frame_time_us: 1,
                 gpu_frame_time_us: None,
+                pass_timings: GraphicsPassTimings {
+                    prepare_us: 0,
+                    scene_raster_us: 0,
+                    resolve_us: 0,
+                    overlay_us: 0,
+                    flush_readback_us: 0,
+                    gpu_prepare_us: None,
+                    gpu_scene_raster_us: None,
+                    gpu_resolve_us: None,
+                    gpu_overlay_us: None,
+                },
             },
             detail: "measured".into(),
         };
@@ -2807,6 +2997,11 @@ mod tests {
         receipt.body.telemetry.frame_time_us = MAX_FRAME_TIME_US + 1;
         receipt.receipt_sha256 =
             sha256_prefixed(&canonical_json(&receipt.body).expect("tampered body JSON"));
+        assert!(validate_frame_receipt(&receipt, b"frame").is_err());
+        receipt.body.telemetry.frame_time_us = 10;
+        receipt.body.telemetry.pass_timings.prepare_us = 11;
+        receipt.receipt_sha256 =
+            sha256_prefixed(&canonical_json(&receipt.body).expect("tampered pass JSON"));
         assert!(validate_frame_receipt(&receipt, b"frame").is_err());
     }
 

@@ -30,16 +30,22 @@ visual bar.
    ecological placement model, impostor, LOD, streaming, or occlusion system.
 6. There are no native water, particle, decal, volumetric, post-processing,
    skeletal animation, or character-rendering paths.
-7. GPU scene scalability is unmeasured. There are no meshlets, GPU-driven
-   indirect draws, residency/streaming policy, occlusion hierarchy, or dense
-   scene stress benchmark.
+7. GPU scene scalability is now measured only for a synthetic instanced
+   foliage stress profile: 512 added background instances (544 total) remain
+   one bounded mesh batch, with 15 draw calls, 240 base mesh vertices, and a
+   warm GPU p50/p95 of 477/504 microseconds under pass-level instrumentation.
+   This does not establish authored-scene scalability, traversal-aware culling,
+   meshlets, GPU-driven indirect draws, residency/streaming policy, or an
+   occlusion hierarchy.
 8. Cold startup is currently expensive: the current cold CLI sample took
-   127.20 seconds and reached 1,933,720 KiB maximum RSS, including the
-   Rust/Cargo boundary. The formal 30-frame supervisor benchmark took 25.361
-   seconds for its cold wall sample. The warm distribution reached 301.552 ms
-   wall-time p95 and 61.933 ms adapter-frame p95. Its graphics-pass GPU interval
-   was 55 µs at p50, 57 µs at p95, and 213 µs at p99 for this 15-draw
-   diagnostic scene; this is not yet a dense-scene frame budget.
+   124.01 seconds and reached 1,722,324 KiB maximum RSS, including the
+   Rust/Cargo boundary. The current formal 30-frame supervisor benchmark took
+   26.960 seconds for its cold wall sample. The warm distribution reached
+   322.104 ms wall-time p95 and 61.962 ms adapter-frame p95 under the current
+   pass-instrumented adapter. Its graphics-pass GPU interval was 405 µs at p50,
+   619 µs at p95, and 928 µs at p99 for this 15-draw diagnostic scene. Named
+   pass timestamps add synchronization overhead, so this is not yet a
+   production or dense-scene frame budget.
 9. The native capture path renders a validated gameplay/world snapshot. The
    Rust reference runtime completes the 78-step traversal and wins gameplay,
    but Lava is not yet the renderer attached to a live native input/update
@@ -66,8 +72,9 @@ may promote them based on a world snapshot or a status-only receipt.
    asset/material packet with normal, occlusion, and emissive roles, then
    validate a textured close-range capture. The supplied bad GLB remains a
    rejection control and is not promoted by this step.
-2. Add a denser stress scene and per-pass GPU timing breakdown before
-   optimizing cold startup or choosing a frame budget.
+2. Replace the synthetic stress population with a denser authored scene or
+   camera-cut profile, and separate instrumented timing from uninstrumented
+   production timing before optimizing cold startup or choosing a frame budget.
 3. Exercise traversal-aware semantic culling with landmark and
    gameplay-critical visibility, camera cuts, and a stressable population.
 4. Add prefiltered IBL and higher-quality shadow strategy behind typed packet

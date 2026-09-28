@@ -6,11 +6,12 @@ use std::time::Instant;
 
 use serde::Serialize;
 use wge_native_graphics_contract::{
-    GraphicsWorkerSupervisor, lower_objective_close_packet, lower_reference_world,
+    GraphicsWorkerSupervisor, lower_dense_benchmark_packet, lower_objective_close_packet,
+    lower_reference_world,
 };
 use wge_reference_runtime::build_from_layout_path;
 
-const BENCHMARK_SCHEMA: &str = "wge.native-graphics-benchmark/v1";
+const BENCHMARK_SCHEMA: &str = "wge.native-graphics-benchmark/v2";
 const DEFAULT_WARM_FRAMES: usize = 30;
 const MAX_WARM_FRAMES: usize = 256;
 
@@ -24,6 +25,25 @@ struct BenchmarkSample {
     pipeline_compilations: usize,
     upload_bytes: usize,
     readback_bytes: usize,
+    visible_instance_count: usize,
+    culled_instance_count: usize,
+    background_visible_instance_count: usize,
+    background_culled_instance_count: usize,
+    mesh_vertex_count: usize,
+    pass_timings: BenchmarkPassTimings,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct BenchmarkPassTimings {
+    prepare_us: u64,
+    scene_raster_us: u64,
+    resolve_us: u64,
+    overlay_us: u64,
+    flush_readback_us: u64,
+    gpu_prepare_us: Option<u64>,
+    gpu_scene_raster_us: Option<u64>,
+    gpu_resolve_us: Option<u64>,
+    gpu_overlay_us: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -38,13 +58,29 @@ struct TimingSummary {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct BenchmarkPassSummary {
+    prepare_us: TimingSummary,
+    scene_raster_us: TimingSummary,
+    resolve_us: TimingSummary,
+    overlay_us: TimingSummary,
+    flush_readback_us: TimingSummary,
+    gpu_prepare_us: Option<TimingSummary>,
+    gpu_scene_raster_us: Option<TimingSummary>,
+    gpu_resolve_us: Option<TimingSummary>,
+    gpu_overlay_us: Option<TimingSummary>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct BenchmarkReport {
     schema: &'static str,
+    profile: &'static str,
+    instance_count: usize,
     packet_sha256: String,
     cold: BenchmarkSample,
     warm_wall_time: TimingSummary,
     warm_renderer_frame_time: TimingSummary,
     warm_gpu_frame_time: Option<TimingSummary>,
+    warm_pass_timings: BenchmarkPassSummary,
     warm_capture_sha256: String,
     deterministic_capture: bool,
 }
@@ -177,7 +213,8 @@ fn run() -> Result<(), String> {
             );
             Ok(())
         }
-        Some("benchmark-layout") => {
+        Some("benchmark-layout") | Some("benchmark-dense-layout") => {
+            let dense_profile = command.as_deref() == Some("benchmark-dense-layout");
             let layout = canonical_path(
                 PathBuf::from(
                     arguments
@@ -228,9 +265,24 @@ fn run() -> Result<(), String> {
                     "warm frame count must be between 1 and {MAX_WARM_FRAMES}"
                 ));
             }
+            let dense_background_instances = if dense_profile {
+                Some(
+                    arguments
+                        .next()
+                        .ok_or_else(|| {
+                            "benchmark-dense-layout requires DENSE_BACKGROUND_INSTANCES".to_owned()
+                        })?
+                        .parse::<usize>()
+                        .map_err(|error| {
+                            format!("dense background instance count is not an integer: {error}")
+                        })?,
+                )
+            } else {
+                None
+            };
             if arguments.next().is_some() {
                 return Err(
-                    "benchmark-layout accepts LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]"
+                    "benchmark command received unexpected trailing arguments"
                         .into(),
                 );
             }
@@ -238,6 +290,12 @@ fn run() -> Result<(), String> {
             let world = build_from_layout_path(&layout, &julia, &terrain_lab)
                 .map_err(|error| error.to_string())?;
             let packet = lower_reference_world(&world.world).map_err(|error| error.to_string())?;
+            let packet = if let Some(background_instance_count) = dense_background_instances {
+                lower_dense_benchmark_packet(&packet, background_instance_count)
+                    .map_err(|error| error.to_string())?
+            } else {
+                packet
+            };
             let mut supervisor = GraphicsWorkerSupervisor::start(&julia, &graphics_project, &worker)
                 .map_err(|error| error.to_string())?;
             supervisor.capabilities().map_err(|error| error.to_string())?;
@@ -257,6 +315,12 @@ fn run() -> Result<(), String> {
                 && warm_captures.iter().all(|capture| capture == &warm_capture_sha256);
             let report = BenchmarkReport {
                 schema: BENCHMARK_SCHEMA,
+                profile: if dense_profile {
+                    "synthetic-dense-foliage"
+                } else {
+                    "certified-overview"
+                },
+                instance_count: packet.body.instances.len(),
                 packet_sha256: packet.packet_sha256.clone(),
                 cold,
                 warm_wall_time: summarize(
@@ -272,6 +336,7 @@ fn run() -> Result<(), String> {
                         .collect::<Vec<_>>(),
                 )?,
                 warm_gpu_frame_time: summarize_optional_gpu_time(&warm_samples)?,
+                warm_pass_timings: summarize_pass_timings(&warm_samples)?,
                 warm_capture_sha256,
                 deterministic_capture,
             };
@@ -285,7 +350,7 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         _ => {
-            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]".into())
+            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]\n       wge-native-graphics-contract benchmark-dense-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES] DENSE_BACKGROUND_INSTANCES".into())
         }
     }
 }
@@ -308,6 +373,22 @@ fn measure_frame(
         pipeline_compilations: telemetry.pipeline_compilations,
         upload_bytes: telemetry.upload_bytes,
         readback_bytes: telemetry.readback_bytes,
+        visible_instance_count: telemetry.visible_instance_count,
+        culled_instance_count: telemetry.culled_instance_count,
+        background_visible_instance_count: telemetry.background_visible_instance_count,
+        background_culled_instance_count: telemetry.background_culled_instance_count,
+        mesh_vertex_count: telemetry.mesh_vertex_count,
+        pass_timings: BenchmarkPassTimings {
+            prepare_us: telemetry.pass_timings.prepare_us,
+            scene_raster_us: telemetry.pass_timings.scene_raster_us,
+            resolve_us: telemetry.pass_timings.resolve_us,
+            overlay_us: telemetry.pass_timings.overlay_us,
+            flush_readback_us: telemetry.pass_timings.flush_readback_us,
+            gpu_prepare_us: telemetry.pass_timings.gpu_prepare_us,
+            gpu_scene_raster_us: telemetry.pass_timings.gpu_scene_raster_us,
+            gpu_resolve_us: telemetry.pass_timings.gpu_resolve_us,
+            gpu_overlay_us: telemetry.pass_timings.gpu_overlay_us,
+        },
     };
     Ok((sample, promoted.frame.capture_sha256))
 }
@@ -344,6 +425,47 @@ fn summarize_optional_gpu_time(
         return Err("benchmark GPU timing was present for only some warm frames".into());
     }
     summarize(&values).map(Some)
+}
+
+fn summarize_pass_timings(samples: &[BenchmarkSample]) -> Result<BenchmarkPassSummary, String> {
+    let summarize_field = |field: fn(&BenchmarkPassTimings) -> u64| {
+        summarize(
+            &samples
+                .iter()
+                .map(|sample| field(&sample.pass_timings))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let summarize_optional_field = |field: fn(&BenchmarkPassTimings) -> Option<u64>| {
+        summarize_optional_values(
+            &samples
+                .iter()
+                .map(|sample| field(&sample.pass_timings))
+                .collect::<Vec<_>>(),
+        )
+    };
+    Ok(BenchmarkPassSummary {
+        prepare_us: summarize_field(|timings| timings.prepare_us)?,
+        scene_raster_us: summarize_field(|timings| timings.scene_raster_us)?,
+        resolve_us: summarize_field(|timings| timings.resolve_us)?,
+        overlay_us: summarize_field(|timings| timings.overlay_us)?,
+        flush_readback_us: summarize_field(|timings| timings.flush_readback_us)?,
+        gpu_prepare_us: summarize_optional_field(|timings| timings.gpu_prepare_us)?,
+        gpu_scene_raster_us: summarize_optional_field(|timings| timings.gpu_scene_raster_us)?,
+        gpu_resolve_us: summarize_optional_field(|timings| timings.gpu_resolve_us)?,
+        gpu_overlay_us: summarize_optional_field(|timings| timings.gpu_overlay_us)?,
+    })
+}
+
+fn summarize_optional_values(values: &[Option<u64>]) -> Result<Option<TimingSummary>, String> {
+    let present = values.iter().flatten().copied().collect::<Vec<_>>();
+    if present.is_empty() {
+        return Ok(None);
+    }
+    if present.len() != values.len() {
+        return Err("benchmark pass GPU timing was present for only some warm frames".to_owned());
+    }
+    summarize(&present).map(Some)
 }
 
 fn nearest_rank(sorted: &[u64], numerator: usize, denominator: usize) -> u64 {

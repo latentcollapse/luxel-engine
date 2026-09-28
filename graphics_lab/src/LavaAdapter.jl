@@ -18,7 +18,7 @@ export AdapterError,
     render_texture_probe,
     render_scene
 
-const ADAPTER_REVISION = "wge.lava-adapter/v2"
+const ADAPTER_REVISION = "wge.lava-adapter/v3"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 const VULKAN_REVISION = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"
 const VULKAN_CORE_REVISION = "1d02829e8fa92da430d879db4dd7bf564a872035"
@@ -1737,6 +1737,12 @@ function _transition_color_to_sampled!(state::LavaBackend, framebuffer::Lava.Lav
 end
 
 const GPU_FRAME_TIMING_LABEL = "wge.graphics.frame"
+const GPU_PASS_TIMING_LABELS = (
+    prepare="wge.graphics.pass.prepare",
+    scene_raster="wge.graphics.pass.scene-raster",
+    resolve="wge.graphics.pass.resolve",
+    overlay="wge.graphics.pass.overlay",
+)
 
 function _begin_gpu_frame_timing(state::LavaBackend)::Union{Nothing,Int}
     state.gpu_timestamp_supported || return nothing
@@ -1762,6 +1768,27 @@ function _begin_gpu_frame_timing(state::LavaBackend)::Union{Nothing,Int}
     end
 end
 
+function _begin_gpu_pass_timing(
+    state::LavaBackend,
+    label::AbstractString,
+)::Union{Nothing,Int}
+    state.gpu_timestamp_supported || return nothing
+    try
+        batch = Lava.ensure_active_batch!(state.queue)
+        slot = Lava.maybe_write_dispatch_start_timestamp!(
+            state.context,
+            batch.cmd_buf,
+            label;
+            stage=Vulkan.PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        )
+        slot < 0 && return nothing
+        return slot
+    catch
+        state.gpu_timestamp_supported = false
+        return nothing
+    end
+end
+
 function _end_gpu_frame_timing!(state::LavaBackend, ::Nothing)
     return nothing
 end
@@ -1783,22 +1810,64 @@ function _end_gpu_frame_timing!(state::LavaBackend, start_slot::Int)
     return nothing
 end
 
-function _read_gpu_frame_time_us(state::LavaBackend, ::Nothing)::Nothing
+function _end_gpu_pass_timing!(state::LavaBackend, ::Nothing)
     return nothing
 end
 
-function _read_gpu_frame_time_us(state::LavaBackend, ::Int)::Union{Nothing,Int}
+function _end_gpu_pass_timing!(state::LavaBackend, start_slot::Int)
     try
-        reports = Lava.dispatch_timing_report(state.context; flush_first=false)
-        index = findfirst(report -> report.name == GPU_FRAME_TIMING_LABEL, reports)
+        batch = Lava.ensure_active_batch!(state.queue)
+        Lava.maybe_write_dispatch_end_timestamp!(
+            state.context,
+            batch.cmd_buf,
+            start_slot,
+            C_NULL;
+            stage=Vulkan.PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            stage_mask=UInt32(Vulkan.PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT),
+        )
+    catch
+        state.gpu_timestamp_supported = false
+    end
+    return nothing
+end
+
+function _read_gpu_timing_reports(state::LavaBackend, ::Nothing)::Nothing
+    return nothing
+end
+
+function _read_gpu_timing_reports(state::LavaBackend, ::Int)::Union{Nothing,Vector}
+    try
+        return Lava.dispatch_timing_report(state.context; flush_first=false)
+    catch
+        state.gpu_timestamp_supported = false
+        return nothing
+    end
+end
+
+function _timing_report_us(
+    ::Nothing,
+    ::AbstractString,
+)::Nothing
+    return nothing
+end
+
+function _timing_report_us(
+    reports::AbstractVector,
+    label::AbstractString,
+)::Union{Nothing,Int}
+    try
+        index = findfirst(report -> report.name == label, reports)
         index === nothing && return nothing
         elapsed_ns = reports[index].total_ns
         isfinite(elapsed_ns) && elapsed_ns >= 0.0 || return nothing
         return ceil(Int, elapsed_ns / 1_000.0)
     catch
-        state.gpu_timestamp_supported = false
         return nothing
     end
+end
+
+@inline function _elapsed_us(started_ns::UInt64)::Int
+    return Int(cld(time_ns() - started_ns, UInt64(1_000)))
 end
 
 function _framebuffer_texture(framebuffer::Lava.LavaFramebuffer, state::LavaBackend)
@@ -2379,17 +2448,25 @@ function _render_scene(
     texture_enabled = _material_texture_enabled(material)
     camera_frame = _camera_frame(packet.camera)
     lighting = _lighting(packet)
+
+    prepare_started_ns = time_ns()
+    prepare_gpu_timing_slot = _begin_gpu_pass_timing(state, GPU_PASS_TIMING_LABELS.prepare)
     resources = _terrain_resources!(state, packet)
     shadow_resources = _shadow_resources!(state, packet, lighting)
     texture_resources = _material_texture_resources!(state, packet, shadow_resources, material)
     visibility = _mesh_visibility(packet, camera_frame)
     mesh_resources = _mesh_resources!(state, packet, camera_frame, visibility)
     overlay_resources = _overlay_resources!(state, packet, camera_frame)
+    _end_gpu_pass_timing!(state, prepare_gpu_timing_slot)
+    prepare_time_us = _elapsed_us(prepare_started_ns)
     render_width = 2 * width
     render_height = 2 * height
     scene_framebuffer = _framebuffer!(state, render_width, render_height, true, :scene_hdr)
     scene_target = OffscreenTarget(scene_framebuffer)
     terrain_vertices = 6 * (packet.terrain.resolution - 1)^2
+
+    scene_raster_started_ns = time_ns()
+    scene_raster_gpu_timing_slot = _begin_gpu_pass_timing(state, GPU_PASS_TIMING_LABELS.scene_raster)
     draw!(
         state.queue,
         state.sky_pipeline,
@@ -2520,6 +2597,11 @@ function _render_scene(
         end
     end
     _transition_color_to_sampled!(state, scene_framebuffer)
+    _end_gpu_pass_timing!(state, scene_raster_gpu_timing_slot)
+    scene_raster_time_us = _elapsed_us(scene_raster_started_ns)
+
+    resolve_started_ns = time_ns()
+    resolve_gpu_timing_slot = _begin_gpu_pass_timing(state, GPU_PASS_TIMING_LABELS.resolve)
     capture_framebuffer = _framebuffer!(state, width, height, false, :capture)
     capture_target = OffscreenTarget(capture_framebuffer)
     resolve_resources = _resolve_resources!(state, scene_framebuffer)
@@ -2541,6 +2623,12 @@ function _render_scene(
         state.resolve_compiled = true
         state.pipeline_compilations += 1
     end
+    _end_gpu_pass_timing!(state, resolve_gpu_timing_slot)
+    resolve_time_us = _elapsed_us(resolve_started_ns)
+
+    overlay_started_ns = time_ns()
+    overlay_gpu_timing_slot = overlay_resources === nothing ?
+        nothing : _begin_gpu_pass_timing(state, GPU_PASS_TIMING_LABELS.overlay)
     if overlay_resources !== nothing
         draw!(
             state.queue,
@@ -2556,10 +2644,34 @@ function _render_scene(
             state.pipeline_compilations += 1
         end
     end
+    _end_gpu_pass_timing!(state, overlay_gpu_timing_slot)
+    overlay_time_us = _elapsed_us(overlay_started_ns)
+
+    flush_readback_started_ns = time_ns()
     _end_gpu_frame_timing!(state, gpu_timing_slot)
     Lava.vk_flush!(state.context)
     pixels = readback_framebuffer(capture_framebuffer)
-    gpu_frame_time_us = _read_gpu_frame_time_us(state, gpu_timing_slot)
+    gpu_timing_reports = _read_gpu_timing_reports(state, gpu_timing_slot)
+    gpu_frame_time_us = _timing_report_us(gpu_timing_reports, GPU_FRAME_TIMING_LABEL)
+    gpu_pass_timings = (
+        prepare_us=_timing_report_us(
+            gpu_timing_reports,
+            GPU_PASS_TIMING_LABELS.prepare,
+        ),
+        scene_raster_us=_timing_report_us(
+            gpu_timing_reports,
+            GPU_PASS_TIMING_LABELS.scene_raster,
+        ),
+        resolve_us=_timing_report_us(
+            gpu_timing_reports,
+            GPU_PASS_TIMING_LABELS.resolve,
+        ),
+        overlay_us=_timing_report_us(
+            gpu_timing_reports,
+            GPU_PASS_TIMING_LABELS.overlay,
+        ),
+    )
+    flush_readback_time_us = _elapsed_us(flush_readback_started_ns)
     capture_bytes = _capture_bytes(pixels)
     state.readback_bytes += length(capture_bytes)
     return (
@@ -2591,8 +2703,19 @@ function _render_scene(
             gameplay_critical_culled_instance_count=visibility.gameplay_critical_culled_count,
             terrain_vertex_count=terrain_vertices,
             mesh_vertex_count=mesh_resources === nothing ? 0 : mesh_resources.vertex_count,
-            frame_time_us=Int(cld(time_ns() - started_ns, UInt64(1_000))),
+            frame_time_us=_elapsed_us(started_ns),
             gpu_frame_time_us=gpu_frame_time_us,
+            pass_timings=(
+                prepare_us=prepare_time_us,
+                scene_raster_us=scene_raster_time_us,
+                resolve_us=resolve_time_us,
+                overlay_us=overlay_time_us,
+                flush_readback_us=flush_readback_time_us,
+                gpu_prepare_us=gpu_pass_timings.prepare_us,
+                gpu_scene_raster_us=gpu_pass_timings.scene_raster_us,
+                gpu_resolve_us=gpu_pass_timings.resolve_us,
+                gpu_overlay_us=gpu_pass_timings.overlay_us,
+            ),
         ),
     )
 end

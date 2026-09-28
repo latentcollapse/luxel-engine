@@ -166,6 +166,55 @@ These remain explicit project domains:
 
 Every domain needs both artifact validity checks and target-runtime captures.
 
+#### Research flag: Tetrahedral Cage RT
+
+Evaluate tetrahedral-cage representations as an optional animation and
+ray-tracing lowering for dense, connectivity-preserving geometry. This is a
+research track, not a prerequisite for the current engine-neutral vertical
+slice and not permission to replace the canonical semantic mesh/asset
+representation. WGE may materialize a TetCageRT representation only after the
+evidence and profitability policy below are independently green.
+
+The central question is not “should WGE use tetrahedral cages?” It is “when
+should WGE materialize animated geometry as tetrahedral cages?” The candidate
+policy may ultimately choose a hybrid hierarchy—full BLAS for near detail,
+cluster AS for intermediate scale, and TetCageRT for far/dense geometry—but
+that is a hypothesis to test, not a design decision.
+
+1. **Paper reconstruction.** Pin the exact AMD paper/source, read it completely,
+   and reconstruct its representation, assumptions, update rules, and failure
+   modes in a cited research note before implementing a shortcut. Do not mix
+   the paper's measurements with later terrain-demo measurements.
+2. **CPU reference.** Implement deterministic tetrahedral-cage generation,
+   triangle clipping, barycentric encoding, deformation, and correctness
+   visualization. Track clipping-induced geometry expansion (reported results
+   suggest roughly 1.3x–2.3x depending on cage/scene resolution) rather than
+   hiding it in a memory estimate.
+3. **Lava/Vulkan prototype.** Build a small, optional prototype behind a typed
+   Julia graphics contract: transformed-ray or static mini-BLAS path, explicit
+   device capability checks, and no semantic authority in Lava. Treat the
+   extra traversal/intersection machinery as a possible cost, not an assumed
+   win.
+4. **Controlled comparison.** Measure conventional animated BLAS, cluster AS,
+   and tetrahedral cage across visual deformation error, AS memory, animation
+   cost, AS update cost, trace cost, total frame time, preprocessing expansion,
+   and cage resolution. Record cold/warm behavior and deterministic replay.
+5. **Watertightness.** Investigate a watertight 4D barycentric representation,
+   including temporal/topological continuity, boundary behavior, numerical
+   robustness, and adversarial deformation cases. Coarse cages and joint-heavy
+   deformation must have visible correctness controls; plausible pixels are not
+   sufficient.
+6. **Materialization policy.** Encode a Rust-owned decision procedure that
+   determines when TetCageRT is legal, bounded, visually acceptable, and
+   profitable for the requested quality profile. “Unsupported,” “uncertain,”
+   and “not profitable” remain explicit outcomes.
+
+The research track must preserve the source mesh as canonical, retain a
+conventional fallback for every comparison, and produce independently
+recomputable evidence. It must not block the native raster certification path,
+silently change asset identity, or turn a benchmark-only acceleration into a
+passing gameplay/render receipt.
+
 ### 8. Build, playtest, critique, and release
 
 The harness must be able to launch fresh builds, send scripted input, capture

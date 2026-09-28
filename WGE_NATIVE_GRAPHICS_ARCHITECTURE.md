@@ -140,9 +140,12 @@ quantization; alpha remains linear. sRGB albedo payloads are decoded to linear
 values before material evaluation. The Rust receipt stores the independently
 recomputed measurements and the adapter reports render-through-readback time
 in microseconds. When the selected Vulkan queue exposes valid timestamp bits,
-the adapter also brackets the graphics pass with two Vulkan timestamp writes
-and reports the GPU interval separately; a queue without that capability
-remains explicitly `null`.
+the adapter brackets the graphics pass and named prepare, scene-raster,
+resolve, and overlay phases with Vulkan timestamp writes. Rust bounds and
+reconciles the resulting telemetry; a queue without that capability reports
+the optional GPU fields as `null`. These pass timestamps deliberately
+synchronize the diagnostic measurement path and are not an uninstrumented
+production frame budget.
 
 Visual evidence remains a real gate. The reference Rust capture and the Lava
 capture are compared for semantic markers and measured properties first, then
@@ -227,6 +230,46 @@ The existing terrain Julia code remains responsible for numerical fields. A
 graphics worker may derive normals, meshlets, visibility, or render buffers
 from a validated packet, but those are renderer products and must be digestible
 and reproducible from the packet.
+
+## Research track: Tetrahedral Cage RT
+
+TetCageRT is an optional representation-lowering investigation for dense,
+connectivity-preserving animated geometry. It is not semantic authority, not a
+replacement for the authored mesh contract, and not part of the current native
+raster certification gate. The canonical source mesh and conventional animated
+BLAS path remain available for every comparison.
+
+The central question is when WGE should materialize animated geometry as
+tetrahedral cages. A possible hybrid policy—full BLAS near, cluster AS at
+intermediate scale, and TetCageRT for far/dense geometry—is only a hypothesis
+until measured.
+
+The research sequence is:
+
+1. pin and completely reconstruct the exact AMD paper/source, including its
+   assumptions and known failure modes; keep its measurements separate from
+   later terrain-demo measurements;
+2. implement a deterministic CPU reference for cage generation, triangle
+   clipping, barycentric encoding, deformation, and correctness visualization;
+3. prototype a typed, optional Lava/Vulkan transformed-ray or static mini-BLAS
+   path with explicit capability and failure reporting;
+4. compare conventional animated BLAS, cluster AS, and TetCageRT using visual
+   deformation error, AS memory, animation cost, AS update cost, trace cost,
+   total frame time, preprocessing expansion, and cage resolution;
+5. investigate watertight 4D barycentric representations, temporal/topological
+   continuity, boundary behavior, numerical robustness, and adversarial
+   deformation cases;
+6. materialize a Rust-owned policy that selects TetCageRT only when legal,
+   bounded, visually acceptable, and measurably profitable.
+
+The reference must account for clipping-induced geometry expansion (roughly
+1.3x–2.3x in the cited discussion), the trade between cage resolution,
+deformation artifacts, and update cost, and the possibility that traversal
+and intersection work costs more than the saved animation/AS update time.
+Unknown paper identity, unsupported hardware, numerical uncertainty, a failed
+watertightness check, or an unprofitable comparison is an explicit research
+outcome rather than an invented implementation decision. No benchmark-only
+geometry may be promoted as authored semantic evidence.
 
 ## Verification ladder
 
@@ -323,8 +366,11 @@ messages. Rust rejects flat/black captures, insufficient RGB diversity, and
 missing pixels for any semantic marker role present in the packet; producer
 measurements are compared against Rust’s independent recomputation. Frame
 telemetry now carries packet-checked total and per-importance instance visibility,
-terrain/mesh submission counts, and an optional capability-gated graphics-pass
-GPU interval, exposing a measurable semantic-culling/performance surface. Visible
+terrain/mesh submission counts, total CPU/GPU frame timing, and optional
+capability-gated per-pass timing, exposing a measurable
+semantic-culling/performance surface. A separate Rust command can derive an
+explicitly synthetic dense-foliage packet for scalability measurements; it
+preserves the source packet and is never authored semantic evidence. Visible
 mesh/material groups are submitted with Lava instancing: base triangle data is
 uploaded once per deterministic batch and transforms/material parameters are
 indexed per instance on the GPU. The integration fixture duplicates an
