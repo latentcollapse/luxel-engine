@@ -1,0 +1,22 @@
+name = "WGEGraphics"
+uuid = "8d7c4a7e-7f0f-4d31-9b80-2d63df2a5b31"
+version = "0.1.0"
+
+[deps]
+JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
+Lava = "3a680b1f-cb25-4bee-9cf7-bc880b76dc8c"
+Raycore = "afc56b53-c9a9-482a-a956-d1d800e05559"
+SHA = "ea8e919c-243c-51af-8825-aaa63cd721ce"
+
+[sources]
+# The worker is intentionally pinned to the audited upstream commit. Raycore
+# is direct here so its upstream master revision cannot drift through Lava's
+# transitive source declaration.
+Lava = {url = "https://github.com/SimonDanisch/Lava.jl", rev = "11c7e31bdf62408d22bf379e9e59510f69d2103e"}
+Raycore = {url = "https://github.com/JuliaGeometry/Raycore.jl", rev = "d93743b3ac0e8462ac8f9ba26d082f5402b4629d"}
+
+[compat]
+JSON3 = "1"
+Lava = "0.1"
+Raycore = "0.2"
+julia = "1.12"
