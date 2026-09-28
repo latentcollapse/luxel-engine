@@ -96,7 +96,14 @@ function _validate_profile(profile::ErosionProfile)
         profile.planation,
     )
     _erosion_require(all(isfinite, values), "invalid_profile", "profile values must be finite")
+    _erosion_require(profile.iterations > 0, "invalid_profile", "iterations must be positive")
     _erosion_require(0.0 <= profile.ice_line <= 1.0, "invalid_profile", "ice_line must be between zero and one")
+    _erosion_require(profile.stream_power >= 0.0, "invalid_profile", "stream_power must not be negative")
+    _erosion_require(profile.glacial_strength >= 0.0, "invalid_profile", "glacial_strength must not be negative")
+    _erosion_require(profile.lateral_widening >= 0.0, "invalid_profile", "lateral_widening must not be negative")
+    _erosion_require(profile.talus_degrees >= 0.0 && profile.talus_degrees < 90.0, "invalid_profile", "talus_degrees must be in [0, 90)")
+    _erosion_require(profile.cirque_strength >= 0.0, "invalid_profile", "cirque_strength must not be negative")
+    _erosion_require(0.0 <= profile.planation <= 1.0, "invalid_profile", "planation must be between zero and one")
     return nothing
 end
 
@@ -121,6 +128,7 @@ function flux_field(
     if source !== nothing
         _erosion_require(size(source) == size(height), "invalid_source", "source and heightfield dimensions differ")
         _erosion_require(all(isfinite, source), "invalid_source", "source contains non-finite values")
+        _erosion_require(all(value -> value >= 0.0, source), "invalid_source", "source contains negative values")
     end
 
     rows, columns = size(height)
@@ -142,9 +150,12 @@ function flux_field(
     order = collect(0:(rows * columns - 1))
     sort!(
         order;
-        by=index -> height[div(index, columns) + 1, mod(index, columns) + 1],
+        by=index -> (
+            height[div(index, columns) + 1, mod(index, columns) + 1],
+            -index,
+        ),
         rev=true,
-        alg=Base.Sort.QuickSort,
+        alg=Base.Sort.MergeSort,
     )
     for index in order
         row, column = div(index, columns) + 1, mod(index, columns) + 1
@@ -170,8 +181,12 @@ function thermal_erosion(
 )
     _validate_erosion_height(height)
     _erosion_require(isfinite(cell_m) && cell_m > 0.0, "invalid_cell_size", "cell_m must be finite and positive")
-    _erosion_require(isfinite(talus_degrees), "invalid_talus_angle", "talus_degrees must be finite")
-    _erosion_require(isfinite(rate), "invalid_rate", "thermal rate must be finite")
+    _erosion_require(
+        isfinite(talus_degrees) && 0.0 <= talus_degrees < 90.0,
+        "invalid_talus_angle",
+        "talus_degrees must be finite and in [0, 90)",
+    )
+    _erosion_require(isfinite(rate) && rate >= 0.0, "invalid_rate", "thermal rate must be finite and non-negative")
 
     limit = tan(talus_degrees * (pi / 180.0)) * cell_m
     moved = zeros(Float64, size(height))

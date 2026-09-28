@@ -6,6 +6,36 @@ using SHA
 const REQUEST_SCHEMA = "wge.julia-world-fields-request/v1"
 const RESPONSE_SCHEMA = "wge.julia-world-fields-response/v1"
 
+struct TerrainFeature
+    id::String
+    x::Float64
+    z::Float64
+    rx::Float64
+    rz::Float64
+    elevation::Float64
+end
+
+struct SemanticRegion
+    id::String
+    code::UInt8
+    priority::Int
+    blocks_traversal::Bool
+    polygon::Vector{Tuple{Float64,Float64}}
+end
+
+struct WorldFieldsRequest
+    layout_sha256::String
+    world_id::String
+    width::Float64
+    length::Float64
+    resolution::Int
+    seed::UInt64
+    base::Float64
+    noise_amplitude::Float64
+    features::Vector{TerrainFeature}
+    regions::Vector{SemanticRegion}
+end
+
 function _exact_keys(value, expected::Set{String}, label::String)
     value isa JSON3.Object || error("$label must be a JSON object")
     Set(String(key) for key in keys(value)) == expected ||
@@ -67,7 +97,7 @@ function _point_in_polygon(x::Float64, z::Float64, polygon::Vector{Tuple{Float64
     inside
 end
 
-function _region_at(x::Float64, z::Float64, regions)
+function _region_at(x::Float64, z::Float64, regions::Vector{SemanticRegion})::UInt8
     for region in regions
         _point_in_polygon(x, z, region.polygon) && return region.code
     end
@@ -126,7 +156,7 @@ function _decode_request(line::String)
     base = _float(terrain.base_elevation_m, "terrain.base_elevation_m")
     noise_amplitude = _float(terrain.noise_amplitude_m, "terrain.noise_amplitude_m")
     noise_amplitude >= 0 || error("noise amplitude must not be negative")
-    features = NamedTuple[]
+    features = TerrainFeature[]
     seen_features = Set{String}()
     for (index, feature) in enumerate(_array(terrain.features, "terrain.features"))
         label = "terrain.features[$index]"
@@ -142,17 +172,20 @@ function _decode_request(line::String)
         radius_x = _float(feature.radius_x_m, "$label.radius_x_m")
         radius_z = _float(feature.radius_z_m, "$label.radius_z_m")
         radius_x > 0 && radius_z > 0 || error("terrain feature radii must be positive")
-        push!(features, (
-            id=id,
-            x=center[1],
-            z=center[2],
-            rx=radius_x,
-            rz=radius_z,
-            elevation=_float(feature.elevation_m, "$label.elevation_m"),
-        ))
+        push!(
+            features,
+            TerrainFeature(
+                id,
+                center[1],
+                center[2],
+                radius_x,
+                radius_z,
+                _float(feature.elevation_m, "$label.elevation_m"),
+            ),
+        )
     end
 
-    regions = NamedTuple[]
+    regions = SemanticRegion[]
     seen_ids = Set{String}()
     seen_codes = Set{UInt8}()
     seen_priorities = Set{Int}()
@@ -177,30 +210,27 @@ function _decode_request(line::String)
         polygon_values = _array(region.polygon_xz_m, "$label.polygon_xz_m")
         length(polygon_values) >= 3 || error("region polygon needs at least three points")
         polygon = [_point(point, "$label.polygon_xz_m[$point_index]") for (point_index, point) in enumerate(polygon_values)]
-        push!(regions, (
-            id=id,
-            code=code,
-            priority=priority,
-            blocked=region.blocks_traversal,
-            polygon=polygon,
-        ))
+        push!(
+            regions,
+            SemanticRegion(id, code, priority, region.blocks_traversal, polygon),
+        )
     end
     sort!(regions, by=region -> region.priority)
-    return (
-        layout_sha256=layout_sha256,
-        world_id=world_id,
-        width=width,
-        length=length_m,
-        resolution=resolution,
-        seed=seed,
-        base=base,
-        noise_amplitude=noise_amplitude,
-        features=features,
-        regions=regions,
+    return WorldFieldsRequest(
+        layout_sha256,
+        world_id,
+        width,
+        length_m,
+        resolution,
+        seed,
+        base,
+        noise_amplitude,
+        features,
+        regions,
     )
 end
 
-function _generate(request, request_sha256::String)
+function _generate(request::WorldFieldsRequest, request_sha256::String)
     resolution = request.resolution
     count = resolution * resolution
     heights = Vector{Float64}(undef, count)
@@ -275,4 +305,6 @@ function main()
     println(JSON3.write(_generate(request, request_sha256)))
 end
 
-main()
+if abspath(PROGRAM_FILE) == abspath(@__FILE__)
+    main()
+end

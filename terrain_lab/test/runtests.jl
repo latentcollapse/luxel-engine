@@ -2,6 +2,12 @@ using CodewealdTerrainLab
 using JSON3
 using Test
 
+function write_f32le(path, values)
+    native_words = reinterpret(UInt32, values)
+    words = Base.ENDIAN_BOM == 0x04030201 ? native_words : htol.(native_words)
+    write(path, reinterpret(UInt8, words))
+end
+
 @testset "semantic terrain analysis" begin
     mktempdir() do directory
         manifest_path = joinpath(directory, "terrain_manifest.json")
@@ -24,7 +30,7 @@ using Test
             0 0 10
             0 0 10
         ]
-        write(heightfield_path, reinterpret(UInt8, vec(permutedims(heights))))
+        write_f32le(heightfield_path, vec(permutedims(heights)))
         protected = UInt8[
             0 0 0
             0 0 255
@@ -51,7 +57,64 @@ using Test
         @test report["intentional_relief"]["maximum_grade"] == 10.0
         @test report["protected_relief_fraction"] == round(2 / 9, digits=8)
         @test report["regions"]["protected_relief"]["maximum_grade"] == 10.0
+        @test_throws ErrorException analyze_heightfield(
+            heightfield_path,
+            mask_path,
+            regions_path,
+            manifest_path;
+            maximum_accessible_grade=NaN,
+        )
     end
+end
+
+@testset "numerical contracts fail closed" begin
+    height = reshape(collect(1.0:9.0), 3, 3)
+    @test_throws ErosionWorkerError thermal_erosion(
+        height;
+        cell_m=1.0,
+        talus_degrees=30.0,
+        rate=-1.0,
+    )
+    @test_throws ErosionWorkerError thermal_erosion(
+        height;
+        cell_m=1.0,
+        talus_degrees=90.0,
+    )
+    @test_throws ErosionWorkerError erode_heightfield(
+        ErodeRequest(
+            height,
+            1.0,
+            ErosionProfile("invalid", 0, 0.2, 0.2, 0.5, 0.1, 30.0, 0.1, 0.1),
+            nothing,
+        ),
+    )
+    @test_throws ErosionWorkerError flux_field(
+        height;
+        source=fill(-1.0, size(height)),
+    )
+end
+
+@testset "little-endian heightfield decoding" begin
+    mktempdir() do directory
+        path = joinpath(directory, "heightfield.bin")
+        write(path, UInt8[0x00, 0x00, 0x80, 0x3f])
+        decoded = CodewealdTerrainLab._read_heightfield(path, 1)
+        @test decoded == Float32[1.0;;]
+    end
+end
+
+include(joinpath(@__DIR__, "..", "bin", "lane_overlap_worker.jl"))
+
+@testset "lane worker emits valid JSON" begin
+    result = JSON3.read(
+        handle(
+            "{\"op\":\"lane_overlap\",\"lane\":{\"x0\":0,\"x1\":4,\"y0\":0,\"y1\":4}," *
+            "\"footprint\":{\"x0\":2,\"x1\":6,\"y0\":2,\"y1\":6}}",
+        ),
+    )
+    @test result["intersects"] == true
+    @test result["overlap_area"] == 4
+    @test JSON3.read(failure("probe", "line\nfeed"))["detail"] == "line\nfeed"
 end
 
 @testset "hydrology rejects local uphill reversals" begin

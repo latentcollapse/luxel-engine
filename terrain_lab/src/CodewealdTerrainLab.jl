@@ -4,6 +4,7 @@ using JSON3
 using SHA
 
 export analyze_heightfield, solve_landform_placements, write_analysis, write_placement_plan
+export AnalysisPolicy
 export EROSION_REQUEST_SCHEMA, EROSION_RESULT_SCHEMA
 export ErosionProfile, ErodeRequest, ThermalErosionRequest, FluxFieldRequest
 export ErosionOutcome, ErosionReport, ErosionWorkerError
@@ -19,8 +20,49 @@ const REGION_HYDROLOGY = UInt8(1 << 3)
 const REGION_LANDMARK_PAD = UInt8(1 << 4)
 const PLACEMENT_SCHEMA = "codeweald.placement-plan/v1"
 
+Base.@kwdef struct AnalysisPolicy
+    maximum_accessible_grade::Float64 = 12.0
+    steep_grade::Float64 = 2.0
+    maximum_accessible_steep_fraction::Float64 = 0.01
+    maximum_accessible_steep_world_fraction::Float64 = 0.009
+    maximum_hydrology_uphill_fraction::Float64 = 0.08
+    maximum_hydrology_uphill_step_m::Float64 = 0.35
+end
+
+function _validate_analysis_policy(policy::AnalysisPolicy)
+    values = (
+        policy.maximum_accessible_grade,
+        policy.steep_grade,
+        policy.maximum_accessible_steep_fraction,
+        policy.maximum_accessible_steep_world_fraction,
+        policy.maximum_hydrology_uphill_fraction,
+        policy.maximum_hydrology_uphill_step_m,
+    )
+    all(isfinite, values) || error("analysis policy values must be finite")
+    policy.maximum_accessible_grade >= 0.0 ||
+        error("maximum_accessible_grade must not be negative")
+    policy.steep_grade >= 0.0 || error("steep_grade must not be negative")
+    0.0 <= policy.maximum_accessible_steep_fraction <= 1.0 ||
+        error("maximum_accessible_steep_fraction must be between zero and one")
+    0.0 <= policy.maximum_accessible_steep_world_fraction <= 1.0 ||
+        error("maximum_accessible_steep_world_fraction must be between zero and one")
+    0.0 <= policy.maximum_hydrology_uphill_fraction <= 1.0 ||
+        error("maximum_hydrology_uphill_fraction must be between zero and one")
+    policy.maximum_hydrology_uphill_step_m >= 0.0 ||
+        error("maximum_hydrology_uphill_step_m must not be negative")
+    return nothing
+end
+
 mutable struct _DeterministicRng
     state::UInt64
+end
+
+struct PlacementCandidate
+    score::Float64
+    x::Float64
+    z::Float64
+    ground::Float64
+    ordinal::Int
 end
 
 function _next!(rng::_DeterministicRng)
@@ -54,7 +96,9 @@ function _read_heightfield(path::AbstractString, resolution::Int)
     expected = resolution * resolution * sizeof(Float32)
     length(bytes) == expected ||
         error("$path has $(length(bytes)) bytes; expected $expected")
-    values = collect(reinterpret(Float32, bytes))
+    native_words = reinterpret(UInt32, bytes)
+    words = Base.ENDIAN_BOM == 0x04030201 ? native_words : ltoh.(native_words)
+    values = collect(reinterpret(Float32, words))
     all(isfinite, values) || error("$path contains non-finite heights")
     # Python writes rows in C order. Julia reshapes columns first, so transpose
     # the intermediate matrix to recover [row, column] terrain coordinates.
@@ -110,16 +154,16 @@ function _summary(
     steep_grade::Float64,
     world_edge_count::Union{Nothing,Int}=nothing,
 )
-    sort!(grades)
-    sample_count = length(grades)
-    steep_count = Base.count(>(steep_grade), grades)
+    sorted_grades = sort(grades)
+    sample_count = length(sorted_grades)
+    steep_count = count(>(steep_grade), sorted_grades)
     summary = Dict(
         "edge_count" => sample_count,
-        "p50_grade" => round(_quantile(grades, 0.50), digits=6),
-        "p95_grade" => round(_quantile(grades, 0.95), digits=6),
-        "p99_grade" => round(_quantile(grades, 0.99), digits=6),
-        "p999_grade" => round(_quantile(grades, 0.999), digits=6),
-        "maximum_grade" => round(isempty(grades) ? 0.0 : grades[end], digits=6),
+        "p50_grade" => round(_quantile(sorted_grades, 0.50), digits=6),
+        "p95_grade" => round(_quantile(sorted_grades, 0.95), digits=6),
+        "p99_grade" => round(_quantile(sorted_grades, 0.99), digits=6),
+        "p999_grade" => round(_quantile(sorted_grades, 0.999), digits=6),
+        "maximum_grade" => round(isempty(sorted_grades) ? 0.0 : sorted_grades[end], digits=6),
         "steep_grade_threshold" => steep_grade,
         "steep_edge_count" => steep_count,
         "steep_edge_fraction" => round(
@@ -221,8 +265,11 @@ function _point_in_polygon(x::Float64, z::Float64, polygon)
 end
 
 function _polygon_frame(polygon)
+    length(polygon) >= 3 || error("landform polygon needs at least three points")
     xs = [Float64(point[1]) for point in polygon]
     zs = [Float64(point[2]) for point in polygon]
+    all(isfinite, xs) && all(isfinite, zs) ||
+        error("landform polygon contains non-finite coordinates")
     center_x, center_z = sum(xs) / length(xs), sum(zs) / length(zs)
     dx, dz = xs .- center_x, zs .- center_z
     sxx = sum(dx .* dx) / length(dx)
@@ -235,6 +282,10 @@ function _polygon_frame(polygon)
     end
     longs = dx .* axis_x .+ dz .* axis_z
     crosses = -dx .* axis_z .+ dz .* axis_x
+    max(longs) - min(longs) > 1e-9 ||
+        error("landform polygon has no longitudinal extent")
+    max(crosses) - min(crosses) > 1e-9 ||
+        error("landform polygon has no transverse extent")
     return (
         center_x=center_x,
         center_z=center_z,
@@ -278,6 +329,9 @@ function solve_landform_placements(
     resolution = Int(manifest.resolution)
     width = Float64(manifest.world_bounds_m.width)
     world_length = Float64(manifest.world_bounds_m.length)
+    resolution >= 3 || error("terrain resolution must be at least 3")
+    isfinite(width) && isfinite(world_length) && width > 0.0 && world_length > 0.0 ||
+        error("terrain world bounds must be finite and positive")
     height = _read_heightfield(heightfield_path, resolution)
     generation_seed = Int(zone_spec.generation_seed)
     placements = Dict{String,Any}[]
@@ -285,11 +339,11 @@ function solve_landform_placements(
     requires_dressing = false
 
     for feature in zone_spec.features
-        hasproperty(feature, :category) || continue
+        hasproperty(feature, :category) || error("feature is missing category")
         String(feature.category) == "landform" || continue
-        hasproperty(feature, :generation) || continue
+        hasproperty(feature, :generation) || error("landform feature is missing generation")
         generation = feature.generation
-        hasproperty(generation, :composition) || continue
+        hasproperty(generation, :composition) || error("landform feature is missing composition")
         feature_id = String(feature.id)
         assignment = _landform_assignment(asset_plan, feature_id)
         assignment === nothing && error("no landform asset assignment for $feature_id")
@@ -309,6 +363,20 @@ function solve_landform_placements(
         minimum_spacing = Float64(assignment.minimum_spacing_m)
         scales = assignment.scale_m
         assets = assignment.assets
+        spine_count > 0 || error("$feature_id composition requires a positive spine_count")
+        target_count > 0 || error("$feature_id dressing requires a positive instance_count")
+        isfinite(elevation_bias) && 0.0 <= elevation_bias <= 1.0 ||
+            error("$feature_id elevation_bias must be between zero and one")
+        isfinite(along_jitter) && along_jitter >= 0.0 ||
+            error("$feature_id along_jitter must be finite and non-negative")
+        isfinite(cross_jitter) && cross_jitter >= 0.0 ||
+            error("$feature_id cross_jitter must be finite and non-negative")
+        isfinite(minimum_spacing) && minimum_spacing >= 0.0 ||
+            error("$feature_id minimum_spacing_m must be finite and non-negative")
+        length(scales) == 2 || error("$feature_id scale_m must contain minimum and maximum")
+        scale_min, scale_max = Float64(scales[1]), Float64(scales[2])
+        isfinite(scale_min) && isfinite(scale_max) && 0.0 < scale_min <= scale_max ||
+            error("$feature_id scale_m must be finite, positive, and ordered")
         isempty(assets) && error("no resolved landform assets for $feature_id")
         rng = _DeterministicRng(_feature_seed(generation_seed, feature_id))
         cross_span = max(frame.max_cross - frame.min_cross, 1e-6)
@@ -318,7 +386,7 @@ function solve_landform_placements(
             frame.min_cross + cross_span * (index - 0.5) / spine_count
             for index in 1:spine_count
         ]
-        candidates = NamedTuple[]
+        candidates = PlacementCandidate[]
         candidate_target = max(target_count * 300, 4000)
         attempts = 0
         while length(candidates) < candidate_target && attempts < candidate_target * 5
@@ -344,10 +412,15 @@ function solve_landform_placements(
                 elevation_score * elevation_bias
             ) * procession
             score += (_unit(rng) - 0.5) * (along_jitter + cross_jitter) * 0.12
-            push!(candidates, (score=score, x=x, z=z, ground=ground))
+            push!(candidates, PlacementCandidate(score, x, z, ground, attempts))
         end
-        sort!(candidates, by=candidate -> candidate.score, rev=true)
-        selected = NamedTuple[]
+        sort!(
+            candidates;
+            by=candidate -> (candidate.score, -candidate.ordinal),
+            rev=true,
+            alg=Base.Sort.MergeSort,
+        )
+        selected = PlacementCandidate[]
         for candidate in candidates
             all(
                 hypot(candidate.x - prior.x, candidate.z - prior.z) >= minimum_spacing
@@ -361,7 +434,7 @@ function solve_landform_placements(
         )
         for (index, candidate) in enumerate(selected)
             asset = assets[mod1(index, length(assets))]
-            scale = Float64(scales[1]) + (Float64(scales[2]) - Float64(scales[1])) * _unit(rng)
+            scale = scale_min + (scale_max - scale_min) * _unit(rng)
             push!(
                 placements,
                 Dict(
@@ -503,6 +576,15 @@ function analyze_heightfield(
     maximum_hydrology_uphill_fraction::Float64=0.08,
     maximum_hydrology_uphill_step_m::Float64=0.35,
 )
+    policy = AnalysisPolicy(
+        maximum_accessible_grade=maximum_accessible_grade,
+        steep_grade=steep_grade,
+        maximum_accessible_steep_fraction=maximum_accessible_steep_fraction,
+        maximum_accessible_steep_world_fraction=maximum_accessible_steep_world_fraction,
+        maximum_hydrology_uphill_fraction=maximum_hydrology_uphill_fraction,
+        maximum_hydrology_uphill_step_m=maximum_hydrology_uphill_step_m,
+    )
+    _validate_analysis_policy(policy)
     manifest = _read_object(manifest_path)
     resolution = Int(manifest.resolution)
     resolution >= 3 || error("terrain resolution must be at least 3")
@@ -535,14 +617,14 @@ function analyze_heightfield(
     # so it does not move when the mountain/valley split does.
     world_edge_count = sum(length(values) for values in Base.values(grades); init=0)
     accessible_summary = _summary(
-        accessible; steep_grade=steep_grade, world_edge_count=world_edge_count
+        accessible; steep_grade=policy.steep_grade, world_edge_count=world_edge_count
     )
     intentional_summary = _summary(
-        intentional; steep_grade=steep_grade, world_edge_count=world_edge_count
+        intentional; steep_grade=policy.steep_grade, world_edge_count=world_edge_count
     )
     region_summaries = Dict(
         name => _summary(
-            values; steep_grade=steep_grade, world_edge_count=world_edge_count
+            values; steep_grade=policy.steep_grade, world_edge_count=world_edge_count
         )
         for (name, values) in grades
     )
@@ -556,12 +638,12 @@ function analyze_heightfield(
             uphill_tolerance_m=0.05,
         )
         for centerline in manifest.hydrology_centerlines
-    ] : Any[]
+    ] : Dict{String,Any}[]
     failures = String[]
-    if accessible_summary["maximum_grade"] > maximum_accessible_grade
+    if accessible_summary["maximum_grade"] > policy.maximum_accessible_grade
         push!(
             failures,
-            "accessible maximum grade $(accessible_summary["maximum_grade"]) exceeds $maximum_accessible_grade",
+            "accessible maximum grade $(accessible_summary["maximum_grade"]) exceeds $(policy.maximum_accessible_grade)",
         )
     end
     # Gated against the world, not against the walkable set. See `_summary`:
@@ -573,10 +655,10 @@ function analyze_heightfield(
     # a world that was then ~87% walkable -- so this is the same strictness
     # expressed in a denominator that holds still.
     if accessible_summary["steep_edge_world_fraction"] >
-       maximum_accessible_steep_world_fraction
+       policy.maximum_accessible_steep_world_fraction
         push!(
             failures,
-            "accessible steep-edge world fraction $(accessible_summary["steep_edge_world_fraction"]) exceeds $maximum_accessible_steep_world_fraction",
+            "accessible steep-edge world fraction $(accessible_summary["steep_edge_world_fraction"]) exceeds $(policy.maximum_accessible_steep_world_fraction)",
         )
     end
     for stream in hydrology
@@ -585,17 +667,17 @@ function analyze_heightfield(
         # bed. Incised and surface channels retain the strict downhill gate.
         requires_downhill_flow = stream["channel_profile"] != "wetland_rill"
         if requires_downhill_flow &&
-           stream["uphill_step_fraction"] > maximum_hydrology_uphill_fraction
+           stream["uphill_step_fraction"] > policy.maximum_hydrology_uphill_fraction
             push!(
                 failures,
-                "hydrology $(stream["id"]) uphill-step fraction $(stream["uphill_step_fraction"]) exceeds $maximum_hydrology_uphill_fraction",
+                "hydrology $(stream["id"]) uphill-step fraction $(stream["uphill_step_fraction"]) exceeds $(policy.maximum_hydrology_uphill_fraction)",
             )
         end
         if requires_downhill_flow &&
-           stream["maximum_uphill_step_m"] > maximum_hydrology_uphill_step_m
+           stream["maximum_uphill_step_m"] > policy.maximum_hydrology_uphill_step_m
             push!(
                 failures,
-                "hydrology $(stream["id"]) maximum uphill step $(stream["maximum_uphill_step_m"]) m exceeds $maximum_hydrology_uphill_step_m m",
+                "hydrology $(stream["id"]) maximum uphill step $(stream["maximum_uphill_step_m"]) m exceeds $(policy.maximum_hydrology_uphill_step_m) m",
             )
         end
     end
@@ -611,15 +693,15 @@ function analyze_heightfield(
         "semantic_region_mask_sha256" => bytes2hex(sha256(read(semantic_region_mask_path))),
         "protected_relief_fraction" => round(count(protected) / length(protected), digits=8),
         "policy" => Dict(
-            "maximum_accessible_grade" => maximum_accessible_grade,
-            "steep_grade" => steep_grade,
+            "maximum_accessible_grade" => policy.maximum_accessible_grade,
+            "steep_grade" => policy.steep_grade,
             # Reported for continuity with worlds analysed before the gate moved
             # to a world-relative denominator; no longer the gated quantity.
-            "maximum_accessible_steep_fraction" => maximum_accessible_steep_fraction,
+            "maximum_accessible_steep_fraction" => policy.maximum_accessible_steep_fraction,
             "maximum_accessible_steep_world_fraction" =>
-                maximum_accessible_steep_world_fraction,
-            "maximum_hydrology_uphill_fraction" => maximum_hydrology_uphill_fraction,
-            "maximum_hydrology_uphill_step_m" => maximum_hydrology_uphill_step_m,
+                policy.maximum_accessible_steep_world_fraction,
+            "maximum_hydrology_uphill_fraction" => policy.maximum_hydrology_uphill_fraction,
+            "maximum_hydrology_uphill_step_m" => policy.maximum_hydrology_uphill_step_m,
             "wetland_rill_flow_policy" => "standing-or-braided; downhill continuity not required",
         ),
         "accessible" => accessible_summary,

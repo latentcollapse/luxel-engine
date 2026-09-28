@@ -80,14 +80,16 @@ const FORBIDDEN = Set([
 ])
 
 function canonical_measurement(measured)
-    flag = measured.intersects ? "true" : "false"
-    "{\"intersects\":$(flag),\"overlap\":{\"x0\":$(measured.x0),\"x1\":$(measured.x1),\"y0\":$(measured.y0),\"y1\":$(measured.y1)},\"overlap_area\":$(measured.area),\"schema\":\"wge.lane-overlap/v0\"}"
+    return JSON3.write((
+        intersects=measured.intersects,
+        overlap=(x0=measured.x0, x1=measured.x1, y0=measured.y0, y1=measured.y1),
+        overlap_area=measured.area,
+        schema="wge.lane-overlap/v0",
+    ))
 end
 
 function failure(code, detail)
-    safe = replace(detail, "\\" => "\\\\")
-    safe = replace(safe, "\"" => "\\\"")
-    "{\"class\":\"OperatorFailure\",\"code\":\"$(code)\",\"detail\":\"$(safe)\"}"
+    return JSON3.write((class="OperatorFailure", code=code, detail=detail))
 end
 
 function segment(obj)
@@ -106,7 +108,7 @@ function measure(::Manhattan, path)
 end
 
 function canonical_length(len::Int)
-    "{\"length\":$(len),\"schema\":\"wge.path-length/v0\"}"
+    return JSON3.write((length=len, schema="wge.path-length/v0"))
 end
 
 function handle(payload::AbstractString)
@@ -149,7 +151,7 @@ end
 function main()
     script = String(read(PROGRAM_FILE))
     digest = bytes2hex(sha256(script))
-    write_frame(stdout, "{\"op\":\"ready\",\"script_sha256\":\"$(digest)\"}")
+    write_frame(stdout, JSON3.write((op="ready", script_sha256=digest)))
     while true
         frame = read_frame(stdin)
         frame === nothing && break
@@ -157,4 +159,6 @@ function main()
     end
 end
 
-main()
+if abspath(PROGRAM_FILE) == abspath(@__FILE__)
+    main()
+end
