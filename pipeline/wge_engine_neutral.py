@@ -39,6 +39,9 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 class OrchestrationError(RuntimeError):
     """A native stage rejected input or produced an unexpected result."""
 
@@ -49,6 +52,8 @@ class NativeCommands:
     runtime: str
     authority: str
     julia: str | None = None
+    asset: str | None = None
+    ledger: str | None = None
 
 
 @dataclass(frozen=True)
@@ -83,6 +88,7 @@ RUNTIME_ARTIFACTS = (
     ("world-artifact", "world_artifact", "world_artifact.json"),
     ("traversal-evidence", "traversal_evidence", "traversal_evidence.json"),
     ("gameplay-binding", "gameplay_world_binding", "gameplay_world_binding.json"),
+    ("gameplay-trace", "gameplay_trace", "gameplay_trace.json"),
     ("reference-capture", "reference_capture_ppm", "reference_capture.ppm"),
     ("visual-evidence", "visual_evidence", "visual_evidence.json"),
 )
@@ -192,9 +198,10 @@ def _candidate_id(
 
 def _native_profile(
     commands: NativeCommands,
+    profile: str,
     runner: Callable[..., subprocess.CompletedProcess[str]],
 ) -> tuple[list[dict[str, object]], dict[str, dict[str, str]]]:
-    result = _run([commands.authority, "profile"], runner=runner)
+    result = _run([commands.authority, "profile", profile], runner=runner)
     value = _stdout_json(result, "profile")
     if isinstance(value, list):
         gates = value
@@ -348,6 +355,7 @@ def _stage_candidate(
     runtime_dir: Path,
     layout_path: Path,
     artifact_dir: Path,
+    extra_artifacts: Sequence[tuple[str, str, Path]] = (),
 ) -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
     fixed = (
@@ -366,6 +374,10 @@ def _stage_candidate(
         source = runtime_dir / filename
         if not source.is_file():
             raise OrchestrationError(f"reference runtime omitted required artifact {filename}")
+        _write_bytes(artifact_dir / f"{artifact_id}--{kind}", source.read_bytes())
+    for artifact_id, kind, source in extra_artifacts:
+        if not source.is_file():
+            raise OrchestrationError(f"additional candidate artifact is missing: {source}")
         _write_bytes(artifact_dir / f"{artifact_id}--{kind}", source.read_bytes())
 
 
@@ -508,6 +520,11 @@ def run_smoke(
     commands: NativeCommands,
     *,
     bad_glb: Path | None = None,
+    profile: str = "engine-neutral",
+    rigging_glb: Path | None = None,
+    rigging_request: Path | None = None,
+    project_id: str | None = None,
+    project_template: Path | None = None,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> SmokeResult:
     """Run one complete source-to-certified engine-neutral vertical slice."""
@@ -523,7 +540,50 @@ def run_smoke(
     bindings = _source_bindings(source_dir, source_dir / "source-bundle-draft.json")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    gates, descriptors = _native_profile(commands, runner)
+    if profile not in {"engine-neutral", "native-mvp"}:
+        raise OrchestrationError(f"unsupported certification profile: {profile}")
+    if profile == "native-mvp" and (rigging_glb is None or rigging_request is None):
+        raise OrchestrationError("native-mvp certification requires a pinned rigging GLB and request")
+    if project_id is None:
+        project_id = "wge-native-mvp" if profile == "native-mvp" else "wge-engine-neutral"
+    if not project_id.strip():
+        raise OrchestrationError("certification project_id must not be empty")
+    if project_template is not None:
+        project_template = project_template.expanduser().resolve(strict=True)
+        if commands.ledger is None:
+            raise OrchestrationError("project-spec compilation requires the Rust project ledger CLI")
+    gates, descriptors = _native_profile(commands, profile, runner)
+
+    extra_artifacts: list[tuple[str, str, Path]] = []
+    if rigging_glb is not None or rigging_request is not None:
+        if rigging_glb is None or rigging_request is None:
+            raise OrchestrationError("rigging GLB and preparation request must be supplied together")
+        asset_cli = commands.asset or os.environ.get("WGE_ASSET_CONTRACT", "")
+        if not asset_cli:
+            asset_cli = str(ROOT / "world_core" / "target" / "debug" / "wge-asset-contract")
+        rigging_glb = rigging_glb.expanduser().resolve(strict=True)
+        rigging_request = rigging_request.expanduser().resolve(strict=True)
+        rigging_dir = output_dir / "rigging"
+        rigging_dir.mkdir(parents=True, exist_ok=True)
+        pinned_request = rigging_dir / "request.json"
+        _write_bytes(pinned_request, rigging_request.read_bytes())
+        rigging_receipt_path = rigging_dir / "preparation-receipt.json"
+        preparation = _run(
+            [asset_cli, "prepare", str(rigging_glb), str(pinned_request)],
+            expected_codes=(0,),
+            runner=runner,
+        )
+        if not preparation.stdout.strip():
+            raise OrchestrationError("asset contract returned no typed rigging receipt")
+        _write_bytes(rigging_receipt_path, preparation.stdout.encode("utf-8"))
+        receipt = _read_json(rigging_receipt_path)
+        if not isinstance(receipt, dict) or receipt.get("status") != "ready":
+            raise OrchestrationError("native-mvp rigging input did not produce a ready runtime package")
+        extra_artifacts = [
+            ("hero-glb", "rigging_glb", rigging_glb),
+            ("hero-request", "rigging_request", pinned_request),
+            ("hero-preparation", "rigging_preparation_receipt", rigging_receipt_path),
+        ]
 
     intake_dir = output_dir / "intake"
     intake_dir.mkdir(parents=True, exist_ok=True)
@@ -582,6 +642,33 @@ def run_smoke(
         runner=runner,
     )
 
+    project_spec_path: Path | None = None
+    if project_template is not None:
+        project_spec_path = output_dir / "project_spec.json"
+        compile_result = _run(
+            [
+                commands.ledger,
+                "compile-spec",
+                str(intake_path),
+                str(project_template),
+                "--output",
+                str(project_spec_path),
+            ],
+            runner=runner,
+        )
+        try:
+            compile_summary = json.loads(compile_result.stdout)
+        except json.JSONDecodeError as error:
+            raise OrchestrationError(f"project ledger emitted non-JSON compile output: {error}") from error
+        if not isinstance(compile_summary, dict) or compile_summary.get("status") != "compiled":
+            raise OrchestrationError("project ledger did not report a compiled project spec")
+        extra_artifacts.extend(
+            [
+                ("project-spec", "project_spec", project_spec_path),
+                ("project-template", "project_template", project_template),
+            ]
+        )
+
     bundle = _read_json(bundle_path)
     draft = _read_json(source_dir / "source-bundle-draft.json")
     if not isinstance(bundle, dict) or not isinstance(draft, dict):
@@ -606,13 +693,18 @@ def run_smoke(
     )
     _run([commands.runtime, "verify", "--bundle", str(current_dir)], runner=runner)
 
+    deferred_gate_ids = (
+        ["unity_import", "unity_build", "unity_playthrough"]
+        if profile == "native-mvp"
+        else ["rigging", "unity_import", "unity_build", "unity_playthrough"]
+    )
     project_manifest = {
         "schema_version": "wge.project-manifest/v1",
-        "project_id": "wge-engine-neutral",
+        "project_id": project_id,
         "source_bundle_id": bundle.get("source_bundle_id"),
         "semantic_intake_id": _read_json(intake_path).get("intake_id"),
-        "scope": "engine_neutral_vertical_slice",
-        "deferred_gates": ["rigging", "unity_import", "unity_build", "unity_playthrough"],
+        "scope": "native_mvp_vertical_slice" if profile == "native-mvp" else "engine_neutral_vertical_slice",
+        "deferred_gates": deferred_gate_ids,
     }
     manifest_path = output_dir / "project-manifest.json"
     _write_json(manifest_path, project_manifest)
@@ -627,6 +719,7 @@ def run_smoke(
         before_dir,
         source_dir / "before-layout.json",
         before_artifact_dir,
+        extra_artifacts,
     )
     _stage_candidate(
         source_dir,
@@ -636,6 +729,7 @@ def run_smoke(
         current_dir,
         source_dir / "layout.json",
         current_artifact_dir,
+        extra_artifacts,
     )
     for artifact_dir in (before_artifact_dir, current_artifact_dir):
         _write_bytes(
@@ -723,6 +817,12 @@ def run_smoke(
     before_runtime = runtime_ids(before_candidate)
     current_runtime = runtime_ids(current_candidate)
 
+    receipt_producer = (
+        "wge-native-mvp-orchestrator"
+        if profile == "native-mvp"
+        else "wge-engine-neutral-orchestrator"
+    )
+
     before_visual_payload = {
         "world_artifact_id": before_runtime["world"],
         "capture_artifact_id": before_runtime["capture"],
@@ -737,7 +837,7 @@ def run_smoke(
         "fail",
         list(before_visual_payload.values()),
         before_visual_payload,
-        "wge-engine-neutral-orchestrator",
+        receipt_producer,
         runner,
     )
 
@@ -746,11 +846,22 @@ def run_smoke(
         "provider_response_artifact_id": "provider-response",
         "source_bundle_artifact_id": "source-bundle",
         "layout_artifact_id": "authored-layout",
+        "project_spec_artifact_id": "project-spec" if project_spec_path is not None else None,
+        "project_template_artifact_id": "project-template" if project_spec_path is not None else None,
         "source_artifacts": [
             {"source_id": source_id, "artifact_id": f"source-{index:03d}"}
             for index, (source_id, _path) in enumerate(source_records)
         ],
     }
+    semantic_evidence = [
+        "semantic-intake",
+        "provider-response",
+        "source-bundle",
+        "authored-layout",
+        *[f"source-{index:03d}" for index in range(len(source_records))],
+    ]
+    if project_spec_path is not None:
+        semantic_evidence.extend(["project-spec", "project-template"])
     current_receipts: list[dict[str, object]] = []
     current_receipts.append(
         _seal_receipt(
@@ -760,18 +871,32 @@ def run_smoke(
             descriptors,
             "semantic",
             "pass",
-            [
-                "semantic-intake",
-                "provider-response",
-                "source-bundle",
-                "authored-layout",
-                *[f"source-{index:03d}" for index in range(len(source_records))],
-            ],
+            semantic_evidence,
             semantic_payload,
-            "wge-engine-neutral-orchestrator",
+            receipt_producer,
             runner,
         )
     )
+    if profile == "native-mvp":
+        rigging_payload = {
+            "source_glb_artifact_id": "hero-glb",
+            "preparation_request_artifact_id": "hero-request",
+            "preparation_receipt_artifact_id": "hero-preparation",
+        }
+        current_receipts.append(
+            _seal_receipt(
+                commands,
+                output_dir,
+                current_candidate,
+                descriptors,
+                "rigging",
+                "pass",
+                list(rigging_payload.values()),
+                rigging_payload,
+                receipt_producer,
+                runner,
+            )
+        )
     world_payload = {
         "world_artifact_id": current_runtime["world"],
         "traversal_artifact_id": current_runtime["traversal"],
@@ -787,7 +912,7 @@ def run_smoke(
             "pass",
             list(world_payload.values()),
             world_payload,
-            "wge-engine-neutral-orchestrator",
+            receipt_producer,
             runner,
         )
     )
@@ -808,7 +933,7 @@ def run_smoke(
             "pass",
             list(gameplay_payload.values()),
             gameplay_payload,
-            "wge-engine-neutral-orchestrator",
+            receipt_producer,
             runner,
         )
     )
@@ -830,7 +955,7 @@ def run_smoke(
             "pass",
             ["static-mesh-source", "asset-package"],
             asset_payload,
-            "wge-engine-neutral-orchestrator",
+            receipt_producer,
             runner,
         )
     )
@@ -848,15 +973,19 @@ def run_smoke(
         "pass",
         list(current_visual_payload.values()),
         current_visual_payload,
-        "wge-engine-neutral-orchestrator",
+        receipt_producer,
         runner,
     )
     current_receipts.append(current_visual)
-    for gate_id in ("rigging", "unity_import", "unity_build", "unity_playthrough"):
+    for gate_id in deferred_gate_ids:
         deferred_payload = {
             "reason_code": "deferred_by_scope",
             "deferral_scope": gate_id,
-            "detail": "This certification scope explicitly defers character rigging and Unity integration.",
+            "detail": (
+                "This native MVP scope explicitly defers Unity integration."
+                if profile == "native-mvp"
+                else "This engine-neutral scope explicitly defers character rigging and Unity integration."
+            ),
         }
         current_receipts.append(
             _seal_receipt(
@@ -868,7 +997,7 @@ def run_smoke(
                 "indeterminate",
                 ["project-manifest"],
                 deferred_payload,
-                "wge-engine-neutral-orchestrator",
+                receipt_producer,
                 runner,
             )
         )
@@ -906,6 +1035,84 @@ def run_smoke(
     delta_template = _read_json(source_dir / "repair-delta-draft.json")
     if not isinstance(proposal, dict) or not isinstance(delta_template, dict):
         raise OrchestrationError("native repair proposal or delta draft is not a JSON object")
+
+    # The proposed after-layout is only a model-supplied candidate until the
+    # Rust repair contract authorizes and applies it. Rebuild the runtime from
+    # the bytes emitted by that native application step, then restage the
+    # candidate that will feed the authority plane.
+    applied_layout_path = output_dir / "repair" / "applied-layout.json"
+    application_path = output_dir / "repair" / "application.json"
+    _run(
+        [
+            commands.intake,
+            "apply-repair",
+            str(source_dir / "before-layout.json"),
+            str(proposal_path),
+            str(source_dir / "layout.json"),
+            "--output",
+            str(applied_layout_path),
+            "--receipt",
+            str(application_path),
+        ],
+        runner=runner,
+    )
+    if applied_layout_path.read_bytes() != (source_dir / "layout.json").read_bytes():
+        raise OrchestrationError("native repair application changed the proposed layout bytes")
+    rebuilt_dir = output_dir / "repair" / "rebuilt-current"
+    rebuilt_report = _runtime_build(
+        commands,
+        applied_layout_path,
+        rebuilt_dir,
+        expect_visual_failure=False,
+        runner=runner,
+    )
+    _run([commands.runtime, "verify", "--bundle", str(rebuilt_dir)], runner=runner)
+    for path in sorted(rebuilt_dir.rglob("*")):
+        if path.is_file():
+            _write_bytes(current_dir / path.relative_to(rebuilt_dir), path.read_bytes())
+    _stage_candidate(
+        source_dir,
+        source_records,
+        bundle_path,
+        intake_path,
+        current_dir,
+        applied_layout_path,
+        current_artifact_dir,
+        extra_artifacts,
+    )
+    _write_bytes(current_artifact_dir / "project-manifest--project_manifest", manifest_path.read_bytes())
+    previous_current_sha256 = current_candidate["candidate_sha256"]
+    current_candidate = _candidate_file(
+        project_id=str(project_manifest.get("project_id", "wge-engine-neutral")),
+        snapshot_id="current-certified",
+        artifact_root="current/artifacts",
+        artifact_dir=current_artifact_dir,
+        authorized=target_ids,
+    )
+    current_candidate_path = _candidate_path(output_dir, current_candidate, "current")
+    current_candidate["candidate_sha256"] = _candidate_id(
+        commands, current_candidate_path, output_dir, runner
+    )
+    current_candidate_path = _candidate_path(output_dir, current_candidate, "current")
+    if current_candidate["candidate_sha256"] != previous_current_sha256:
+        raise OrchestrationError("native repair application changed the certified candidate unexpectedly")
+    current_map = artifact_map(current_candidate)
+    changed_ids = sorted(
+        artifact_id
+        for artifact_id in set(before_map) | set(current_map)
+        if artifact_id in before_map
+        and artifact_id in current_map
+        and (
+            before_map[artifact_id]["sha256"] != current_map[artifact_id]["sha256"]
+            or before_map[artifact_id]["kind"] != current_map[artifact_id]["kind"]
+        )
+    )
+    if changed_ids != target_ids:
+        raise OrchestrationError(
+            "native repair application changed an unauthorized artifact set: "
+            f"declared={target_ids!r} actual={changed_ids!r}"
+        )
+    current_report = rebuilt_report
     delta_draft = dict(delta_template)
     delta_draft["proposal_id"] = proposal["proposal_id"]
     delta_draft["candidate_before_sha256"] = before_candidate["candidate_sha256"]
@@ -998,7 +1205,7 @@ def run_smoke(
         "pass",
         ["repair-proposal", "repair-delta-draft", "repair-record"],
         repair_payload,
-        "wge-engine-neutral-orchestrator",
+        receipt_producer,
         runner,
     )
 
@@ -1021,7 +1228,15 @@ def run_smoke(
     request_path = output_dir / "certification-request.json"
     _write_json(request_path, request)
     validate_result = _run(
-        [commands.authority, "validate", str(request_path), "--artifact-root", str(output_dir)],
+        [
+            commands.authority,
+            "validate",
+            str(request_path),
+            "--artifact-root",
+            str(output_dir),
+            "--profile",
+            profile,
+        ],
         runner=runner,
     )
     report = _stdout_json(validate_result, "certification validate")
@@ -1029,7 +1244,8 @@ def run_smoke(
         raise OrchestrationError("native certification report is not a JSON object")
     report_path = output_dir / "certification-report.json"
     _write_json(report_path, report)
-    if report.get("status") != "engine_neutral_certified":
+    expected_status = "native_mvp_certified" if profile == "native-mvp" else "engine_neutral_certified"
+    if report.get("status") != expected_status:
         raise OrchestrationError(f"native certification did not pass: {report.get('reasons')}")
 
     stage_summary = {
@@ -1042,11 +1258,14 @@ def run_smoke(
             "candidate_identity_native_revalidation",
             "native_receipt_sealing",
             "native_typed_repair_reference_and_delta",
+            "native_typed_repair_application_and_rebuild",
             "native_certification_request_and_revalidation",
+            *(["native_mvp_rigging_revalidation"] if profile == "native-mvp" else []),
         ],
         "before_visual_status": before_report.get("visual_status"),
         "current_visual_status": current_report.get("visual_status"),
         "bad_glb_sha256": _digest((output_dir / "negative_controls" / bad_glb.name).read_bytes()) if bad_glb is not None else None,
+        "certification_profile": profile,
         "certification_status": report.get("status"),
         "certification_report_id": report.get("report_id"),
     }

@@ -5,19 +5,62 @@ use wge_gameplay_contract::{
     AbilityId, AbilitySpec, Control, EntityAttributes, EntityId, EntitySpec,
     GAMEPLAY_SNAPSHOT_SCHEMA, GAMEPLAY_TRACE_SCHEMA, GameOutcome, GameSnapshot, GameplayEffect,
     GameplayReceipt, GameplayTag, InputEvent, LocationId, MAX_REPLAY_EVENTS, NavigationGraph,
-    NpcBehavior, ObjectivePrerequisite, ObjectiveSpec, ReplayTrace, TargetingRule, run_replay,
-    verify_replay,
+    NpcAction, NpcBehavior, ObjectivePrerequisite, ObjectiveSpec, ObjectiveState, ReplayTrace,
+    TargetingRule, Transition, run_replay, verify_replay,
 };
 
 use crate::fields::prefixed_sha256;
 use crate::world::validate_world_artifact;
+use crate::world::{cell_is_clear, cell_position};
 use crate::{
-    GAMEPLAY_WORLD_BINDING_SCHEMA, GAMEPLAY_WORLD_VALIDATOR_ID, ReferenceRuntimeError,
-    TRAVERSAL_EVIDENCE_SCHEMA, TraversalEvidence, VISUAL_EVIDENCE_SCHEMA, VisualEvidence,
-    WorldArtifact, validate_traversal_evidence, validate_visual_evidence,
+    GAMEPLAY_CAPTURE_METADATA_SCHEMA, GAMEPLAY_WORLD_BINDING_SCHEMA, GAMEPLAY_WORLD_VALIDATOR_ID,
+    REFERENCE_TICK_RATE_HZ, ReferenceRuntimeError, TRAVERSAL_EVIDENCE_SCHEMA, TraversalEvidence,
+    VISUAL_EVIDENCE_SCHEMA, VisualEvidence, WorldArtifact, validate_traversal_evidence,
+    validate_visual_evidence,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeCapturePhase {
+    WorldOverviewBeforePlaythrough,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeCaptureMetadata {
+    pub schema_version: String,
+    pub world_artifact_id: String,
+    pub capture_sha256: String,
+    pub visual_evidence_sha256: String,
+    pub capture_format: String,
+    pub camera: crate::ReferenceCamera,
+    pub phase: RuntimeCapturePhase,
+    pub simulation_tick: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeEntityPose {
+    pub entity_id: EntityId,
+    pub cell: usize,
+    pub position_xyz_m: [f64; 3],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct GameplayTickTelemetry {
+    pub tick: u64,
+    pub elapsed_nanoseconds: u64,
+    pub input_event: InputEvent,
+    pub transition: Transition,
+    pub npc_action: NpcAction,
+    pub entity_poses: Vec<RuntimeEntityPose>,
+    pub objective_state: ObjectiveState,
+    pub outcome: GameOutcome,
+    pub state_sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GameplayWorldBindingBody {
     pub schema_version: String,
@@ -31,10 +74,13 @@ pub struct GameplayWorldBindingBody {
     pub gameplay_snapshot: GameSnapshot,
     pub gameplay_trace: ReplayTrace,
     pub gameplay_receipt: GameplayReceipt,
+    pub fixed_tick_rate_hz: u32,
+    pub telemetry: Vec<GameplayTickTelemetry>,
+    pub capture: RuntimeCaptureMetadata,
     pub outcome: GameOutcome,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GameplayWorldBinding {
     pub body: GameplayWorldBindingBody,
@@ -59,6 +105,8 @@ pub fn build_gameplay_world_binding(
             "world-bound gameplay replay did not win".into(),
         ));
     }
+    let telemetry = build_telemetry(world, &snapshot, &trace, &receipt)?;
+    let capture_metadata = build_capture_metadata(world, capture, visual)?;
     let body = GameplayWorldBindingBody {
         schema_version: GAMEPLAY_WORLD_BINDING_SCHEMA.into(),
         validator_id: GAMEPLAY_WORLD_VALIDATOR_ID.into(),
@@ -72,6 +120,9 @@ pub fn build_gameplay_world_binding(
         gameplay_trace: trace,
         outcome: receipt.body.outcome,
         gameplay_receipt: receipt,
+        fixed_tick_rate_hz: REFERENCE_TICK_RATE_HZ,
+        telemetry,
+        capture: capture_metadata,
     };
     let evidence_sha256 = prefixed_sha256(&serde_json::to_vec(&body).map_err(|error| {
         ReferenceRuntimeError::contract(format!("gameplay binding encoding failed: {error}"))
@@ -113,6 +164,21 @@ pub fn validate_gameplay_world_binding(
             "gameplay binding points at different world or runtime evidence".into(),
         ));
     }
+    if binding.body.fixed_tick_rate_hz != REFERENCE_TICK_RATE_HZ
+        || binding.body.telemetry
+            != build_telemetry(
+                world,
+                &binding.body.gameplay_snapshot,
+                &binding.body.gameplay_trace,
+                &binding.body.gameplay_receipt,
+            )?
+        || binding.body.capture != build_capture_metadata(world, capture, visual)?
+    {
+        return Err(ReferenceRuntimeError::provenance(
+            "gameplay telemetry or capture metadata differs from the world-bound fixed-tick replay"
+                .into(),
+        ));
+    }
     let (encounter_id, expected_snapshot, expected_trace) = gameplay_case(world)?;
     if binding.body.primary_encounter_id != encounter_id
         || binding.body.gameplay_snapshot != expected_snapshot
@@ -140,6 +206,122 @@ pub fn validate_gameplay_world_binding(
         ));
     }
     Ok(())
+}
+
+fn build_capture_metadata(
+    world: &WorldArtifact,
+    capture_bytes: &[u8],
+    visual: &VisualEvidence,
+) -> Result<RuntimeCaptureMetadata, ReferenceRuntimeError> {
+    let capture_sha256 = prefixed_sha256(capture_bytes);
+    if visual.body.capture_sha256 != capture_sha256
+        || visual.body.camera != world.body.authored_layout.reference_camera
+    {
+        return Err(ReferenceRuntimeError::provenance(
+            "runtime capture metadata does not match the measured world capture".into(),
+        ));
+    }
+    Ok(RuntimeCaptureMetadata {
+        schema_version: GAMEPLAY_CAPTURE_METADATA_SCHEMA.into(),
+        world_artifact_id: world.artifact_id.clone(),
+        capture_sha256,
+        visual_evidence_sha256: visual.evidence_sha256.clone(),
+        capture_format: visual.body.capture_format.clone(),
+        camera: visual.body.camera.clone(),
+        phase: RuntimeCapturePhase::WorldOverviewBeforePlaythrough,
+        simulation_tick: 0,
+    })
+}
+
+fn build_telemetry(
+    world: &WorldArtifact,
+    snapshot: &GameSnapshot,
+    trace: &ReplayTrace,
+    receipt: &GameplayReceipt,
+) -> Result<Vec<GameplayTickTelemetry>, ReferenceRuntimeError> {
+    if receipt.body.events.len() != trace.events.len() || receipt.body.events.is_empty() {
+        return Err(ReferenceRuntimeError::provenance(
+            "gameplay receipt does not contain one tick for every input event".into(),
+        ));
+    }
+    let layout = &world.body.authored_layout;
+    let mut locations: BTreeMap<EntityId, LocationId> = snapshot
+        .entities
+        .iter()
+        .map(|(entity_id, entity)| (entity_id.clone(), entity.location.clone()))
+        .collect();
+    let mut objective_state = ObjectiveState::Available;
+    let last_index = receipt.body.events.len() - 1;
+    let mut telemetry = Vec::with_capacity(receipt.body.events.len());
+    for (index, (event, input)) in receipt.body.events.iter().zip(&trace.events).enumerate() {
+        if event.event_index != index || event.input != *input || event.tick != index as u64 + 1 {
+            return Err(ReferenceRuntimeError::provenance(
+                "gameplay receipt ticks or inputs are not a contiguous fixed-tick replay".into(),
+            ));
+        }
+        if let Transition::EntityMoved { entity, to, .. } = &event.transition {
+            locations.insert(entity.clone(), to.clone());
+        }
+        if matches!(event.transition, Transition::ObjectiveSecured { .. }) {
+            objective_state = ObjectiveState::Secured;
+        }
+
+        let mut entity_poses = Vec::with_capacity(locations.len());
+        for (entity_id, location) in &locations {
+            let cell = parse_cell_location(location)?;
+            let position_xz = cell_position(layout, cell);
+            if !cell_is_clear(layout, &world.body.fields, cell) {
+                return Err(ReferenceRuntimeError::contract(format!(
+                    "gameplay telemetry places entity {} inside blocked world cell {cell}",
+                    entity_id.as_str()
+                )));
+            }
+            entity_poses.push(RuntimeEntityPose {
+                entity_id: entity_id.clone(),
+                cell,
+                position_xyz_m: [
+                    position_xz[0],
+                    world.body.fields.heights_m[cell],
+                    position_xz[1],
+                ],
+            });
+        }
+        let tick = event.tick;
+        let elapsed_nanoseconds = tick.checked_mul(1_000_000_000).ok_or_else(|| {
+            ReferenceRuntimeError::contract("runtime elapsed time overflow".into())
+        })? / u64::from(REFERENCE_TICK_RATE_HZ);
+        telemetry.push(GameplayTickTelemetry {
+            tick,
+            elapsed_nanoseconds,
+            input_event: input.clone(),
+            transition: event.transition.clone(),
+            npc_action: event.npc_action.clone(),
+            entity_poses,
+            objective_state,
+            outcome: if index == last_index {
+                receipt.body.outcome
+            } else {
+                GameOutcome::InProgress
+            },
+            state_sha256: event.resulting_state_sha256.clone(),
+        });
+    }
+    Ok(telemetry)
+}
+
+fn parse_cell_location(location: &LocationId) -> Result<usize, ReferenceRuntimeError> {
+    let cell = location
+        .as_str()
+        .strip_prefix("cell_")
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|cell| format!("cell_{cell}") == location.as_str())
+        .ok_or_else(|| {
+            ReferenceRuntimeError::contract(format!(
+                "gameplay location {:?} is not bound to a world grid cell",
+                location.as_str()
+            ))
+        })?;
+    Ok(cell)
 }
 
 fn gameplay_case(

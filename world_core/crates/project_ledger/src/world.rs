@@ -11,9 +11,16 @@ use std::path::Path;
 
 use serde_json::{Map, Value};
 
-use crate::{ArtifactRef, LedgerError, ProjectSpec, sha256_prefixed};
+use crate::{ArtifactRef, LedgerError, ProjectSpec, sha256_prefixed, validate_relative_path};
+use wge_reference_runtime::{
+    TRAVERSAL_EVIDENCE_SCHEMA, TraversalEvidence, WORLD_SCHEMA, WorldArtifact,
+    validate_traversal_evidence, validate_world_artifact,
+};
 
 pub fn validate_world_bundle(root: &Path, spec: &ProjectSpec) -> Result<(), LedgerError> {
+    if let Some(bundle) = &spec.world.reference_runtime {
+        return validate_reference_runtime_bundle(root, spec, bundle);
+    }
     let terrain = read_artifact_json(root, &spec.world.terrain, "terrain")?;
     let collision = read_artifact_json(root, &spec.world.collision, "collision")?;
     let navigation = read_artifact_json(root, &spec.world.navigation, "navigation")?;
@@ -21,6 +28,150 @@ pub fn validate_world_bundle(root: &Path, spec: &ProjectSpec) -> Result<(), Ledg
     validate_collision(&collision, spec)?;
     validate_navigation(&navigation, spec)?;
     Ok(())
+}
+
+fn validate_reference_runtime_bundle(
+    root: &Path,
+    spec: &ProjectSpec,
+    bundle: &crate::ReferenceRuntimeWorldBundle,
+) -> Result<(), LedgerError> {
+    let world = read_reference_artifact::<WorldArtifact>(
+        root,
+        &bundle.world_artifact,
+        "reference world",
+        "reference_world",
+        WORLD_SCHEMA,
+    )?;
+    if bundle.world_artifact.artifact_id != world.artifact_id {
+        return Err(LedgerError::Provenance(
+            "reference world artifact ID does not match the sealed runtime artifact".into(),
+        ));
+    }
+    validate_world_artifact(&world).map_err(runtime_error)?;
+
+    let traversal = read_reference_artifact::<TraversalEvidence>(
+        root,
+        &bundle.traversal_evidence,
+        "reference traversal",
+        "traversal_evidence",
+        TRAVERSAL_EVIDENCE_SCHEMA,
+    )?;
+    let traversal_id = format!(
+        "traversal-{}",
+        traversal.evidence_sha256.trim_start_matches("sha256:")
+    );
+    if bundle.traversal_evidence.artifact_id != traversal_id {
+        return Err(LedgerError::Provenance(
+            "traversal artifact ID does not match the sealed runtime evidence".into(),
+        ));
+    }
+    validate_traversal_evidence(&world, &traversal).map_err(runtime_error)?;
+
+    let layout = &world.body.authored_layout;
+    if spec.world.world_id != world.body.world_id
+        || !same_measure(spec.world.dimensions_m[0], layout.width_m)
+        || !same_measure(spec.world.dimensions_m[1], layout.length_m)
+    {
+        return Err(LedgerError::Provenance(
+            "project world identity or dimensions do not match the reference runtime artifact"
+                .into(),
+        ));
+    }
+    if spec.world.objective.objective_id != layout.traversal.objective_id
+        || spec.gameplay.objective_id != layout.traversal.objective_id
+        || spec.gameplay.start_entity_id != layout.traversal.start_spawn_id
+        || traversal.body.world_artifact_id != world.artifact_id
+        || traversal.body.world_artifact_sha256 != world.artifact_sha256
+        || traversal.body.objective_id != spec.world.objective.objective_id
+    {
+        return Err(LedgerError::Provenance(
+            "project objective, start spawn, and traversal identities do not match the runtime world"
+                .into(),
+        ));
+    }
+
+    let authored_spawns = &layout.spawns;
+    if authored_spawns.len() != spec.world.spawns.len() {
+        return Err(LedgerError::Contract(
+            "project spawn set does not match the authored reference world".into(),
+        ));
+    }
+    for spawn in &spec.world.spawns {
+        let Some(native) = authored_spawns
+            .iter()
+            .find(|native| native.spawn_id == spawn.spawn_id)
+        else {
+            return Err(LedgerError::Provenance(format!(
+                "project spawn {} is absent from the reference world",
+                spawn.spawn_id
+            )));
+        };
+        let expected_team = match native.role {
+            wge_reference_runtime::SpawnRole::PlayerStart => "player",
+            wge_reference_runtime::SpawnRole::Opponent => "opponent",
+        };
+        if spawn.team != expected_team
+            || !same_measure(spawn.position_xz_m[0], native.position_xz_m[0])
+            || !same_measure(spawn.position_xz_m[1], native.position_xz_m[1])
+        {
+            return Err(LedgerError::Provenance(format!(
+                "project spawn {} differs from its authored runtime identity",
+                spawn.spawn_id
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn read_reference_artifact<T: serde::de::DeserializeOwned>(
+    root: &Path,
+    artifact: &ArtifactRef,
+    label: &str,
+    expected_kind: &str,
+    expected_schema: &str,
+) -> Result<T, LedgerError> {
+    if artifact.kind != expected_kind
+        || artifact.schema_version != expected_schema
+        || artifact.producer != "wge-reference-runtime"
+    {
+        return Err(LedgerError::Contract(format!(
+            "{label} reference must name the registered native runtime schema, kind, and producer"
+        )));
+    }
+    validate_relative_path(&artifact.path, &format!("{label} artifact path"))?;
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|error| LedgerError::Io(format!("{}: {error}", root.display())))?;
+    let path = canonical_root.join(Path::new(&artifact.path));
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|error| LedgerError::Io(format!("{}: {error}", path.display())))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err(LedgerError::Contract(format!(
+            "{label} artifact path escapes the candidate root: {}",
+            artifact.path
+        )));
+    }
+    let bytes = fs::read(&canonical_path)
+        .map_err(|error| LedgerError::Io(format!("{}: {error}", canonical_path.display())))?;
+    if sha256_prefixed(&bytes) != artifact.sha256 {
+        return Err(LedgerError::Provenance(format!(
+            "{label} file digest does not match its declared artifact reference"
+        )));
+    }
+    serde_json::from_slice(&bytes)
+        .map_err(|error| LedgerError::Json(format!("{}: {error}", canonical_path.display())))
+}
+
+fn runtime_error(error: wge_reference_runtime::ReferenceRuntimeError) -> LedgerError {
+    match error.code {
+        "provenance_failure" => LedgerError::Provenance(error.to_string()),
+        _ => LedgerError::Contract(error.to_string()),
+    }
+}
+
+fn same_measure(left: f64, right: f64) -> bool {
+    (left - right).abs() <= 1e-9
 }
 
 fn read_artifact_json(

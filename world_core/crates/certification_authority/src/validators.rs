@@ -5,6 +5,7 @@ use crate::{
     AuthorityError, CandidateContext, ReceiptEnvelope, ReceiptStatus, ValidatedReceipt,
     ValidatorKind, parse_artifact, sha256_prefixed,
 };
+use wge_asset_contract::runtime as asset_runtime;
 use wge_intake_repair_contract as intake;
 use wge_reference_runtime as runtime;
 
@@ -17,6 +18,8 @@ const INTAKE_KIND: &str = "semantic_intake";
 const PROVIDER_RESPONSE_KIND: &str = "provider_response";
 const SOURCE_BUNDLE_KIND: &str = "source_bundle";
 const SOURCE_BYTES_KIND: &str = "source_bytes";
+const PROJECT_SPEC_KIND: &str = "project_spec";
+const PROJECT_TEMPLATE_KIND: &str = "project_template";
 
 #[derive(Clone, Debug)]
 pub(crate) struct DomainVerdict {
@@ -40,6 +43,7 @@ pub(crate) fn validate(
         ValidatorKind::World => validate_world(envelope, candidate),
         ValidatorKind::Gameplay => validate_gameplay(envelope, candidate),
         ValidatorKind::Asset => validate_asset(envelope, candidate),
+        ValidatorKind::Rigging => validate_rigging(envelope, candidate),
         ValidatorKind::Visual => validate_visual(envelope, candidate),
         ValidatorKind::Repair => validate_repair(envelope, candidate, candidates, validated),
         ValidatorKind::Deferred => validate_deferred(envelope, candidate),
@@ -80,6 +84,56 @@ fn validate_semantic(
     let bundle: intake::SourceBundle = parse_artifact(bundle_bytes, "source bundle")?;
     let layout: runtime::AuthoredLayout = parse_artifact(layout_bytes, "typed authored layout")?;
     runtime::validate_layout(&layout).map_err(runtime_error)?;
+    let project_spec_id = payload.project_spec_artifact_id.as_ref();
+    let project_template_id = payload.project_template_artifact_id.as_ref();
+    if project_spec_id.is_some() != project_template_id.is_some() {
+        return Err(AuthorityError::new(
+            "provenance",
+            "compiled project spec and project template must be bound together",
+        ));
+    }
+    let project_definition = if let (Some(spec_id), Some(template_id)) =
+        (project_spec_id, project_template_id)
+    {
+        let spec_bytes = bound_artifact(envelope, candidate, spec_id, PROJECT_SPEC_KIND)?;
+        let template_bytes =
+            bound_artifact(envelope, candidate, template_id, PROJECT_TEMPLATE_KIND)?;
+        let spec: wge_project_ledger::ProjectSpec =
+            parse_artifact(spec_bytes, "compiled project spec")?;
+        let template: wge_project_ledger::ProjectTemplate =
+            parse_artifact(template_bytes, "typed project template")?;
+        wge_project_ledger::validate_spec(&spec).map_err(|error| {
+            AuthorityError::new("contract", format!("compiled project spec failed: {error}"))
+        })?;
+        if spec.project_id != candidate.project_id {
+            return Err(AuthorityError::new(
+                "provenance",
+                "compiled project spec project_id differs from the candidate",
+            ));
+        }
+        let compiled =
+            wge_project_ledger::compile_project_spec(&semantic, template).map_err(|error| {
+                AuthorityError::new(
+                    "provenance",
+                    format!("project template does not compile against canonical intake: {error}"),
+                )
+            })?;
+        let supplied_value = serde_json::to_value(&spec)
+            .map_err(|error| AuthorityError::new("malformed", error.to_string()))?;
+        let compiled_value = serde_json::to_value(&compiled)
+            .map_err(|error| AuthorityError::new("malformed", error.to_string()))?;
+        if wge_project_ledger::canonical_json(&supplied_value)
+            != wge_project_ledger::canonical_json(&compiled_value)
+        {
+            return Err(AuthorityError::new(
+                "provenance",
+                "compiled project spec differs from the canonical intake/template compilation",
+            ));
+        }
+        Some((spec_id.clone(), template_id.clone()))
+    } else {
+        None
+    };
     if bundle.request_id != semantic.request_id
         || bundle.source_bundle_id != semantic.source_bundle_id
         || bundle.sources != semantic.sources
@@ -105,6 +159,10 @@ fn validate_semantic(
             "authored_layout".to_owned(),
         ),
     ]);
+    if let Some((spec_id, template_id)) = project_definition {
+        expected.insert(spec_id, PROJECT_SPEC_KIND.to_owned());
+        expected.insert(template_id, PROJECT_TEMPLATE_KIND.to_owned());
+    }
     let mut source_ids = BTreeSet::new();
     let mut layout_source_typed_match = false;
     for binding in &payload.source_artifacts {
@@ -446,6 +504,116 @@ fn validate_asset(
         metric_id: intake::MetricId::MissingAssetFeatures,
         metric_value: 0.0,
         failure_code: None,
+    })
+}
+
+fn validate_rigging(
+    envelope: &ReceiptEnvelope,
+    candidate: &CandidateContext,
+) -> Result<DomainVerdict, AuthorityError> {
+    let payload: RiggingReceiptPayload = parse_payload(envelope, "rigging")?;
+    let glb = bound_artifact(
+        envelope,
+        candidate,
+        &payload.source_glb_artifact_id,
+        "rigging_glb",
+    )?;
+    let request_bytes = bound_artifact(
+        envelope,
+        candidate,
+        &payload.preparation_request_artifact_id,
+        "rigging_request",
+    )?;
+    let receipt_bytes = bound_artifact(
+        envelope,
+        candidate,
+        &payload.preparation_receipt_artifact_id,
+        "rigging_preparation_receipt",
+    )?;
+    require_exact_evidence(
+        envelope,
+        &BTreeMap::from([
+            (
+                payload.source_glb_artifact_id.clone(),
+                "rigging_glb".to_owned(),
+            ),
+            (
+                payload.preparation_request_artifact_id.clone(),
+                "rigging_request".to_owned(),
+            ),
+            (
+                payload.preparation_receipt_artifact_id.clone(),
+                "rigging_preparation_receipt".to_owned(),
+            ),
+        ]),
+    )?;
+
+    let request_value: serde_json::Value = parse_artifact(request_bytes, "rigging request")?;
+    let request: asset_runtime::AssetPreparationRequest =
+        parse_artifact(request_bytes, "typed rigging preparation request")?;
+    if serde_json::to_value(&request).ok().as_ref() != Some(&request_value) {
+        return Err(AuthorityError::new(
+            "malformed",
+            "rigging request contains fields outside the registered typed schema",
+        ));
+    }
+    if request.asset_use != wge_asset_contract::AssetUse::Character || request.rig.is_none() {
+        return Err(AuthorityError::new(
+            "contract",
+            "native rigging evidence requires a character request with a rig contract",
+        ));
+    }
+
+    let supplied_value: serde_json::Value =
+        parse_artifact(receipt_bytes, "asset preparation receipt")?;
+    let supplied: asset_runtime::AssetPreparationReceipt =
+        parse_artifact(receipt_bytes, "typed asset preparation receipt")?;
+    if serde_json::to_value(&supplied).ok().as_ref() != Some(&supplied_value) {
+        return Err(AuthorityError::new(
+            "malformed",
+            "asset preparation receipt contains fields outside its typed schema",
+        ));
+    }
+    let measured = asset_runtime::prepare_asset(glb, &request).map_err(|error| {
+        AuthorityError::new("contract", format!("GLB preparation failed: {error}"))
+    })?;
+    if supplied != measured {
+        return Err(AuthorityError::new(
+            "provenance",
+            "candidate-bound preparation receipt differs from independent GLB/request revalidation",
+        ));
+    }
+    if supplied.status == asset_runtime::PreparationStatus::Ready
+        && (supplied.package.is_none() || !supplied.findings.is_empty())
+    {
+        return Err(AuthorityError::new(
+            "contract",
+            "ready rigging receipt must carry a prepared package and no findings",
+        ));
+    }
+    let status = match supplied.status {
+        asset_runtime::PreparationStatus::Ready => ReceiptStatus::Pass,
+        asset_runtime::PreparationStatus::Rejected => ReceiptStatus::Fail,
+    };
+    Ok(DomainVerdict {
+        status,
+        detail: match &supplied.package {
+            Some(package) => format!(
+                "runtime preparation {} independently revalidated: {} joints, {} clips, {} sockets",
+                package.package_id,
+                package.rig.as_ref().map_or(0, |rig| rig.joint_names.len()),
+                package.animations.len(),
+                package.sockets.len()
+            ),
+            None => format!(
+                "GLB failed native rigging preparation with {} independently revalidated findings",
+                supplied.findings.len()
+            ),
+        },
+        measured_artifact_id: payload.preparation_receipt_artifact_id,
+        metric_id: intake::MetricId::MissingAssetFeatures,
+        metric_value: supplied.findings.len() as f64,
+        failure_code: (status == ReceiptStatus::Fail).then(|| "rigging_preparation_failed".into()),
     })
 }
 

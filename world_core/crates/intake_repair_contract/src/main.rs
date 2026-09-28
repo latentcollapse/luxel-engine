@@ -6,8 +6,8 @@ use std::process::ExitCode;
 
 use wge_intake_repair_contract::{
     IntakeDraft, RepairEvidenceDelta, RepairProposal, RepairProposalDraft, SemanticIntake,
-    SourceBundle, SourceBundleDraft, normalize_intake, normalize_repair_proposal, parse_json,
-    prepare_source_bundle, to_pretty_json, validate_delta_identity, validate_intake,
+    SourceBundle, SourceBundleDraft, apply_repair, normalize_intake, normalize_repair_proposal,
+    parse_json, prepare_source_bundle, to_pretty_json, validate_delta_identity, validate_intake,
     validate_repair_proposal, validate_source_bundle,
 };
 
@@ -98,6 +98,22 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
             println!("proposal-valid {}", proposal.proposal_id);
             Ok(())
         }
+        "apply-repair" if arguments.len() == 8 => {
+            let before = read(&arguments[1])?;
+            let proposal: RepairProposal =
+                parse_json(&read(&arguments[2])?).map_err(|e| e.to_string())?;
+            let proposed = read(&arguments[3])?;
+            if arguments[4] != "--output" || arguments[6] != "--receipt" {
+                return Err(usage());
+            }
+            let (applied, application) =
+                apply_repair(&proposal, &before, &proposed).map_err(|e| e.to_string())?;
+            fs::write(&arguments[5], applied)
+                .map_err(|error| format!("{}: {error}", Path::new(&arguments[5]).display()))?;
+            write_json(&arguments[7], &application)?;
+            println!("{}", application.after_sha256);
+            Ok(())
+        }
         "validate-delta-identity" if arguments.len() == 2 => {
             let delta: RepairEvidenceDelta =
                 parse_json(&read(&arguments[1])?).map_err(|e| e.to_string())?;
@@ -110,7 +126,7 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage:\n  wge-intake-repair prepare-source-bundle DRAFT.json OUTPUT.json source_ref=PATH...\n  wge-intake-repair validate-source-bundle BUNDLE.json source_id=PATH...\n  wge-intake-repair normalize-intake DRAFT.json SOURCE_BUNDLE.json PROVIDER_RESPONSE OUTPUT.json source_id=PATH...\n  wge-intake-repair validate-intake INTAKE.json PROVIDER_RESPONSE source_id=PATH...\n  wge-intake-repair normalize-repair-proposal DRAFT.json OUTPUT.json\n  wge-intake-repair validate-repair-proposal PROPOSAL.json\n  wge-intake-repair validate-delta-identity DELTA.json\n\nFull repair evidence verification is exposed through the Rust API and requires the integrating Rust native-validator registry."
+    "usage:\n  wge-intake-repair prepare-source-bundle DRAFT.json OUTPUT.json source_ref=PATH...\n  wge-intake-repair validate-source-bundle BUNDLE.json source_id=PATH...\n  wge-intake-repair normalize-intake DRAFT.json SOURCE_BUNDLE.json PROVIDER_RESPONSE OUTPUT.json source_id=PATH...\n  wge-intake-repair validate-intake INTAKE.json PROVIDER_RESPONSE source_id=PATH...\n  wge-intake-repair normalize-repair-proposal DRAFT.json OUTPUT.json\n  wge-intake-repair validate-repair-proposal PROPOSAL.json\n  wge-intake-repair apply-repair BEFORE_LAYOUT.json PROPOSAL.json PROPOSED_LAYOUT.json --output APPLIED_LAYOUT.json --receipt APPLICATION.json\n  wge-intake-repair validate-delta-identity DELTA.json\n\nFull repair evidence verification is exposed through the Rust API and requires the integrating Rust native-validator registry."
         .into()
 }
 

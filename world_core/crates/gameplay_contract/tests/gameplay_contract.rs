@@ -40,6 +40,19 @@ fn known_good_playthrough_wins_and_receipt_is_byte_stable() {
 
     let first = run_replay(&fixture.snapshot, &fixture.trace).expect("known-good trace completes");
     let second = run_replay(&fixture.snapshot, &fixture.trace).expect("same trace replays");
+    assert_eq!(
+        wge_gameplay_contract::GAMEPLAY_FIXED_TICK_RATE_HZ,
+        30,
+        "the contract declares its deterministic fixed simulation rate"
+    );
+    assert!(
+        first
+            .body
+            .events
+            .iter()
+            .enumerate()
+            .all(|(index, event)| event.tick == index as u64 + 1)
+    );
     assert_eq!(first.body.outcome, GameOutcome::Won);
     assert_eq!(first.body.event_count, 9);
     let expected: ExpectedReceipt = serde_json::from_str(include_str!(
@@ -294,7 +307,17 @@ fn npc_can_defeat_both_playable_entities_and_produce_a_loss() {
     trace.events.extend((0..5).map(|_| InputEvent::Wait));
 
     let receipt = run_replay(&fixture.snapshot, &trace).expect("loss is a valid terminal outcome");
+    let replayed = run_replay(&fixture.snapshot, &trace).expect("loss replay is deterministic");
     assert_eq!(receipt.body.outcome, GameOutcome::Lost);
+    assert_eq!(
+        receipt.canonical_bytes().unwrap(),
+        replayed.canonical_bytes().unwrap()
+    );
+    assert_eq!(receipt.body.final_state.tick, trace.events.len() as u64);
+    assert_eq!(
+        receipt.body.events.last().unwrap().resulting_state_sha256,
+        receipt.body.final_state_sha256
+    );
     assert!(
         receipt
             .body

@@ -5274,8 +5274,10 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "wge-asset-contract",
  "wge-gameplay-contract",
  "wge-intake-repair-contract",
+ "wge-project-ledger",
  "wge-reference-runtime",
 ]
 
@@ -5304,6 +5306,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "wge-intake-repair-contract",
+ "wge-reference-runtime",
 ]
 
 [[package]]

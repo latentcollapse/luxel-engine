@@ -27,6 +27,17 @@ and a gate report. A failed visual gate is preserved as failed evidence and
 returns exit code 2. The crate does not inspect or promote the supplied GLB and
 has no engine import dependency.
 
+The gameplay/world binding uses `wge.gameplay-world-binding/v2`. It includes a
+30 Hz deterministic action-tick stream with world-cell poses, input and NPC
+transitions, objective/outcome state, and the gameplay state digest at each
+tick. Its capture metadata identifies the exact overview capture bytes, visual
+receipt, camera, and capture phase; the overview is explicitly marked as taken
+before play begins. Native verification reconstructs the telemetry from the
+world and replay and rejects rehashed telemetry or capture metadata that does
+not match. This reference evidence does not establish target-engine import,
+build, or playthrough behavior; those still require evidence from the normal
+engine and MCP path.
+
 The JSON exchange schema and Julia worker are in
 `terrain_lab/bin/wge_reference_world_fields.jl`. The receipt retains exact
 request/response bytes and pins the worker and terrain project digests. Rust

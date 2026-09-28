@@ -15,7 +15,8 @@ mod world;
 
 pub use fields::{JuliaFieldProvenance, JuliaFieldResponse, NumericalFields};
 pub use gameplay_binding::{
-    GameplayWorldBinding, GameplayWorldBindingBody, build_gameplay_world_binding,
+    GameplayTickTelemetry, GameplayWorldBinding, GameplayWorldBindingBody, RuntimeCaptureMetadata,
+    RuntimeCapturePhase, RuntimeEntityPose, build_gameplay_world_binding,
     validate_gameplay_world_binding,
 };
 pub use model::{
@@ -44,8 +45,10 @@ pub const TRAVERSAL_EVIDENCE_SCHEMA: &str = "wge.reference-traversal-evidence/v1
 pub const VISUAL_EVIDENCE_SCHEMA: &str = "wge.reference-visual-evidence/v1";
 pub const TRAVERSAL_VALIDATOR_ID: &str = "wge.reference-runtime.traversal/v1";
 pub const VISUAL_VALIDATOR_ID: &str = "wge.reference-runtime.visual/v1";
-pub const GAMEPLAY_WORLD_BINDING_SCHEMA: &str = "wge.gameplay-world-binding/v1";
-pub const GAMEPLAY_WORLD_VALIDATOR_ID: &str = "wge.reference-runtime.gameplay-binding/v1";
+pub const GAMEPLAY_WORLD_BINDING_SCHEMA: &str = "wge.gameplay-world-binding/v2";
+pub const GAMEPLAY_WORLD_VALIDATOR_ID: &str = "wge.reference-runtime.gameplay-binding/v2";
+pub const GAMEPLAY_CAPTURE_METADATA_SCHEMA: &str = "wge.reference-runtime-capture-metadata/v1";
+pub const REFERENCE_TICK_RATE_HZ: u32 = wge_gameplay_contract::GAMEPLAY_FIXED_TICK_RATE_HZ;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReferenceRuntimeError {

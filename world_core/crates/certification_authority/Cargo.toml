@@ -12,7 +12,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 wge-gameplay-contract = { path = "../gameplay_contract" }
+wge-asset-contract = { path = "../asset_contract" }
 wge-intake-repair-contract = { path = "../intake_repair_contract" }
+wge-project-ledger = { path = "../project_ledger" }
 wge-reference-runtime = { path = "../reference_runtime" }
 
 [[bin]]

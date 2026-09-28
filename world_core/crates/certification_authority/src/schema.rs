@@ -21,6 +21,12 @@ pub struct SemanticReceiptPayload {
     /// Typed authored layout, also represented by one provider-bound design
     /// source in `source_artifacts` so the semantic and world gates cannot drift.
     pub layout_artifact_id: String,
+    /// Native MVP binds the compiled project definition into the candidate
+    /// and lets the authority recompile it from the exact intake/template.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_spec_artifact_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_template_artifact_id: Option<String>,
     pub source_artifacts: Vec<SourceArtifactBinding>,
 }
 
@@ -81,6 +87,17 @@ pub struct AssetReceiptPayload {
     pub source_artifact_id: String,
     pub package_artifact_id: String,
     pub asset_use: AssetUse,
+}
+
+/// Native rigging evidence binds the exact source GLB, typed preparation
+/// request, and raw `wge-asset-contract` receipt bytes. The authority reruns
+/// preparation itself before allowing this gate to pass.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RiggingReceiptPayload {
+    pub source_glb_artifact_id: String,
+    pub preparation_request_artifact_id: String,
+    pub preparation_receipt_artifact_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

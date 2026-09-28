@@ -5,12 +5,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use wge_gameplay_contract::GameOutcome;
+use wge_gameplay_contract::{FailureCode, GameOutcome, InputEvent, run_replay};
 use wge_reference_runtime::{
-    AuthoredLayout, GameplayWorldBinding, TraversalEvidence, TraversalOutcome, VisualEvidence,
-    VisualGateStatus, WorldArtifact, build_from_layout_path, validate_gameplay_world_binding,
-    validate_layout, validate_traversal_evidence, validate_visual_evidence,
-    validate_world_artifact,
+    AuthoredLayout, GameplayWorldBinding, REFERENCE_TICK_RATE_HZ, RuntimeCapturePhase,
+    TraversalEvidence, TraversalOutcome, VisualEvidence, VisualGateStatus, WorldArtifact,
+    build_from_layout_path, validate_gameplay_world_binding, validate_layout,
+    validate_traversal_evidence, validate_visual_evidence, validate_world_artifact,
 };
 
 static TEMP_ID: AtomicU64 = AtomicU64::new(0);
@@ -120,6 +120,11 @@ fn fresh_cli_build_replays_gameplay_and_verifies_the_saved_candidate() {
     assert_eq!(report["status"], "passed");
     assert_eq!(report["traversal_outcome"], "completed");
     assert_eq!(report["gameplay_outcome"], "won");
+    assert_eq!(
+        report["gameplay_fixed_tick_rate_hz"],
+        REFERENCE_TICK_RATE_HZ
+    );
+    assert!(report["gameplay_telemetry_ticks"].as_u64().unwrap() > 0);
     assert_eq!(report["visual_status"], "passed");
 
     for filename in [
@@ -214,6 +219,125 @@ fn fresh_cli_build_replays_gameplay_and_verifies_the_saved_candidate() {
     }
     fs::remove_dir_all(first_dir).unwrap();
     fs::remove_dir_all(second_dir).unwrap();
+}
+
+#[test]
+fn world_bound_gameplay_ticks_cover_the_real_route_and_bind_capture_metadata() {
+    let built = build_layout(&example_layout(), "runtime-telemetry").unwrap();
+    let binding = &built.gameplay.body;
+
+    assert_eq!(binding.fixed_tick_rate_hz, REFERENCE_TICK_RATE_HZ);
+    assert_eq!(
+        binding.telemetry.len(),
+        binding.gameplay_receipt.body.events.len()
+    );
+    assert_eq!(binding.telemetry.first().unwrap().tick, 1);
+    for (index, frame) in binding.telemetry.iter().enumerate() {
+        assert_eq!(frame.tick, index as u64 + 1);
+        assert_eq!(
+            frame.elapsed_nanoseconds,
+            frame.tick * 1_000_000_000 / u64::from(REFERENCE_TICK_RATE_HZ)
+        );
+        assert_eq!(
+            frame.state_sha256,
+            binding.gameplay_receipt.body.events[index].resulting_state_sha256
+        );
+        assert!(frame.entity_poses.iter().all(|pose| {
+            pose.position_xyz_m[1] == built.world.body.fields.heights_m[pose.cell]
+        }));
+    }
+    let movement_cells: Vec<usize> = binding
+        .telemetry
+        .iter()
+        .filter_map(|frame| match &frame.transition {
+            wge_gameplay_contract::Transition::EntityMoved { to, .. } => Some(
+                to.as_str()
+                    .strip_prefix("cell_")
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap(),
+            ),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        movement_cells,
+        built.world.body.navigation.route_cells[1..],
+        "each gameplay movement tick follows the measured world route"
+    );
+    let final_tick = binding.telemetry.last().unwrap();
+    assert_eq!(final_tick.outcome, GameOutcome::Won);
+    assert_eq!(
+        final_tick.objective_state,
+        wge_gameplay_contract::ObjectiveState::Secured
+    );
+    assert!(matches!(
+        final_tick.transition,
+        wge_gameplay_contract::Transition::ObjectiveSecured { .. }
+    ));
+
+    let capture = &binding.capture;
+    assert_eq!(capture.world_artifact_id, built.world.artifact_id);
+    assert_eq!(capture.capture_sha256, built.visual.body.capture_sha256);
+    assert_eq!(capture.visual_evidence_sha256, built.visual.evidence_sha256);
+    assert_eq!(
+        capture.camera,
+        built.world.body.authored_layout.reference_camera
+    );
+    assert_eq!(
+        capture.phase,
+        RuntimeCapturePhase::WorldOverviewBeforePlaythrough
+    );
+    assert_eq!(capture.simulation_tick, 0);
+}
+
+#[test]
+fn actual_world_gameplay_path_rejects_early_objective_and_resealed_telemetry_faults() {
+    let built = build_layout(&example_layout(), "runtime-failure-controls").unwrap();
+    let body = &built.gameplay.body;
+
+    let mut early_objective = body.gameplay_trace.clone();
+    early_objective
+        .events
+        .retain(|event| !matches!(event, InputEvent::UseAbility { .. }));
+    let failure = run_replay(&body.gameplay_snapshot, &early_objective)
+        .expect_err("reaching the objective without defeating its guard must fail");
+    assert_eq!(failure.code, FailureCode::ObjectivePrerequisiteUnmet);
+
+    let mut injected_failure = built.gameplay.clone();
+    let player_pose = injected_failure
+        .body
+        .telemetry
+        .iter_mut()
+        .flat_map(|frame| frame.entity_poses.iter_mut())
+        .find(|pose| pose.entity_id.as_str() == "player_alpha")
+        .unwrap();
+    player_pose.cell = built.world.body.navigation.objective_cell;
+    player_pose.position_xyz_m[0] += 4.0;
+    reseal_gameplay(&mut injected_failure);
+    let error = validate_gameplay_world_binding(
+        &built.world,
+        &built.traversal,
+        &built.capture_bytes,
+        &built.visual,
+        &injected_failure,
+    )
+    .expect_err("rehashed telemetry must be recomputed from the gameplay replay");
+    assert!(error.message.contains("telemetry"));
+
+    let mut forged_capture = built.gameplay.clone();
+    forged_capture.body.capture.camera.distance_m += 1.0;
+    reseal_gameplay(&mut forged_capture);
+    assert!(
+        validate_gameplay_world_binding(
+            &built.world,
+            &built.traversal,
+            &built.capture_bytes,
+            &built.visual,
+            &forged_capture,
+        )
+        .is_err()
+    );
 }
 
 #[test]

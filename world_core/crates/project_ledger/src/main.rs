@@ -3,9 +3,9 @@ use std::process::ExitCode;
 
 use serde_json::json;
 use wge_project_ledger::{
-    EvidenceBundle, ProjectSnapshot, ProjectSpec, build_unity_import_manifest, canonical_json,
-    commit_snapshot, load_json, spec_digest, validate_snapshot, validate_spec,
-    validate_world_bundle, write_json,
+    EvidenceBundle, ProjectSnapshot, ProjectSpec, ProjectTemplate, build_unity_import_manifest,
+    canonical_json, commit_snapshot, compile_project_spec, load_json, spec_digest,
+    validate_snapshot, validate_spec, validate_world_bundle, write_json,
 };
 
 fn main() -> ExitCode {
@@ -22,6 +22,37 @@ fn dispatch() -> Result<(), String> {
     let mut args = env::args().skip(1);
     let command = args.next().ok_or_else(usage)?;
     match command.as_str() {
+        "compile-spec" => {
+            let intake_path = args.next().ok_or_else(usage)?;
+            let template_path = args.next().ok_or_else(usage)?;
+            let output_flag = args.next().ok_or_else(usage)?;
+            if output_flag != "--output" {
+                return Err(usage());
+            }
+            let output = args.next().ok_or_else(usage)?;
+            if args.next().is_some() {
+                return Err(usage());
+            }
+            let intake: wge_intake_repair_contract::SemanticIntake =
+                load_json(&intake_path).map_err(|error| error.to_string())?;
+            let template: ProjectTemplate =
+                load_json(&template_path).map_err(|error| error.to_string())?;
+            let spec =
+                compile_project_spec(&intake, template).map_err(|error| error.to_string())?;
+            let spec_sha256 = spec_digest(&spec).map_err(|error| error.to_string())?;
+            write_json(&output, &spec).map_err(|error| error.to_string())?;
+            println!(
+                "{}",
+                canonical_json(&json!({
+                    "status": "compiled",
+                    "schema_version": spec.schema_version,
+                    "project_id": spec.project_id,
+                    "spec_sha256": spec_sha256,
+                    "output": output,
+                }))
+            );
+            Ok(())
+        }
         "validate-spec" => {
             let path = args.next().ok_or_else(usage)?;
             let spec: ProjectSpec = load_json(&path).map_err(|error| error.to_string())?;
@@ -119,5 +150,5 @@ fn dispatch() -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: wge-project-ledger validate-spec SPEC.json | commit SPEC.json --evidence EVIDENCE.json --output SNAPSHOT.json | validate-snapshot SNAPSHOT.json | unity-manifest SPEC.json --snapshot SNAPSHOT.json --output MANIFEST.json".into()
+    "usage: wge-project-ledger compile-spec INTAKE.json TEMPLATE.json --output SPEC.json | validate-spec SPEC.json | commit SPEC.json --evidence EVIDENCE.json --output SNAPSHOT.json | validate-snapshot SNAPSHOT.json | unity-manifest SPEC.json --snapshot SNAPSHOT.json --output MANIFEST.json".into()
 }

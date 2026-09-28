@@ -252,27 +252,38 @@ cargo test --workspace                       # from world_core/
 julia --project=. test/runtests.jl           # from terrain_lab/
 ```
 
-## MVP vertical slice
+## Engine-neutral native MVP
 
-The current game-development harness slice is driven by the Rust-owned project
-ledger. The Python command is only orchestration: it copies and hashes pinned
-inputs, then asks Rust to validate, certify, and emit the Unity handoff.
+The current model-facing vertical slice is driven by the Rust-owned native
+contracts. Python only stages provider input and packages the deterministic
+handoff; it is not semantic authority. The transaction accepts a fresh typed
+intake, compiles a project specification, builds the Julia/Rust world path,
+produces reference-runtime and visual evidence, exercises bounded repair, and
+reopens the certified snapshot through the authority plane.
+
+Run the focused acceptance suite:
 
 ```sh
-python3 pipeline/wge_mvp.py prepare --output <candidate>
-python3 pipeline/wge_mvp.py verify-all \
-  --spec <candidate>/project_spec.json \
-  --evidence <candidate>/evidence.json \
-  --snapshot-output <candidate>/project_snapshot.json \
-  --unity-output <candidate>/wge_unity_mvp_import.json
+python3 -m unittest tests.test_wge_native_mvp -v
 ```
 
-`verify-all` exits nonzero and reports the blocked gates until target-runtime
-evidence has actually been observed. It never upgrades an indeterminate Unity
-import, playthrough, or visual result into a pass. A certified handoff is
-imported through **Tools > Codeweald > WGE MVP > Import Certified Snapshot** in
-the Unity adapter. The conventional-engine comparison is reported by
-`pipeline/benchmark_mvp.py` only after both measured runs exist.
+The model-facing command is:
+
+```sh
+python3 pipeline/wge_native_mvp.py \
+  --source-dir <brief-concept-and-layout> \
+  --project-template <typed-project-template.json> \
+  --rigging-glb <provider-output.glb> \
+  --rigging-request <typed-rigging-request.json> \
+  --output-dir <certified-handoff>
+```
+
+The supplied bad GLB remains a permanent rejection control. Rigging quality is
+tested with the separate known-good structural control; arbitrary mesh-to-
+character generation is not silently claimed. Unity import/build/playthrough
+and any Unity-versus-WGE benchmark are intentionally deferred. This checkpoint
+is judged by WGE's own semantic, mechanical, traversal, visual, repair,
+determinism, provenance, and archive-revalidation gates.
 
 ## As substrate for a world model (Project Aisling)
 

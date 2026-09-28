@@ -24,6 +24,9 @@ struct CandidateReport<'a> {
     traversal_steps: usize,
     gameplay_outcome: &'a str,
     gameplay_receipt_sha256: &'a str,
+    gameplay_fixed_tick_rate_hz: u32,
+    gameplay_telemetry_ticks: usize,
+    gameplay_capture_sha256: &'a str,
     visual_status: &'a str,
     visual_evidence_sha256: &'a str,
     visual_failure_reasons: &'a [String],
@@ -68,6 +71,15 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
                 &output_dir.join("gameplay_world_binding.json"),
                 &build.gameplay,
             )?;
+            // Keep the authored fixed-tick input trace as an independently
+            // addressable native artifact.  The binding remains the authority
+            // for replay validation; this projection exists so the project
+            // ledger can bind gameplay input without Python re-serializing
+            // semantic data.
+            write_json(
+                &output_dir.join("gameplay_trace.json"),
+                &build.gameplay.body.gameplay_trace,
+            )?;
             fs::write(
                 output_dir.join("reference_capture.ppm"),
                 &build.capture_bytes,
@@ -94,6 +106,9 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
                     wge_gameplay_contract::GameOutcome::InProgress => "in_progress",
                 },
                 gameplay_receipt_sha256: &build.gameplay.body.gameplay_receipt.receipt_sha256,
+                gameplay_fixed_tick_rate_hz: build.gameplay.body.fixed_tick_rate_hz,
+                gameplay_telemetry_ticks: build.gameplay.body.telemetry.len(),
+                gameplay_capture_sha256: &build.gameplay.body.capture.capture_sha256,
                 visual_status: match build.visual.body.status {
                     wge_reference_runtime::VisualGateStatus::Passed => "passed",
                     wge_reference_runtime::VisualGateStatus::Failed => "failed",

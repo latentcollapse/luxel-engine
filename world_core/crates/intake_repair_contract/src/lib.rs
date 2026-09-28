@@ -21,6 +21,7 @@ pub const REPAIR_PROPOSAL_DRAFT_SCHEMA: &str = "wge.repair-proposal-draft/v1";
 pub const REPAIR_PROPOSAL_SCHEMA: &str = "wge.repair-proposal/v1";
 pub const REPAIR_DELTA_DRAFT_SCHEMA: &str = "wge.repair-evidence-delta-draft/v1";
 pub const REPAIR_DELTA_SCHEMA: &str = "wge.repair-evidence-delta/v1";
+pub const REPAIR_APPLICATION_SCHEMA: &str = "wge.repair-application/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContractError {
@@ -1252,6 +1253,65 @@ pub fn normalize_repair_proposal(
 
 pub fn validate_repair_proposal(proposal: &RepairProposal) -> Result<(), ContractError> {
     validate_proposal_fields(proposal)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RepairApplication {
+    pub schema_version: String,
+    pub proposal_id: String,
+    pub failed_layer: FailedLayer,
+    pub artifact_id: String,
+    pub before_sha256: String,
+    pub after_sha256: String,
+}
+
+/// Apply a bounded semantic repair through the native contract boundary.
+/// The caller may provide a proposed replacement layout, but Rust decides
+/// whether it is authorized and whether it changes the declared source.
+pub fn apply_repair(
+    proposal: &RepairProposal,
+    before_layout_bytes: &[u8],
+    proposed_layout_bytes: &[u8],
+) -> Result<(Vec<u8>, RepairApplication), ContractError> {
+    validate_repair_proposal(proposal)?;
+    let before_value: Value = parse_json(before_layout_bytes)?;
+    let proposed_value: Value = parse_json(proposed_layout_bytes)?;
+    if !before_value.is_object() || !proposed_value.is_object() {
+        return Err(ContractError::Schema(
+            "repair layouts must be JSON objects".into(),
+        ));
+    }
+    let before_sha256 = sha256_prefixed(before_layout_bytes);
+    let target = proposal
+        .authorized_targets
+        .iter()
+        .find(|target| target.artifact_id == "authored-layout")
+        .ok_or_else(|| {
+            ContractError::Repair(
+                "native layout application requires authored-layout authorization".into(),
+            )
+        })?;
+    if target.before_sha256 != before_sha256 {
+        return Err(ContractError::Provenance(
+            "repair proposal is stale for the supplied before-layout bytes".into(),
+        ));
+    }
+    let after_sha256 = sha256_prefixed(proposed_layout_bytes);
+    if before_sha256 == after_sha256 {
+        return Err(ContractError::Repair(
+            "repair application must change the authored layout bytes".into(),
+        ));
+    }
+    let application = RepairApplication {
+        schema_version: REPAIR_APPLICATION_SCHEMA.into(),
+        proposal_id: proposal.proposal_id.clone(),
+        failed_layer: proposal.failed_layer,
+        artifact_id: "authored-layout".into(),
+        before_sha256,
+        after_sha256,
+    };
+    Ok((proposed_layout_bytes.to_vec(), application))
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

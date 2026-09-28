@@ -2,65 +2,18 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using UnityEditor;
 using UnityEngine;
 
 namespace Codeweald.ZoneImporter
 {
     /// <summary>
-    /// Imports the certified WGE MVP handoff. This is intentionally separate
-    /// from the legacy zone importer: the project ledger is the authority and
-    /// this editor transaction only verifies and materializes its artifacts.
-    /// There is no primitive fallback for a missing or mismatched source.
+    /// Materializes only Rust-ledger artifacts. It validates the snapshot,
+    /// manifest, every source byte and containment before writing any Unity asset.
     /// </summary>
     public static class WgeMvpImporter
     {
-        private const string Schema = "wge.unity-mvp-import/v1";
         private const string OutputRoot = "Assets/CodewealdGenerated/WgeMvp";
-
-        [Serializable]
-        private sealed class Manifest
-        {
-            public string schema_version;
-            public string project_id;
-            public string snapshot_sha256;
-            public string snapshot_path;
-            public TargetProfile target;
-            public Artifact[] artifacts;
-            public string world_id;
-            public string gameplay_artifact_id;
-            public Gate[] required_gates;
-        }
-
-        [Serializable]
-        private sealed class TargetProfile
-        {
-            public string engine;
-            public string engine_version;
-            public string platform;
-            public string coordinate_system;
-            public string build_profile;
-        }
-
-        [Serializable]
-        private sealed class Artifact
-        {
-            public string artifact_id;
-            public string kind;
-            public string schema_version;
-            public string path;
-            public string sha256;
-            public string producer;
-        }
-
-        [Serializable]
-        private sealed class Gate
-        {
-            public string gate_id;
-            public string evidence_kind;
-        }
 
         [Serializable]
         private sealed class ImportReport
@@ -69,7 +22,8 @@ namespace Codeweald.ZoneImporter
             public string project_id;
             public string snapshot_sha256;
             public string status;
-            public string target_runtime_validation = "pending";
+            public string snapshot_authority_validation = "indeterminate";
+            public string target_runtime_validation = "indeterminate";
             public List<string> imported_artifacts = new List<string>();
             public List<string> verified_sha256 = new List<string>();
             public List<string> failures = new List<string>();
@@ -82,86 +36,63 @@ namespace Codeweald.ZoneImporter
             if (!string.IsNullOrEmpty(path)) Import(path);
         }
 
+        /// <summary>Compatibility entry point retained for existing menu and automation callers.</summary>
         public static void Import(string manifestPath)
         {
-            if (string.IsNullOrWhiteSpace(manifestPath) || !File.Exists(manifestPath))
-                throw new InvalidOperationException("WGE MVP manifest does not exist");
-            var manifest = JsonUtility.FromJson<Manifest>(File.ReadAllText(manifestPath));
-            ValidateManifest(manifest);
-
-            var report = new ImportReport { project_id = manifest.project_id, snapshot_sha256 = manifest.snapshot_sha256 };
-            var manifestDirectory = Path.GetDirectoryName(Path.GetFullPath(manifestPath));
-            var stagingRoot = Path.Combine(OutputRoot, Sanitize(manifest.project_id));
+            var handoff = WgeMvpContract.ValidateHandoff(manifestPath);
+            var manifest = handoff.Manifest;
+            var projectRoot = Path.Combine(OutputRoot, Sanitize((string)manifest["project_id"]));
+            var stagingRoot = Path.Combine(projectRoot, Sanitize((string)handoff.Snapshot["snapshot_id"]));
             Directory.CreateDirectory(stagingRoot);
-            foreach (var artifact in manifest.artifacts)
+            var report = new ImportReport
             {
-                var sourcePath = ResolveContainedPath(manifestDirectory, artifact.path);
-                var sourceDigest = Sha256File(sourcePath);
-                if (!string.Equals(sourceDigest, artifact.sha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException("artifact " + artifact.artifact_id + " digest mismatch");
-                var destination = Path.Combine(stagingRoot, Sanitize(artifact.artifact_id) + Path.GetExtension(sourcePath));
-                File.Copy(sourcePath, destination, true);
-                report.imported_artifacts.Add(artifact.artifact_id);
-                report.verified_sha256.Add(artifact.artifact_id + ":" + sourceDigest);
-                AssetDatabase.ImportAsset(destination.Replace('\\', '/'), ImportAssetOptions.ForceUpdate);
+                project_id = (string)manifest["project_id"],
+                snapshot_sha256 = (string)manifest["snapshot_sha256"],
+                status = "imported_bytes_verified"
+            };
+
+            AssetDatabase.StartAssetEditing();
+            try
+            {
+                foreach (var artifact in handoff.Artifacts)
+                {
+                    var destination = Path.Combine(stagingRoot, Sanitize(artifact.Id) + Path.GetExtension(artifact.SourcePath));
+                    File.Copy(artifact.SourcePath, destination, true);
+                    if (!string.Equals(WgeMvpContract.HashFile(destination), artifact.Sha256, StringComparison.Ordinal))
+                        throw new InvalidDataException("source changed during Unity import: " + artifact.Id);
+                    report.imported_artifacts.Add(artifact.Id);
+                    report.verified_sha256.Add(artifact.Id + ":" + artifact.Sha256);
+                    AssetDatabase.ImportAsset(destination.Replace('\\', '/'), ImportAssetOptions.ForceUpdate);
+                }
+                var snapshotDestination = Path.Combine(stagingRoot, "project_snapshot.json");
+                File.Copy(Path.Combine(handoff.RootPath, (string)manifest["snapshot_path"]), snapshotDestination, true);
+                var copiedSnapshot = WgeMvpContract.ParseObject(WgeMvpContract.ReadUtf8(snapshotDestination, "copied snapshot"), "copied snapshot");
+                WgeMvpContract.ValidateSnapshot(copiedSnapshot);
+                if (!string.Equals((string)copiedSnapshot["snapshot_sha256"], (string)manifest["snapshot_sha256"], StringComparison.Ordinal))
+                    throw new InvalidDataException("snapshot changed during Unity import");
+                var manifestDestination = Path.Combine(stagingRoot, "wge_unity_mvp_import.json");
+                File.Copy(handoff.ManifestPath, manifestDestination, true);
+                var copiedManifest = WgeMvpContract.ParseObject(WgeMvpContract.ReadUtf8(manifestDestination, "copied manifest"), "copied manifest");
+                if (!string.Equals(WgeMvpContract.Canonical(copiedManifest), WgeMvpContract.Canonical(manifest), StringComparison.Ordinal))
+                    throw new InvalidDataException("manifest changed during Unity import");
+                var reportPath = Path.Combine(stagingRoot, "wge_mvp_import_report.json");
+                File.WriteAllText(reportPath, JsonUtility.ToJson(report, true));
+                AssetDatabase.ImportAsset(snapshotDestination.Replace('\\', '/'), ImportAssetOptions.ForceUpdate);
+                AssetDatabase.ImportAsset(manifestDestination.Replace('\\', '/'), ImportAssetOptions.ForceUpdate);
+                AssetDatabase.ImportAsset(reportPath.Replace('\\', '/'), ImportAssetOptions.ForceUpdate);
             }
-
-            report.status = "imported";
-            var reportPath = Path.Combine(stagingRoot, "wge_mvp_import_report.json");
-            File.WriteAllText(reportPath, JsonUtility.ToJson(report, true));
-            AssetDatabase.Refresh();
-            Debug.Log("WGE MVP imported certified snapshot " + manifest.project_id + "; runtime validation remains pending.");
-        }
-
-        private static void ValidateManifest(Manifest manifest)
-        {
-            if (manifest == null || manifest.schema_version != Schema)
-                throw new InvalidOperationException("Expected " + Schema);
-            if (manifest.target == null || !string.Equals(manifest.target.engine, "unity", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("WGE MVP target is not Unity");
-            if (string.IsNullOrWhiteSpace(manifest.project_id) || !IsSha256(manifest.snapshot_sha256))
-                throw new InvalidOperationException("WGE MVP identity is incomplete");
-            if (manifest.artifacts == null || manifest.artifacts.Length == 0)
-                throw new InvalidOperationException("WGE MVP handoff has no artifacts");
-            if (manifest.required_gates == null || manifest.required_gates.Length == 0)
-                throw new InvalidOperationException("WGE MVP handoff has no required gates");
-            if (manifest.artifacts.Any(artifact => artifact == null || string.IsNullOrWhiteSpace(artifact.path) || !IsSha256(artifact.sha256)))
-                throw new InvalidOperationException("WGE MVP handoff contains an invalid artifact");
-            if (manifest.artifacts.Select(artifact => artifact.artifact_id).Distinct().Count() != manifest.artifacts.Length)
-                throw new InvalidOperationException("WGE MVP handoff contains duplicate artifact ids");
-        }
-
-        private static string ResolveContainedPath(string root, string relativePath)
-        {
-            if (Path.IsPathRooted(relativePath)) throw new InvalidOperationException("WGE MVP paths must be relative");
-            var full = Path.GetFullPath(Path.Combine(root, relativePath));
-            var normalizedRoot = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-            if (!full.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("WGE MVP artifact escapes the handoff root: " + relativePath);
-            if (!File.Exists(full)) throw new InvalidOperationException("WGE MVP artifact is missing: " + relativePath);
-            return full;
-        }
-
-        private static string Sha256File(string path)
-        {
-            using (var stream = File.OpenRead(path))
-            using (var sha = SHA256.Create())
-                return "sha256:" + BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", string.Empty).ToLowerInvariant();
-        }
-
-        private static bool IsSha256(string value)
-        {
-            if (string.IsNullOrEmpty(value) || !value.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase)) return false;
-            var hex = value.Substring("sha256:".Length);
-            return hex.Length == 64 && hex.All(Uri.IsHexDigit);
+            finally
+            {
+                AssetDatabase.StopAssetEditing();
+                AssetDatabase.Refresh();
+            }
+            Debug.Log("WGE MVP snapshot verified and imported: " + manifest["project_id"] + " / " + handoff.Snapshot["snapshot_id"] + ". Runtime remains indeterminate until a built player completes the scripted run.");
         }
 
         private static string Sanitize(string value)
         {
-            var builder = new StringBuilder();
-            foreach (var character in value ?? string.Empty)
-                builder.Append(char.IsLetterOrDigit(character) || character == '_' || character == '-' ? character : '_');
-            return builder.Length == 0 ? "unnamed" : builder.ToString();
+            var chars = (value ?? string.Empty).Select(c => char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_').ToArray();
+            return chars.Length == 0 ? "unnamed" : new string(chars);
         }
     }
 }

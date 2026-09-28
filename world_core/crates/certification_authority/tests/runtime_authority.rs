@@ -391,6 +391,8 @@ fn semantic_receipt(
                 provider_response_artifact_id: "provider-response".into(),
                 source_bundle_artifact_id: "source-bundle".into(),
                 layout_artifact_id: LAYOUT_ID.into(),
+                project_spec_artifact_id: None,
+                project_template_artifact_id: None,
                 source_artifacts: vec![
                     wge_certification_authority::schema::SourceArtifactBinding {
                         source_id: brief_source.source_id.clone(),

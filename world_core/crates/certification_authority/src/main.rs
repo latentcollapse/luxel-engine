@@ -10,9 +10,9 @@ use wge_certification_authority::{
     ArtifactBytes, CandidateContext, GateRequirement, MAX_ARTIFACT_BYTES, MAX_CANDIDATES,
     MAX_ENVELOPE_BYTES, MAX_RECEIPTS, MAX_TOTAL_ARTIFACT_BYTES, REQUEST_SCHEMA, ReceiptEnvelope,
     ValidationRequest, ValidatorRegistry, candidate_identity, candidate_identity_bytes,
-    canonical_json, engine_neutral_gate_profile, native_repair_evidence_reference,
-    native_repair_receipt_bytes, repair_validator_registry, sha256_prefixed,
-    validate_candidate_identity, validate_request,
+    canonical_json, engine_neutral_gate_profile, native_mvp_gate_profile,
+    native_repair_evidence_reference, native_repair_receipt_bytes, repair_validator_registry,
+    sha256_prefixed, validate_candidate_identity, validate_request,
 };
 use wge_intake_repair_contract as repair_contract;
 
@@ -94,8 +94,16 @@ fn dispatch() -> Result<ExitCode, String> {
                 .map_err(|error| format!("cannot write sealed receipt: {error}"))?;
             Ok(ExitCode::SUCCESS)
         }
-        Some("registry") if args.next().is_none() => {
-            let registry = ValidatorRegistry::wge_engine_neutral_v1();
+        Some("registry") => {
+            let profile = args.next().unwrap_or_else(|| "engine-neutral".into());
+            if args.next().is_some() {
+                return Err(usage());
+            }
+            let registry = match profile.as_str() {
+                "engine-neutral" => ValidatorRegistry::wge_engine_neutral_v1(),
+                "native-mvp" => ValidatorRegistry::wge_native_mvp_v1(),
+                _ => return Err(usage()),
+            };
             let result = json!({
                 "schema_version": "wge.validator-registry/v1",
                 "registry_sha256": registry.digest(),
@@ -104,12 +112,27 @@ fn dispatch() -> Result<ExitCode, String> {
             println!("{}", canonical_json(&result));
             Ok(ExitCode::SUCCESS)
         }
-        Some("profile") if args.next().is_none() => {
-            let registry = ValidatorRegistry::wge_engine_neutral_v1();
+        Some("profile") => {
+            let profile = args.next().unwrap_or_else(|| "engine-neutral".into());
+            if args.next().is_some() {
+                return Err(usage());
+            }
+            let (registry, gates) = match profile.as_str() {
+                "engine-neutral" => (
+                    ValidatorRegistry::wge_engine_neutral_v1(),
+                    engine_neutral_gate_profile(),
+                ),
+                "native-mvp" => (
+                    ValidatorRegistry::wge_native_mvp_v1(),
+                    native_mvp_gate_profile(),
+                ),
+                _ => return Err(usage()),
+            };
             let result = json!({
                 "schema_version": "wge.certification-profile/v1",
                 "registry_sha256": registry.digest(),
-                "gates": engine_neutral_gate_profile(),
+                "profile_id": profile,
+                "gates": gates,
             });
             println!("{}", canonical_json(&result));
             Ok(ExitCode::SUCCESS)
@@ -259,20 +282,38 @@ fn dispatch() -> Result<ExitCode, String> {
                 return Err(usage());
             }
             let artifact_root = PathBuf::from(args.next().ok_or_else(usage)?);
+            let profile = match args.next() {
+                None => "engine-neutral".to_owned(),
+                Some(flag) if flag == "--profile" => args.next().ok_or_else(usage)?,
+                Some(_) => return Err(usage()),
+            };
             if args.next().is_some() {
                 return Err(usage());
             }
             let request = load_request(&request_path, &artifact_root)?;
-            let registry = ValidatorRegistry::wge_engine_neutral_v1();
+            let (registry, expected_gates) = match profile.as_str() {
+                "engine-neutral" => (
+                    ValidatorRegistry::wge_engine_neutral_v1(),
+                    engine_neutral_gate_profile(),
+                ),
+                "native-mvp" => (
+                    ValidatorRegistry::wge_native_mvp_v1(),
+                    native_mvp_gate_profile(),
+                ),
+                _ => return Err(usage()),
+            };
+            if request.gates != expected_gates {
+                return Err(format!(
+                    "request gates do not match selected {profile} profile"
+                ));
+            }
             let report =
                 validate_request(&request, &registry).map_err(|error| error.to_string())?;
             println!(
                 "{}",
                 canonical_json(&serde_json::to_value(&report).map_err(|error| error.to_string())?)
             );
-            if report.status
-                == wge_certification_authority::CertificationStatus::EngineNeutralCertified
-            {
+            if report.status != wge_certification_authority::CertificationStatus::Rejected {
                 Ok(ExitCode::SUCCESS)
             } else {
                 Ok(ExitCode::from(3))
@@ -459,5 +500,5 @@ fn safe_existing_path(root: &Path, relative: &str, directory: bool) -> Result<Pa
 }
 
 fn usage() -> String {
-    "usage:\n  wge-certification-authority registry\n  wge-certification-authority profile\n  wge-certification-authority seal RECEIPT.json OUTPUT.json\n  wge-certification-authority candidate-id CANDIDATE.json --artifact-root DIR\n  wge-certification-authority repair-reference RECEIPT.json --candidate CANDIDATE.json --artifact-root DIR [--output-bridge BRIDGE.json]\n  wge-certification-authority repair-delta REQUEST.json --artifact-root DIR --output DELTA.json\n  wge-certification-authority validate REQUEST.json --artifact-root DIR".into()
+    "usage:\n  wge-certification-authority registry [engine-neutral|native-mvp]\n  wge-certification-authority profile [engine-neutral|native-mvp]\n  wge-certification-authority seal RECEIPT.json OUTPUT.json\n  wge-certification-authority candidate-id CANDIDATE.json --artifact-root DIR\n  wge-certification-authority repair-reference RECEIPT.json --candidate CANDIDATE.json --artifact-root DIR [--output-bridge BRIDGE.json]\n  wge-certification-authority repair-delta REQUEST.json --artifact-root DIR --output DELTA.json\n  wge-certification-authority validate REQUEST.json --artifact-root DIR [--profile engine-neutral|native-mvp]".into()
 }

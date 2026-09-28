@@ -8,13 +8,15 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Component, Path};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+mod intake_compiler;
 mod world;
+pub use intake_compiler::{PROJECT_TEMPLATE_SCHEMA, ProjectTemplate, compile_project_spec};
 pub use world::validate_world_bundle;
 
 pub const PROJECT_SPEC_SCHEMA: &str = "wge.project-spec/v1";
@@ -70,6 +72,8 @@ pub struct BriefSpec {
     pub style_target: StyleTarget,
     pub assumptions: Vec<SpecAssumption>,
     pub design_constraints: Vec<DesignConstraint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intake_provenance: Option<IntakeProvenance>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -80,6 +84,39 @@ pub struct SourceReference {
     pub path: String,
     pub sha256: String,
     pub region_normalized: Option<[f64; 4]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byte_length: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<SourceProvenance>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct IntakeProvenance {
+    pub intake_id: String,
+    pub request_id: String,
+    pub source_bundle_id: String,
+    pub provider: IntakeProviderProvenance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct IntakeProviderProvenance {
+    pub provider_id: String,
+    pub provider_version: String,
+    pub protocol: String,
+    pub response_sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SourceProvenance {
+    pub origin: wge_intake_repair_contract::ProvenanceOrigin,
+    pub origin_ref: String,
+    pub provider_id: Option<String>,
+    pub provider_version: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -103,10 +140,22 @@ pub enum ClaimKind {
 #[serde(deny_unknown_fields)]
 pub struct SemanticClaim {
     pub claim_id: String,
+    /// Kept as the first evidence source for existing ledger consumers.
     pub source_id: String,
     pub kind: ClaimKind,
     pub statement: String,
     pub confidence: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain: Option<wge_intake_repair_contract::ClaimDomain>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<ClaimEvidence>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct ClaimEvidence {
+    pub source_id: String,
+    pub region: Option<wge_intake_repair_contract::SourceRegion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -115,7 +164,9 @@ pub struct SpecConflict {
     pub conflict_id: String,
     pub left_claim_id: String,
     pub right_claim_id: String,
-    pub resolution: String,
+    pub explanation: String,
+    #[serde(default)]
+    pub resolution: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -127,12 +178,16 @@ pub struct StyleTarget {
     pub reference_source_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct SpecAssumption {
     pub assumption_id: String,
     pub statement: String,
     pub reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub related_claim_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -168,8 +223,20 @@ pub struct WorldSpec {
     pub terrain: ArtifactRef,
     pub collision: ArtifactRef,
     pub navigation: ArtifactRef,
+    /// Native reference-runtime artifacts supersede the legacy terrain,
+    /// collision, and navigation documents when present. The legacy fields
+    /// remain in the wire contract for existing project templates and tools.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reference_runtime: Option<ReferenceRuntimeWorldBundle>,
     pub spawns: Vec<SpawnPoint>,
     pub objective: ObjectiveSpec,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ReferenceRuntimeWorldBundle {
+    pub world_artifact: ArtifactRef,
+    pub traversal_evidence: ArtifactRef,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -417,7 +484,16 @@ pub fn validate_spec(spec: &ProjectSpec) -> Result<(), LedgerError> {
     for source in &spec.brief.sources {
         nonempty("brief.sources.source_id", &source.source_id)?;
         nonempty("brief.sources.path", &source.path)?;
+        validate_relative_path(&source.path, "brief source path")?;
         validate_digest(&source.sha256, "brief source")?;
+        if source.byte_length.is_some() != source.media_type.is_some()
+            || source.byte_length.is_some() != source.provenance.is_some()
+        {
+            return Err(LedgerError::Contract(format!(
+                "source {} intake metadata must be complete or absent",
+                source.source_id
+            )));
+        }
         if let Some(region) = source.region_normalized
             && (region
                 .iter()
@@ -437,6 +513,11 @@ pub fn validate_spec(spec: &ProjectSpec) -> Result<(), LedgerError> {
         .iter()
         .map(|source| source.source_id.as_str())
         .collect();
+    if source_ids.len() != spec.brief.sources.len() {
+        return Err(LedgerError::Contract(
+            "brief.sources contains duplicate source IDs".into(),
+        ));
+    }
     let mut claim_ids = BTreeSet::new();
     for claim in &spec.brief.claims {
         nonempty("brief.claim.claim_id", &claim.claim_id)?;
@@ -460,6 +541,22 @@ pub fn validate_spec(spec: &ProjectSpec) -> Result<(), LedgerError> {
                 claim.claim_id
             )));
         }
+        for evidence in &claim.evidence {
+            if !source_ids.contains(evidence.source_id.as_str()) {
+                return Err(LedgerError::Contract(format!(
+                    "claim {} references missing evidence source {}",
+                    claim.claim_id, evidence.source_id
+                )));
+            }
+        }
+        if let Some(first_evidence) = claim.evidence.first()
+            && first_evidence.source_id != claim.source_id
+        {
+            return Err(LedgerError::Contract(format!(
+                "claim {} primary source_id must match its first evidence link",
+                claim.claim_id
+            )));
+        }
     }
     for conflict in &spec.brief.conflicts {
         nonempty("brief.conflict.conflict_id", &conflict.conflict_id)?;
@@ -471,7 +568,10 @@ pub fn validate_spec(spec: &ProjectSpec) -> Result<(), LedgerError> {
                 conflict.conflict_id
             )));
         }
-        nonempty("brief.conflict.resolution", &conflict.resolution)?;
+        nonempty("brief.conflict.explanation", &conflict.explanation)?;
+        if let Some(resolution) = &conflict.resolution {
+            nonempty("brief.conflict.resolution", resolution)?;
+        }
     }
     nonempty(
         "brief.style_target.visual_language",
@@ -495,6 +595,51 @@ pub fn validate_spec(spec: &ProjectSpec) -> Result<(), LedgerError> {
         nonempty("brief.assumption.assumption_id", &assumption.assumption_id)?;
         nonempty("brief.assumption.statement", &assumption.statement)?;
         nonempty("brief.assumption.reason", &assumption.reason)?;
+        if let Some(confidence) = assumption.confidence
+            && (!confidence.is_finite() || !(0.0..=1.0).contains(&confidence))
+        {
+            return Err(LedgerError::Contract(format!(
+                "assumption {} confidence must be in [0,1]",
+                assumption.assumption_id
+            )));
+        }
+        if assumption
+            .related_claim_ids
+            .iter()
+            .any(|claim_id| !claim_ids.contains(claim_id.as_str()))
+        {
+            return Err(LedgerError::Contract(format!(
+                "assumption {} references an unknown claim",
+                assumption.assumption_id
+            )));
+        }
+    }
+    if let Some(provenance) = &spec.brief.intake_provenance {
+        validate_intake_identity_text(&provenance.intake_id, "intake")?;
+        validate_intake_identity_text(&provenance.source_bundle_id, "source bundle")?;
+        nonempty("intake provenance request_id", &provenance.request_id)?;
+        nonempty("intake provider_id", &provenance.provider.provider_id)?;
+        nonempty(
+            "intake provider_version",
+            &provenance.provider.provider_version,
+        )?;
+        nonempty("intake provider protocol", &provenance.provider.protocol)?;
+        validate_digest(
+            &provenance.provider.response_sha256,
+            "intake provider response",
+        )?;
+    }
+    let mut constraint_ids = BTreeSet::new();
+    for constraint in &spec.brief.design_constraints {
+        nonempty("design constraint id", &constraint.constraint_id)?;
+        nonempty("design constraint category", &constraint.category)?;
+        nonempty("design constraint statement", &constraint.statement)?;
+        if !constraint_ids.insert(constraint.constraint_id.as_str()) {
+            return Err(LedgerError::Contract(format!(
+                "duplicate design constraint id {}",
+                constraint.constraint_id
+            )));
+        }
     }
     if spec.target.engine != Engine::Unity {
         return Err(LedgerError::Contract(
@@ -612,6 +757,7 @@ pub fn validate_artifact_graph(nodes: &[ArtifactNode]) -> Result<(), LedgerError
         nonempty("artifact.kind", &node.artifact.kind)?;
         nonempty("artifact.schema_version", &node.artifact.schema_version)?;
         nonempty("artifact.path", &node.artifact.path)?;
+        validate_relative_path(&node.artifact.path, "artifact path")?;
         nonempty("artifact.producer", &node.artifact.producer)?;
         validate_digest(&node.artifact.sha256, "artifact")?;
         if by_id
@@ -912,6 +1058,10 @@ fn referenced_artifacts(spec: &ProjectSpec) -> Vec<&ArtifactRef> {
         &spec.gameplay.runtime_package,
         &spec.gameplay.input_trace,
     ];
+    if let Some(bundle) = &spec.world.reference_runtime {
+        references.push(&bundle.world_artifact);
+        references.push(&bundle.traversal_evidence);
+    }
     for asset in &spec.assets {
         references.push(&asset.source);
         references.push(&asset.runtime_package);
@@ -933,6 +1083,34 @@ fn validate_digest(value: &str, label: &str) -> Result<(), LedgerError> {
     Ok(())
 }
 
+pub(crate) fn validate_relative_path(value: &str, label: &str) -> Result<(), LedgerError> {
+    nonempty(label, value)?;
+    let path = Path::new(value);
+    if path.is_absolute()
+        || value.contains('\\')
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(LedgerError::Contract(format!(
+            "{label} must be a relative in-root path"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_intake_identity_text(value: &str, label: &str) -> Result<(), LedgerError> {
+    let digest = match label {
+        "intake" => value.strip_prefix("intake:"),
+        _ => value.strip_prefix("source-bundle:"),
+    }
+    .ok_or_else(|| LedgerError::Provenance(format!("{label} identity has an invalid prefix")))?;
+    validate_digest(digest, label)
+}
+
 fn nonempty(label: &str, value: &str) -> Result<(), LedgerError> {
     if value.trim().is_empty() {
         return Err(LedgerError::Contract(format!("{label} is required")));
@@ -941,8 +1119,17 @@ fn nonempty(label: &str, value: &str) -> Result<(), LedgerError> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+    use std::io::Write;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use wge_reference_runtime::{
+        AuthoredLayout, TraversalEvidence, WorldArtifact, build_from_layout_path,
+    };
+
+    static TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
     fn digest(seed: &str) -> String {
         sha256_prefixed(seed.as_bytes())
@@ -959,7 +1146,7 @@ mod tests {
         }
     }
 
-    fn spec() -> ProjectSpec {
+    pub(crate) fn spec() -> ProjectSpec {
         let terrain = artifact("terrain", "terrain");
         let collision = artifact("collision", "collision");
         let navigation = artifact("navigation", "navigation");
@@ -988,6 +1175,9 @@ mod tests {
                     path: "brief.md".into(),
                     sha256: digest("brief"),
                     region_normalized: None,
+                    byte_length: None,
+                    media_type: None,
+                    provenance: None,
                 }],
                 claims: vec![SemanticClaim {
                     claim_id: "reachable-objective".into(),
@@ -995,6 +1185,8 @@ mod tests {
                     kind: ClaimKind::Constraint,
                     statement: "The objective must be reachable.".into(),
                     confidence: 1.0,
+                    domain: None,
+                    evidence: Vec::new(),
                 }],
                 conflicts: Vec::new(),
                 style_target: StyleTarget {
@@ -1007,6 +1199,8 @@ mod tests {
                     assumption_id: "single-process".into(),
                     statement: "The first slice does not require network replication.".into(),
                     reason: "MVP roadmap explicitly defers multiplayer.".into(),
+                    confidence: None,
+                    related_claim_ids: Vec::new(),
                 }],
                 design_constraints: vec![DesignConstraint {
                     constraint_id: "playable".into(),
@@ -1014,6 +1208,7 @@ mod tests {
                     statement: "The objective must be reachable.".into(),
                     required: true,
                 }],
+                intake_provenance: None,
             },
             target: TargetProfile {
                 engine: Engine::Unity,
@@ -1028,6 +1223,7 @@ mod tests {
                 terrain,
                 collision,
                 navigation,
+                reference_runtime: None,
                 spawns: vec![SpawnPoint {
                     spawn_id: "player".into(),
                     team: "player".into(),
@@ -1086,6 +1282,127 @@ mod tests {
                     evidence_kind: "runtime".into(),
                 },
             ],
+        }
+    }
+
+    fn native_candidate(label: &str) -> (PathBuf, ProjectSpec, WorldArtifact, TraversalEvidence) {
+        let root = std::env::temp_dir().join(format!(
+            "wge-project-ledger-{label}-{}-{}",
+            std::process::id(),
+            TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let workspace = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .nth(3)
+            .unwrap();
+        let layout_path =
+            workspace.join("world_core/crates/reference_runtime/examples/riverwatch.layout.json");
+        let layout: AuthoredLayout = load_json(&layout_path).unwrap();
+        let terrain_lab = workspace.join("terrain_lab");
+        let julia = std::env::var_os("WGE_JULIA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("julia"));
+        let build = build_from_layout_path(&layout_path, &julia, &terrain_lab).unwrap();
+        let world_path = root.join("world_artifact.json");
+        let traversal_path = root.join("traversal_evidence.json");
+        let world_bytes = serde_json::to_vec(&build.world).unwrap();
+        let traversal_bytes = serde_json::to_vec(&build.traversal).unwrap();
+        fs::write(&world_path, &world_bytes).unwrap();
+        fs::write(&traversal_path, &traversal_bytes).unwrap();
+
+        let mut candidate = spec();
+        candidate.world.world_id = layout.world_id.clone();
+        candidate.world.dimensions_m = [layout.width_m, layout.length_m];
+        candidate.world.spawns = layout
+            .spawns
+            .iter()
+            .map(|spawn| SpawnPoint {
+                spawn_id: spawn.spawn_id.clone(),
+                team: match spawn.role {
+                    wge_reference_runtime::SpawnRole::PlayerStart => "player",
+                    wge_reference_runtime::SpawnRole::Opponent => "opponent",
+                }
+                .into(),
+                position_xz_m: spawn.position_xz_m,
+                required: true,
+            })
+            .collect();
+        candidate.world.objective.objective_id = layout.traversal.objective_id.clone();
+        candidate.gameplay.start_entity_id = layout.traversal.start_spawn_id.clone();
+        candidate.gameplay.objective_id = layout.traversal.objective_id.clone();
+
+        let world_ref = ArtifactRef {
+            artifact_id: build.world.artifact_id.clone(),
+            kind: "reference_world".into(),
+            schema_version: wge_reference_runtime::WORLD_SCHEMA.into(),
+            path: "world_artifact.json".into(),
+            sha256: sha256_prefixed(&world_bytes),
+            producer: "wge-reference-runtime".into(),
+        };
+        let traversal_ref = ArtifactRef {
+            artifact_id: format!(
+                "traversal-{}",
+                build
+                    .traversal
+                    .evidence_sha256
+                    .trim_start_matches("sha256:")
+            ),
+            kind: "traversal_evidence".into(),
+            schema_version: wge_reference_runtime::TRAVERSAL_EVIDENCE_SCHEMA.into(),
+            path: "traversal_evidence.json".into(),
+            sha256: sha256_prefixed(&traversal_bytes),
+            producer: "wge-reference-runtime".into(),
+        };
+        candidate.world.reference_runtime = Some(ReferenceRuntimeWorldBundle {
+            world_artifact: world_ref.clone(),
+            traversal_evidence: traversal_ref.clone(),
+        });
+        candidate.artifact_graph.push(ArtifactNode {
+            artifact: world_ref,
+            dependencies: Vec::new(),
+        });
+        candidate.artifact_graph.push(ArtifactNode {
+            artifact: traversal_ref,
+            dependencies: vec![DependencyRef {
+                artifact_id: build.world.artifact_id.clone(),
+                sha256: candidate
+                    .world
+                    .reference_runtime
+                    .as_ref()
+                    .unwrap()
+                    .world_artifact
+                    .sha256
+                    .clone(),
+            }],
+        });
+        (root, candidate, build.world, build.traversal)
+    }
+
+    fn resign_native_world(world: &mut WorldArtifact) {
+        let digest = sha256_prefixed(&serde_json::to_vec(&world.body).unwrap());
+        world.artifact_id = format!("world-{}", digest.trim_start_matches("sha256:"));
+        world.artifact_sha256 = digest;
+    }
+
+    fn replace_world_file(root: &Path, spec: &mut ProjectSpec, world: &WorldArtifact) {
+        let bytes = serde_json::to_vec(world).unwrap();
+        fs::write(root.join("world_artifact.json"), &bytes).unwrap();
+        let bundle = spec.world.reference_runtime.as_mut().unwrap();
+        bundle.world_artifact.artifact_id = world.artifact_id.clone();
+        bundle.world_artifact.sha256 = sha256_prefixed(&bytes);
+        let world_ref = bundle.world_artifact.clone();
+        let world_id = world_ref.artifact_id.clone();
+        for node in &mut spec.artifact_graph {
+            if node.artifact.kind == "reference_world" {
+                node.artifact = world_ref.clone();
+            }
+            for dependency in &mut node.dependencies {
+                if dependency.artifact_id.starts_with("world-") {
+                    dependency.artifact_id = world_id.clone();
+                    dependency.sha256 = world_ref.sha256.clone();
+                }
+            }
         }
     }
 
@@ -1195,5 +1512,164 @@ mod tests {
             .insert("silent_repair".into(), Value::Bool(true));
         let error = serde_json::from_value::<ProjectSpec>(value).unwrap_err();
         assert!(error.to_string().contains("unknown field"));
+    }
+
+    #[test]
+    fn native_reference_world_and_replayed_traversal_validate_as_a_project_spec() {
+        let (root, spec, _, _) = native_candidate("known-good");
+        validate_spec(&spec).unwrap();
+        validate_world_bundle(&root, &spec).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_world_rejects_disconnected_navigation_even_when_resigned() {
+        let (root, mut spec, mut world, _) = native_candidate("disconnected");
+        world.body.navigation.route_cells.clear();
+        resign_native_world(&mut world);
+        replace_world_file(&root, &mut spec, &world);
+        validate_spec(&spec).unwrap();
+        let error = validate_world_bundle(&root, &spec).unwrap_err();
+        assert!(error.to_string().contains("navigation artifact"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn native_world_rejects_forged_file_digest_and_malformed_traversal() {
+        let (root, mut spec, world, traversal) = native_candidate("tampered");
+        fs::OpenOptions::new()
+            .append(true)
+            .open(root.join("world_artifact.json"))
+            .unwrap()
+            .write_all(b" ")
+            .unwrap();
+        let error = validate_world_bundle(&root, &spec).unwrap_err();
+        assert!(error.to_string().contains("file digest"));
+        fs::write(
+            root.join("world_artifact.json"),
+            serde_json::to_vec(&world).unwrap(),
+        )
+        .unwrap();
+
+        let mut forged_world = world.clone();
+        forged_world.body.title.push_str(" altered");
+        replace_world_file(&root, &mut spec, &forged_world);
+        validate_spec(&spec).unwrap();
+        let error = validate_world_bundle(&root, &spec).unwrap_err();
+        assert!(error.to_string().contains("world artifact identity"));
+        replace_world_file(&root, &mut spec, &world);
+
+        let mut forged_traversal = traversal.clone();
+        forged_traversal.body.objective_id.push_str("_altered");
+        let forged_traversal_bytes = serde_json::to_vec(&forged_traversal).unwrap();
+        fs::write(
+            root.join("traversal_evidence.json"),
+            &forged_traversal_bytes,
+        )
+        .unwrap();
+        let traversal_ref = spec
+            .world
+            .reference_runtime
+            .as_mut()
+            .unwrap()
+            .traversal_evidence
+            .clone();
+        let traversal_ref = ArtifactRef {
+            sha256: sha256_prefixed(&forged_traversal_bytes),
+            ..traversal_ref
+        };
+        spec.world
+            .reference_runtime
+            .as_mut()
+            .unwrap()
+            .traversal_evidence = traversal_ref.clone();
+        for node in &mut spec.artifact_graph {
+            if node.artifact.kind == "traversal_evidence" {
+                node.artifact = traversal_ref.clone();
+            }
+        }
+        validate_spec(&spec).unwrap();
+        let error = validate_world_bundle(&root, &spec).unwrap_err();
+        assert!(error.to_string().contains("traversal evidence digest"));
+        let traversal_bytes = serde_json::to_vec(&traversal).unwrap();
+        fs::write(root.join("traversal_evidence.json"), &traversal_bytes).unwrap();
+        let traversal_ref = ArtifactRef {
+            sha256: sha256_prefixed(&traversal_bytes),
+            ..traversal_ref
+        };
+        spec.world
+            .reference_runtime
+            .as_mut()
+            .unwrap()
+            .traversal_evidence = traversal_ref.clone();
+        for node in &mut spec.artifact_graph {
+            if node.artifact.kind == "traversal_evidence" {
+                node.artifact = traversal_ref.clone();
+            }
+        }
+
+        let malformed = br#"{"status":"passed"}"#;
+        fs::write(root.join("traversal_evidence.json"), malformed).unwrap();
+        let bundle = spec.world.reference_runtime.as_mut().unwrap();
+        bundle.traversal_evidence.sha256 = sha256_prefixed(malformed);
+        for node in &mut spec.artifact_graph {
+            if node.artifact.kind == "traversal_evidence" {
+                node.artifact.sha256 = sha256_prefixed(malformed);
+            }
+        }
+        validate_spec(&spec).unwrap();
+        let error = validate_world_bundle(&root, &spec).unwrap_err();
+        assert!(error.to_string().contains("unknown field"), "{error}");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn traversal_identity_must_be_bound_to_the_project_objective() {
+        let (root, mut spec, _, _) = native_candidate("objective-mismatch");
+        spec.world.objective.objective_id = "forged-objective".into();
+        let error = validate_world_bundle(&root, &spec).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("objective, start spawn, and traversal identities")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_world_rejects_symlink_escape_from_candidate_root() {
+        use std::os::unix::fs::symlink;
+
+        let (root, mut spec, _, _) = native_candidate("symlink-escape");
+        let outside = root.with_extension("outside.json");
+        let world_bytes = fs::read(root.join("world_artifact.json")).unwrap();
+        fs::write(&outside, world_bytes).unwrap();
+        fs::remove_file(root.join("world_artifact.json")).unwrap();
+        symlink(&outside, root.join("world_artifact.json")).unwrap();
+        let mut world_ref = spec
+            .world
+            .reference_runtime
+            .as_ref()
+            .unwrap()
+            .world_artifact
+            .clone();
+        world_ref.path = "world_artifact.json".into();
+        spec.world
+            .reference_runtime
+            .as_mut()
+            .unwrap()
+            .world_artifact = world_ref.clone();
+        for node in &mut spec.artifact_graph {
+            if node.artifact.kind == "reference_world" {
+                node.artifact = world_ref.clone();
+            }
+        }
+        validate_spec(&spec).unwrap();
+        let error = validate_world_bundle(&root, &spec).unwrap_err();
+        assert!(error.to_string().contains("escapes the candidate root"));
+        fs::remove_file(root.join("world_artifact.json")).unwrap();
+        fs::remove_file(outside).unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 }

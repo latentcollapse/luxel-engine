@@ -1,0 +1,32 @@
+{
+  "schema_version": "wge.asset-runtime-request/v1",
+  "target": "unity",
+  "asset_use": "character",
+  "expected_source_sha256": null,
+  "meters_per_unit": 1.0,
+  "vertical_axis": "y",
+  "rig": {
+    "expected_root_joint": "root",
+    "max_influences": 4,
+    "weight_sum_tolerance": 0.001,
+    "require_inverse_bind_matrices": true
+  },
+  "required_animations": [
+    { "role": "idle", "clip_name": "idle", "minimum_duration_seconds": 0.5 },
+    { "role": "locomotion", "clip_name": "locomotion", "minimum_duration_seconds": 0.5 },
+    { "role": "attack", "clip_name": "attack", "minimum_duration_seconds": 0.5 }
+  ],
+  "required_sockets": [
+    { "role": "weapon_mount", "node_name": "weapon_mount", "parent_joint_name": "hand_r" }
+  ],
+  "collision": {
+    "shape": "capsule",
+    "center": [0.0, 0.94, 0.0],
+    "size": [0.32, 1.80, 0.32],
+    "axis": "y"
+  },
+  "lods": [
+    { "level": 0, "mesh_name": "body_lod0", "switch_below_fraction": 1.0 },
+    { "level": 1, "mesh_name": "body_lod1", "switch_below_fraction": 0.25 }
+  ]
+}

@@ -41,6 +41,11 @@ pub const DEFERRED_GATES: [&str; 4] = [
     "unity_build",
     "unity_playthrough",
 ];
+pub const NATIVE_MVP_REQUIRED_GATES: [&str; 7] = [
+    "semantic", "world", "gameplay", "asset", "rigging", "visual", "repair",
+];
+pub const NATIVE_MVP_DEFERRED_GATES: [&str; 3] =
+    ["unity_import", "unity_build", "unity_playthrough"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthorityError {
@@ -201,6 +206,7 @@ pub struct ValidationRequest {
 #[serde(rename_all = "snake_case")]
 pub enum CertificationStatus {
     EngineNeutralCertified,
+    NativeMvpCertified,
     Rejected,
 }
 
@@ -245,6 +251,7 @@ enum ValidatorKind {
     World,
     Gameplay,
     Asset,
+    Rigging,
     Visual,
     Repair,
     Deferred,
@@ -358,13 +365,28 @@ impl ValidatorRegistry {
                 },
             )
             .collect::<BTreeMap<_, _>>();
-        let descriptors = entries
-            .values()
-            .map(|entry| entry.descriptor.clone())
-            .collect::<Vec<_>>();
-        let digest =
-            sha256_prefixed(canonical_json(&serde_json::to_value(descriptors).unwrap()).as_bytes());
+        let digest = registry_digest(&entries);
         Self { entries, digest }
+    }
+
+    pub fn wge_native_mvp_v1() -> Self {
+        let mut registry = Self::wge_engine_neutral_v1();
+        let descriptor = ValidatorDescriptor {
+            validator_id: "wge.validator.rigging-runtime-preparation/v1".into(),
+            gate_id: "rigging".into(),
+            receipt_schema: "wge.rigging-receipt/v1".into(),
+            revision: 1,
+            accepted_statuses: vec![ReceiptStatus::Pass, ReceiptStatus::Fail],
+        };
+        registry.entries.insert(
+            descriptor.validator_id.clone(),
+            RegisteredValidator {
+                descriptor,
+                kind: ValidatorKind::Rigging,
+            },
+        );
+        registry.digest = registry_digest(&registry.entries);
+        registry
     }
 
     pub fn descriptors(&self) -> Vec<ValidatorDescriptor> {
@@ -400,6 +422,32 @@ pub fn engine_neutral_gate_profile() -> Vec<GateRequirement> {
             receipt_schema: descriptor.receipt_schema,
         })
         .collect()
+}
+
+/// Strict native MVP profile. The prior engine-neutral profile remains
+/// unchanged and continues to leave rigging and Unity indeterminate.
+pub fn native_mvp_gate_profile() -> Vec<GateRequirement> {
+    let registry = ValidatorRegistry::wge_native_mvp_v1();
+    let mut gates = engine_neutral_gate_profile();
+    let rigging = registry
+        .descriptor("wge.validator.rigging-runtime-preparation/v1")
+        .expect("native rigging validator is registered");
+    let requirement = gates
+        .iter_mut()
+        .find(|gate| gate.gate_id == "rigging")
+        .expect("rigging exists in the compatible engine-neutral profile");
+    requirement.validator_id = rigging.validator_id.clone();
+    requirement.receipt_schema = rigging.receipt_schema.clone();
+    requirement.disposition = GateDisposition::RequiredPass;
+    gates
+}
+
+fn registry_digest(entries: &BTreeMap<String, RegisteredValidator>) -> String {
+    let descriptors = entries
+        .values()
+        .map(|entry| entry.descriptor.clone())
+        .collect::<Vec<_>>();
+    sha256_prefixed(canonical_json(&serde_json::to_value(descriptors).unwrap()).as_bytes())
 }
 
 #[derive(Clone, Debug)]
@@ -730,6 +778,26 @@ pub fn validate_request(
         .iter()
         .filter(|receipt| receipt.snapshot_id == current.snapshot_id)
         .collect::<Vec<_>>();
+    if request.gates == native_mvp_gate_profile() {
+        let semantic = current_receipts
+            .iter()
+            .find(|receipt| receipt.gate_id == "semantic")
+            .ok_or_else(|| {
+                AuthorityError::new("provenance", "native MVP semantic receipt is missing")
+            })?;
+        let payload: schema::SemanticReceiptPayload =
+            serde_json::from_value(semantic.payload.clone()).map_err(|error| {
+                AuthorityError::new("malformed", format!("semantic payload: {error}"))
+            })?;
+        if payload.project_spec_artifact_id.is_none()
+            || payload.project_template_artifact_id.is_none()
+        {
+            return Err(AuthorityError::new(
+                "policy",
+                "native MVP semantic receipt must bind a compiled project spec and project template",
+            ));
+        }
+    }
     validate_semantic_world_layout_binding(&current_receipts)?;
     let mut current_by_gate = BTreeMap::<&str, Vec<&ReceiptEnvelope>>::new();
     for receipt in &current_receipts {
@@ -821,7 +889,11 @@ pub fn validate_request(
     deferred.sort();
     reasons.sort();
     let status = if reasons.is_empty() {
-        CertificationStatus::EngineNeutralCertified
+        if request.gates == native_mvp_gate_profile() {
+            CertificationStatus::NativeMvpCertified
+        } else {
+            CertificationStatus::EngineNeutralCertified
+        }
     } else {
         CertificationStatus::Rejected
     };
@@ -948,6 +1020,12 @@ fn validate_gate_profile(
     gates: &[GateRequirement],
     registry: &ValidatorRegistry,
 ) -> Result<(), AuthorityError> {
+    if gates != engine_neutral_gate_profile() && gates != native_mvp_gate_profile() {
+        return Err(AuthorityError::new(
+            "policy",
+            "gate profile must exactly match a registered engine-neutral or native-MVP profile",
+        ));
+    }
     let mut gate_ids = BTreeSet::new();
     for gate in gates {
         if !gate_ids.insert(gate.gate_id.as_str()) {
@@ -973,7 +1051,11 @@ fn validate_gate_profile(
                 format!("gate {} does not match its registered schema", gate.gate_id),
             ));
         }
-        let should_defer = DEFERRED_GATES.contains(&gate.gate_id.as_str());
+        let should_defer = if gates == native_mvp_gate_profile() {
+            NATIVE_MVP_DEFERRED_GATES.contains(&gate.gate_id.as_str())
+        } else {
+            DEFERRED_GATES.contains(&gate.gate_id.as_str())
+        };
         if should_defer != (gate.disposition == GateDisposition::DeferredIndeterminate) {
             return Err(AuthorityError::new(
                 "policy",

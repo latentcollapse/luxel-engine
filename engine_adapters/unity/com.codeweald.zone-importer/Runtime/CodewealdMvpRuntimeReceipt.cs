@@ -3,9 +3,9 @@ using UnityEngine;
 namespace Codeweald.ZoneImporter
 {
     /// <summary>
-    /// Runtime-side receipt anchor for the WGE MVP handoff. The gameplay
-    /// adapter fills the outcome fields after a real playthrough; import alone
-    /// never marks the runtime gate as passed.
+    /// Legacy scene/debug metadata retained for package compatibility. These
+    /// fields are not a WGE receipt and must never be used to pass a runtime gate.
+    /// Use the independently verified wge.unity-runtime-receipt/v1 contract.
     /// </summary>
     public sealed class CodewealdMvpRuntimeReceipt : MonoBehaviour
     {
