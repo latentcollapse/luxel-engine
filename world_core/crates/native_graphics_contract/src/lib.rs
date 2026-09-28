@@ -831,16 +831,30 @@ fn overlay_color(overlay: &SemanticOverlay) -> &[f32; 4] {
     }
 }
 
+fn linear_to_srgb(value: f32) -> f32 {
+    if value <= 0.0031308 {
+        12.92 * value
+    } else {
+        1.055 * value.powf(1.0 / 2.4) - 0.055
+    }
+}
+
 fn rgba8(color: &[f32; 4]) -> Result<[u8; 4], GraphicsContractError> {
     color
         .iter()
-        .map(|value| {
+        .enumerate()
+        .map(|(index, value)| {
             if !value.is_finite() || !(0.0..=1.0).contains(value) {
                 return Err(GraphicsContractError::malformed(
                     "visual measurement color is outside [0, 1]",
                 ));
             }
-            Ok((value * 255.0).round() as u8)
+            let encoded = if index < 3 {
+                linear_to_srgb(*value)
+            } else {
+                *value
+            };
+            Ok((encoded * 255.0).round() as u8)
         })
         .collect::<Result<Vec<_>, _>>()?
         .try_into()
@@ -2086,6 +2100,14 @@ mod tests {
         let measurements = measure_frame_capture(&packet, &capture).expect("capture measures");
         assert_eq!(measurements.route_visible_pixels, 1);
         assert_eq!(measurements.distinct_terrain_colors, 2);
+    }
+
+    #[test]
+    fn srgb_capture_quantization_is_explicit() {
+        assert_eq!(
+            rgba8(&[0.5, 0.5, 0.5, 0.5]).expect("valid color"),
+            [188, 188, 188, 128]
+        );
     }
 
     #[test]

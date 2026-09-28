@@ -288,8 +288,12 @@ binding is used by terrain and mesh draws. The pinned Lava revision has a
 compatibility hazard where `frag_args` affects the fragment signature but is
 not packed into the draw argument buffer; the adapter therefore forwards
 scene constants through explicit varyings and keeps fragment argument tuples
-empty. Color-space transfer, mip generation/streaming, and multiple material
-texture roles remain quality-gap work. The adapter also emits deterministic
+empty. Capture conversion is explicit: scene-linear RGB uses the standard sRGB
+transfer before `rgba8_srgb` quantization, alpha remains linear, and Rust
+remeasures marker colors through the same conversion. sRGB albedo payloads are
+decoded to linear values before shader sampling; linear/data payloads are not
+transformed. Mip generation/streaming and multiple material texture roles remain
+quality-gap work. The adapter also emits deterministic
 instance visibility and submitted-vertex telemetry; mesh/material groups use
 Lava's real instanced draw path, uploading base geometry once and indexing
 per-instance transforms and material parameters with `instance_index()`.

@@ -128,9 +128,12 @@ The Rust side independently checks the response. At minimum it recomputes:
 - deterministic replay by requesting the same frame again after a clean worker
   reset.
 
-The canonical `rgba8_srgb` payload is row-major, top-to-bottom RGBA8. The
-Rust receipt stores the independently recomputed measurements and the adapter
-reports render-through-readback time in microseconds.
+The canonical `rgba8_srgb` payload is row-major, top-to-bottom RGBA8. RGB
+capture bytes use the standard scene-linear-to-sRGB transfer before
+quantization; alpha remains linear. sRGB albedo payloads are decoded to linear
+values before material evaluation. The Rust receipt stores the independently
+recomputed measurements and the adapter reports render-through-readback time
+in microseconds.
 
 Visual evidence remains a real gate. The reference Rust capture and the Lava
 capture are compared for semantic markers and measured properties first, then

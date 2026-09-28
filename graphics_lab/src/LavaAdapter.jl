@@ -769,8 +769,35 @@ function _framebuffer!(state::LavaBackend, width_px::Int, height_px::Int, depth:
     end
 end
 
+function _linear_to_srgb(value::Float32)::Float32
+    clamped = clamp(value, 0.0f0, 1.0f0)
+    return clamped <= 0.0031308f0 ?
+           12.92f0 * clamped :
+           1.055f0 * clamped^(1.0f0 / 2.4f0) - 0.055f0
+end
+
+function _srgb_to_linear(value::Float32)::Float32
+    clamped = clamp(value, 0.0f0, 1.0f0)
+    return clamped <= 0.04045f0 ?
+           clamped / 12.92f0 :
+           ((clamped + 0.055f0) / 1.055f0)^2.4f0
+end
+
 function _rgba8(value::NTuple{4,<:Real})::NTuple{4,UInt8}
-    return ntuple(index -> UInt8(clamp(round(Int, Float32(value[index]) * 255.0f0), 0, 255)), 4)
+    return ntuple(
+        index -> begin
+            channel = Float32(value[index])
+            isfinite(channel) && 0.0f0 <= channel <= 1.0f0 ||
+                throw(AdapterError("invalid_capture", "RGBA channel is outside [0, 1]"))
+            encoded = index == 4 ? channel : _linear_to_srgb(channel)
+            UInt8(clamp(round(Int, encoded * 255.0f0), 0, 255))
+        end,
+        4,
+    )
+end
+
+function _rgba8(value::NTuple{4,UInt8})::NTuple{4,UInt8}
+    return value
 end
 
 function _capture_bytes(pixels::AbstractMatrix{<:NTuple{4,<:Real}})::Vector{UInt8}
@@ -937,10 +964,30 @@ function _texture_resources!(state::LavaBackend)
     return created
 end
 
+function _decode_texture_channel(::Val{:linear}, channel::Float32)::Float32
+    return channel
+end
+
+function _decode_texture_channel(::Val{:srgb}, channel::Float32)::Float32
+    return _srgb_to_linear(channel)
+end
+
 function _texture_matrix(
     bytes::Vector{UInt8},
     width::UInt32,
     height::UInt32,
+    color_space::Symbol=:linear,
+)::Matrix{NTuple{4,Float32}}
+    color_space == :linear && return _texture_matrix(bytes, width, height, Val{:linear}())
+    color_space == :srgb && return _texture_matrix(bytes, width, height, Val{:srgb}())
+    throw(AdapterError("unsupported_texture", "texture color space is not a color payload"))
+end
+
+function _texture_matrix(
+    bytes::Vector{UInt8},
+    width::UInt32,
+    height::UInt32,
+    decoder::Val,
 )::Matrix{NTuple{4,Float32}}
     width_int = Int(width)
     height_int = Int(height)
@@ -952,7 +999,13 @@ function _texture_matrix(
     data = Matrix{NTuple{4,Float32}}(undef, height_int, width_int)
     offset = 1
     for row in 1:height_int, column in 1:width_int
-        data[row, column] = ntuple(index -> Float32(bytes[offset+index-1]) / 255.0f0, 4)
+        data[row, column] = ntuple(
+            index -> begin
+                channel = Float32(bytes[offset+index-1]) / 255.0f0
+                index == 4 ? channel : _decode_texture_channel(decoder, channel)
+            end,
+            4,
+        )
         offset += 4
     end
     return data
@@ -983,6 +1036,7 @@ function _material_texture_resources!(
         bytes = UInt8[255, 255, 255, 255]
         width = UInt32(1)
         height = UInt32(1)
+        color_space = :linear
     else
         texture_id = only(texture_ids)
         texture_index = findfirst(texture -> texture.texture_id == texture_id, packet.textures)
@@ -996,8 +1050,9 @@ function _material_texture_resources!(
         bytes = texture.payload::Vector{UInt8}
         width = texture.width_px
         height = texture.height_px
+        color_space = texture.color_space
     end
-    data = _texture_matrix(bytes, width, height)
+    data = _texture_matrix(bytes, width, height, color_space)
     gpu_texture = Lava.LavaTexture2D(data; ctx=state.context, filter=:linear, wrap=:clamp)
     sampler = Lava.LavaSampler(ctx=state.context, filter=:linear, wrap=:clamp)
     bindings = Lava.bind_textures([gpu_texture * sampler])
@@ -1434,15 +1489,29 @@ function _overlay_resources!(
     return created
 end
 
-function _pixel_luminance(pixel::NTuple{4,<:Real})
+function _pixel_luminance(pixel::NTuple{4,<:Real})::Float64
     return 0.2126 * Float64(pixel[1]) + 0.7152 * Float64(pixel[2]) + 0.0722 * Float64(pixel[3])
 end
 
-function _distinct_colors(pixels)
+function _capture_pixels(capture_bytes::Vector{UInt8})::Vector{NTuple{4,UInt8}}
+    length(capture_bytes) % 4 == 0 ||
+        throw(AdapterError("invalid_capture", "capture byte length is not RGBA-aligned"))
+    pixels = Vector{NTuple{4,UInt8}}(undef, length(capture_bytes) ÷ 4)
+    for (pixel_index, offset) in enumerate(1:4:length(capture_bytes))
+        pixels[pixel_index] = ntuple(index -> capture_bytes[offset+index-1], 4)
+    end
+    return pixels
+end
+
+function _distinct_colors(pixels::AbstractVector{<:NTuple{4,<:Real}})::Int
     return length(Set((rgba[1], rgba[2], rgba[3]) for rgba in (_rgba8(pixel) for pixel in pixels)))
 end
 
-function _role_pixels(pixels, overlays, role::Symbol)
+function _role_pixels(
+    pixels::AbstractVector{<:NTuple{4,<:Real}},
+    overlays::Vector{<:WGEGraphics.OverlayPacket},
+    role::Symbol,
+)::Int
     colors = Set{NTuple{4,UInt8}}()
     for overlay in overlays
         overlay.role == role && push!(colors, _rgba8(overlay.color_rgba))
@@ -1452,7 +1521,7 @@ function _role_pixels(pixels, overlays, role::Symbol)
 end
 
 function _scene_measurements(
-    pixels::AbstractMatrix{<:NTuple{4,<:Real}},
+    pixels::AbstractVector{<:NTuple{4,<:Real}},
     packet::WGEGraphics.GraphicsScenePacket,
 )
     luminance = Float64[_pixel_luminance(pixel) for pixel in pixels]
@@ -1465,6 +1534,13 @@ function _scene_measurements(
         encounter_visible_pixels=_role_pixels(pixels, packet.overlays, :encounter),
         objective_visible_pixels=_role_pixels(pixels, packet.overlays, :objective),
     )
+end
+
+function _scene_measurements(
+    capture_bytes::Vector{UInt8},
+    packet::WGEGraphics.GraphicsScenePacket,
+)
+    return _scene_measurements(_capture_pixels(capture_bytes), packet)
 end
 
 function render_scene(
@@ -1619,7 +1695,7 @@ function render_scene(
         height_px=height,
         capture_sha256="sha256:" * bytes2hex(sha256(capture_bytes)),
         capture_base64=base64encode(capture_bytes),
-        measurements=_scene_measurements(pixels, packet),
+        measurements=_scene_measurements(capture_bytes, packet),
         telemetry=(
             upload_bytes=Int(state.upload_bytes),
             readback_bytes=Int(state.readback_bytes),

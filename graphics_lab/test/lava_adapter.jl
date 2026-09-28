@@ -21,6 +21,16 @@ using .LavaAdapter
     @test matrix[2, 3] == (21.0f0 / 255.0f0, 22.0f0 / 255.0f0, 23.0f0 / 255.0f0, 24.0f0 / 255.0f0)
 end
 
+@testset "linear and sRGB transfer" begin
+    @test LavaAdapter._linear_to_srgb(0.5f0) ≈ 0.7353569f0 atol = 1.0f-5
+    @test LavaAdapter._srgb_to_linear(0.5f0) ≈ 0.21404114f0 atol = 1.0f-5
+    @test LavaAdapter._srgb_to_linear(LavaAdapter._linear_to_srgb(0.5f0)) ≈ 0.5f0 atol = 1.0f-5
+
+    srgb = LavaAdapter._texture_matrix(UInt8[128, 128, 128, 255], UInt32(1), UInt32(1), :srgb)
+    @test srgb[1, 1][1] ≈ 0.2158605f0 atol = 1.0f-5
+    @test srgb[1, 1][4] == 1.0f0
+end
+
 @testset "camera projection lowering" begin
     orthographic = WGEGraphics.CameraPacket(
         "orthographic",
