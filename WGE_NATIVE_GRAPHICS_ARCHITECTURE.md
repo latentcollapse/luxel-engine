@@ -1,10 +1,14 @@
 # WGE Native Graphics Architecture
 
-Status: contract checkpoint; implementation begins after this document.
+Status: executable adapter checkpoint; packet lowering and Rust receipt
+promotion remain ahead.
 
 Date: 2026-09-28
 
-Upstream substrate: Lava.jl `11c7e31bdf62408d22bf379e9e59510f69d2103e`.
+Upstream substrate: Lava.jl
+`11c7e31bdf62408d22bf379e9e59510f69d2103e`, with matching Vulkan.jl
+`03b4ca2351477ccbb8ee378f512da50f7eec7bac` and VulkanCore.jl
+`1d02829e8fa92da430d879db4dd7bf564a872035`.
 
 The companion forensic record is [`LAVA_GRAPHICS_AUDIT.md`](LAVA_GRAPHICS_AUDIT.md).
 This document turns that audit into an executable boundary. The design is
@@ -235,5 +239,10 @@ explicitly deferred/indeterminate.
 6. Add repair/rebuild and deterministic restart evidence.
 7. Measure and improve visual quality only inside the certified boundary.
 
-The next code slice is item 1. No renderer implementation should bypass this
-contract or use Bevy types as the native scene model.
+The Rust packet contract and protocol worker are now implemented. The Lava
+adapter has also passed a real offscreen color/readback probe through a
+persistent Julia process, with the first target-size cache/reuse test green.
+The next code slice is a packet-driven terrain/marker render, followed by
+depth and texture capability probes and Rust-owned receipt promotion. No
+renderer implementation should bypass this contract or use Bevy types as the
+native scene model.

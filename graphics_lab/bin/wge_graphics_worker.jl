@@ -4,6 +4,9 @@ using JSON3
 using SHA
 using WGEGraphics
 
+include(joinpath(@__DIR__, "..", "src", "LavaAdapter.jl"))
+using .LavaAdapter
+
 const WORKER_SCHEMA = "wge.graphics-worker/v1"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 
@@ -39,29 +42,47 @@ function handle(payload::AbstractString)::String
         return failure("malformed_request", "JSON decode failed: $(sprint(showerror, error))")
     end
     value isa JSON3.Object || return failure("malformed_request", "request must be an object")
-    Set(String(key) for key in keys(value)) == Set(("op", "packet")) ||
-        return failure("malformed_request", "request fields are closed")
-    String(value["op"]) == "validate_packet" ||
-        return failure("unsupported_operation", "only validate_packet is available in the protocol checkpoint")
+    operation = String(get(value, "op", ""))
     try
-        packet = validate_scene_packet(JSON3.write(value["packet"]))
-        summary = packet_summary(packet)
-        return JSON3.write((
-            schema=WORKER_SCHEMA,
-            kind="packet_validated",
-            packet_sha256=summary.packet_sha256,
-            world_artifact_id=summary.world_artifact_id,
-            spatial_fields_sha256=summary.spatial_fields_sha256,
-            resolution=summary.resolution,
-            terrain_samples=summary.terrain_samples,
-            capture_id=summary.capture_id,
-            width_px=summary.width_px,
-            height_px=summary.height_px,
-            overlay_count=summary.overlay_count,
-            lava_revision=LAVA_REVISION,
-        ))
+        if operation == "validate_packet"
+            Set(String(key) for key in keys(value)) == Set(("op", "packet")) ||
+                return failure("malformed_request", "validate_packet request fields are closed")
+            packet = validate_scene_packet(JSON3.write(value["packet"]))
+            summary = packet_summary(packet)
+            return JSON3.write((
+                schema=WORKER_SCHEMA,
+                kind="packet_validated",
+                packet_sha256=summary.packet_sha256,
+                world_artifact_id=summary.world_artifact_id,
+                spatial_fields_sha256=summary.spatial_fields_sha256,
+                resolution=summary.resolution,
+                terrain_samples=summary.terrain_samples,
+                capture_id=summary.capture_id,
+                width_px=summary.width_px,
+                height_px=summary.height_px,
+                overlay_count=summary.overlay_count,
+                lava_revision=LAVA_REVISION,
+            ))
+        elseif operation == "probe_backend"
+            allowed = Set(("op", "width_px", "height_px"))
+            request_keys = Set(String(key) for key in keys(value))
+            request_keys ⊆ allowed || return failure("malformed_request", "probe_backend request fields are closed")
+            width = haskey(value, "width_px") ? Int(value["width_px"]) : 16
+            height = haskey(value, "height_px") ? Int(value["height_px"]) : 16
+            state = LavaAdapter.backend()
+            capabilities = LavaAdapter.backend_probe(state)
+            render = LavaAdapter.render_probe(width, height, state)
+            return JSON3.write((
+                schema=WORKER_SCHEMA,
+                kind="backend_probed",
+                capabilities=capabilities,
+                render=render,
+            ))
+        else
+            return failure("unsupported_operation", "operation is not available in the graphics worker")
+        end
     catch error
-        if error isa ProtocolError
+        if error isa ProtocolError || error isa AdapterError
             return failure(error.code, error.detail)
         end
         return failure("worker_error", sprint(showerror, error))
@@ -73,9 +94,10 @@ function main()
     write_frame(stdout, JSON3.write((
         schema=WORKER_SCHEMA,
         kind="ready",
-        profile="protocol_only",
+        profile="protocol_and_lava_lazy",
         script_sha256=script_sha256,
         lava_revision=LAVA_REVISION,
+        adapter_revision=LavaAdapter.ADAPTER_REVISION,
         julia_version=string(VERSION),
     )))
     while true

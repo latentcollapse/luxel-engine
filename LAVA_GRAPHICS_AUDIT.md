@@ -235,3 +235,25 @@ The next checkpoint is the architecture/contract document. It must preserve
 the conclusions above, especially the Rust authority plane, separate Julia
 graphics process, exact dependency lock, engine-neutral packet boundary, and
 Bevy-as-oracle rule.
+
+## Post-audit substrate checkpoint
+
+The first executable adapter slice exposed a dependency compatibility fault in
+the upstream composition: Lava `11c7e31` calls Vulkan 1.4 cooperative-matrix
+types that are absent from the registered Vulkan `0.6.30` / VulkanCore `1.3.1`
+pair. WGE therefore pins the matching upstream wrapper revisions explicitly:
+
+| Dependency | Revision |
+| --- | --- |
+| Lava.jl | `11c7e31bdf62408d22bf379e9e59510f69d2103e` |
+| Vulkan.jl | `03b4ca2351477ccbb8ee378f512da50f7eec7bac` |
+| VulkanCore.jl | `1d02829e8fa92da430d879db4dd7bf564a872035` |
+| Raycore.jl | `d93743b3ac0e8462ac8f9ba26d082f5402b4629d` |
+
+On the current host, the pinned stack initializes an NVIDIA GeForce RTX 5060
+with Vulkan `1.4.351`, creates a persistent Lava context, compiles a Julia
+vertex/fragment pair, renders an offscreen triangle, reads back the target,
+and emits deterministic RGBA8 bytes. The integration test also renders two
+different target sizes through the same cached context and pipeline. This is
+substrate evidence only: it does not certify depth, texture sampling, terrain
+lowering, or Rust receipt promotion.

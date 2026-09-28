@@ -359,7 +359,8 @@ function _parse_instances(value, mesh_ids::Set{String}, material_ids::Set{String
             [_finite_float32(value, "instance transform") for value in values]
         end
     end
-    isempty(array) || isempty(mesh_ids) || throw(ProtocolError("provenance", "instance references absent meshes"))
+    !isempty(array) && isempty(mesh_ids) &&
+        throw(ProtocolError("provenance", "instance references absent meshes"))
     return ids
 end
 
