@@ -77,6 +77,7 @@ pub struct GameplayWorldBindingBody {
     pub fixed_tick_rate_hz: u32,
     pub telemetry: Vec<GameplayTickTelemetry>,
     pub capture: RuntimeCaptureMetadata,
+    pub general_gameplay: crate::GeneralGameplayEvidence,
     pub outcome: GameOutcome,
 }
 
@@ -107,6 +108,7 @@ pub fn build_gameplay_world_binding(
     }
     let telemetry = build_telemetry(world, &snapshot, &trace, &receipt)?;
     let capture_metadata = build_capture_metadata(world, capture, visual)?;
+    let general_gameplay = crate::build_general_gameplay_evidence(world)?;
     let body = GameplayWorldBindingBody {
         schema_version: GAMEPLAY_WORLD_BINDING_SCHEMA.into(),
         validator_id: GAMEPLAY_WORLD_VALIDATOR_ID.into(),
@@ -123,6 +125,7 @@ pub fn build_gameplay_world_binding(
         fixed_tick_rate_hz: REFERENCE_TICK_RATE_HZ,
         telemetry,
         capture: capture_metadata,
+        general_gameplay,
     };
     let evidence_sha256 = prefixed_sha256(&serde_json::to_vec(&body).map_err(|error| {
         ReferenceRuntimeError::contract(format!("gameplay binding encoding failed: {error}"))
@@ -179,6 +182,7 @@ pub fn validate_gameplay_world_binding(
                 .into(),
         ));
     }
+    crate::validate_general_gameplay_evidence(world, &binding.body.general_gameplay)?;
     let (encounter_id, expected_snapshot, expected_trace) = gameplay_case(world)?;
     if binding.body.primary_encounter_id != encounter_id
         || binding.body.gameplay_snapshot != expected_snapshot

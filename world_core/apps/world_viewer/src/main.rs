@@ -105,6 +105,9 @@ impl MaterialExtension for TerrainExtension {
 /// is one place that decides what a directory is.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum WorldMode {
+    /// A Rust-validated engine-neutral world artifact from the reference
+    /// runtime. This path deliberately bypasses the legacy renderer tree.
+    Native,
     Certified,
     Preview,
     /// A directory of mountain crops from `gaea_crop.py`. Not a world at all --
@@ -148,6 +151,7 @@ impl WorldMode {
 /// patching the root inline when it switches batches.
 fn renderer_root_for(batch: &Path, mode: WorldMode) -> Result<PathBuf> {
     match mode {
+        WorldMode::Native => Ok(batch.to_path_buf()),
         // The crops' `.glb` files sit beside their manifest, so the batch is
         // also the asset root.
         WorldMode::Preview | WorldMode::CropLibrary => Ok(batch.to_path_buf()),
@@ -168,6 +172,7 @@ fn renderer_root_for(batch: &Path, mode: WorldMode) -> Result<PathBuf> {
 #[derive(Resource, Clone)]
 struct ViewerConfig {
     batch: PathBuf,
+    native_world: Option<PathBuf>,
     renderer_root: PathBuf,
     capture_path: Option<PathBuf>,
     capture_view: String,
@@ -187,6 +192,7 @@ impl ViewerConfig {
     fn from_args() -> Result<Self> {
         let mut arguments = env::args().skip(1);
         let mut batch = None;
+        let mut native_world = None;
         let mut capture_path = None;
         let mut worlds_roots = Vec::new();
         let mut surround_path: Option<PathBuf> = None;
@@ -195,6 +201,7 @@ impl ViewerConfig {
         while let Some(argument) = arguments.next() {
             match argument.as_str() {
                 "--batch" => batch = arguments.next().map(PathBuf::from),
+                "--native-world" => native_world = arguments.next().map(PathBuf::from),
                 "--worlds-root" => {
                     worlds_roots.extend(arguments.next().map(PathBuf::from));
                 }
@@ -220,6 +227,7 @@ impl ViewerConfig {
                 "-h" | "--help" => {
                     println!(
                         "usage: codeweald-world-viewer --batch <concept-batch-directory> \
+                         | --native-world <wge.world-artifact.json> \
                          [--worlds-root <directory>]... \
                          [--surround <landform-batch> [--surround-offset x,y,z]] \
                          [--capture <png-path>] \
@@ -239,17 +247,36 @@ impl ViewerConfig {
                 "unknown view {capture_view:?}; expected overview, west-wall, east-wall, player, or border"
             );
         }
-        let batch = batch
-            .context("--batch is required")?
-            .canonicalize()
-            .context("cannot resolve concept batch")?;
-        let mode = WorldMode::detect(&batch);
+        if batch.is_some() && native_world.is_some() {
+            bail!("--batch and --native-world are mutually exclusive");
+        }
+        let (batch, mode, native_world) = if let Some(path) = native_world {
+            let path = path
+                .canonicalize()
+                .context("cannot resolve native world artifact")?;
+            if !path.is_file() {
+                bail!("native world artifact is not a file: {}", path.display());
+            }
+            let parent = path
+                .parent()
+                .context("native world artifact has no parent")?
+                .to_path_buf();
+            (parent, WorldMode::Native, Some(path))
+        } else {
+            let batch = batch
+                .context("--batch or --native-world is required")?
+                .canonicalize()
+                .context("cannot resolve concept batch")?;
+            let mode = WorldMode::detect(&batch);
+            (batch, mode, None)
+        };
         let renderer_root = renderer_root_for(&batch, mode)?;
         if worlds_roots.is_empty() {
             worlds_roots.extend(batch.parent().map(Path::to_path_buf));
         }
         Ok(Self {
             batch,
+            native_world,
             renderer_root,
             capture_path,
             capture_view,
@@ -744,6 +771,23 @@ struct PreviewWorld {
     source_resolution: Option<u64>,
 }
 
+/// A native reference-runtime world projected into Bevy for inspection.
+///
+/// This is intentionally a separate type from `CompiledWorld`: the native
+/// artifact has no Godot renderer tree, texture plan, or delivery-backend
+/// assumptions. Bevy consumes the already-certified Rust/Julia world bytes
+/// and can only render the fields and semantic metadata that artifact owns.
+struct NativeWorld {
+    world: wge_reference_runtime::WorldArtifact,
+    mesh: Mesh,
+    terrain_size_m: Vec2,
+    relief_m: f32,
+    source_signature: u64,
+    terrain_vertices: usize,
+    camera_transform: Transform,
+    heightfield: TerrainHeightfield,
+}
+
 /// A crop cut from a heightfield, ready to look at.
 struct CropEntry {
     name: String,
@@ -769,6 +813,7 @@ struct CropLibrary {
 
 /// What a batch directory turned out to hold.
 enum LoadedWorld {
+    Native(Box<NativeWorld>),
     Certified(Box<CompiledWorld>),
     Preview(Box<PreviewWorld>),
     Crops(Box<CropLibrary>),
@@ -1122,6 +1167,44 @@ fn capture_certified_world(
     }
     capture.requested = true;
     let path = path.clone();
+    let native_capture_context = if config.mode == WorldMode::Native {
+        let Some(native_world_path) = config.native_world.as_ref() else {
+            capture.requested = false;
+            eprintln!("native capture provenance failed: native world path is missing");
+            return;
+        };
+        let world_bytes = match fs::read(native_world_path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                capture.requested = false;
+                eprintln!("native capture provenance failed: cannot reread native world: {error}");
+                return;
+            }
+        };
+        let world: wge_reference_runtime::WorldArtifact = match serde_json::from_slice(&world_bytes)
+        {
+            Ok(world) => world,
+            Err(error) => {
+                capture.requested = false;
+                eprintln!("native capture provenance failed: native world is malformed: {error}");
+                return;
+            }
+        };
+        if let Err(error) = wge_reference_runtime::validate_world_artifact(&world) {
+            capture.requested = false;
+            eprintln!("native capture provenance failed: native world changed: {error}");
+            return;
+        }
+        let provenance_path = path.with_file_name(format!(
+            "{}_provenance.json",
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("capture")
+        ));
+        Some((world, provenance_path, config.capture_view.clone()))
+    } else {
+        None
+    };
     // Written from the same settled frame the screenshot is taken from, so the
     // projection describes the image the gate will read rather than a camera
     // the world has since moved under.
@@ -1143,6 +1226,34 @@ fn capture_certified_world(
     commands.spawn(Screenshot::primary_window()).observe(
         move |captured: On<ScreenshotCaptured>, mut app_exit: MessageWriter<AppExit>| {
             save_to_disk(&path)(captured);
+            if let Some((world, provenance_path, capture_view)) = &native_capture_context {
+                let result = (|| -> Result<()> {
+                    let image = fs::read(&path)
+                        .with_context(|| format!("cannot reread capture {}", path.display()))?;
+                    let provenance = wge_reference_runtime::build_bevy_capture_provenance(
+                        world,
+                        &image,
+                        capture_view.clone(),
+                        wge_reference_runtime::BevyRendererIdentity {
+                            renderer_id: "bevy".into(),
+                            viewer_package: env!("CARGO_PKG_NAME").into(),
+                            viewer_version: env!("CARGO_PKG_VERSION").into(),
+                        },
+                    )
+                    .map_err(|error| {
+                        anyhow::anyhow!("capture provenance validation failed: {error}")
+                    })?;
+                    let bytes = serde_json::to_vec_pretty(&provenance)?;
+                    fs::write(provenance_path, bytes)
+                        .with_context(|| format!("cannot write {}", provenance_path.display()))?;
+                    Ok(())
+                })();
+                if let Err(error) = result {
+                    eprintln!("native capture provenance failed: {error:#}");
+                    app_exit.write(AppExit::error());
+                    return;
+                }
+            }
             app_exit.write(AppExit::Success);
         },
     );
@@ -1316,6 +1427,7 @@ fn apply_camera_frame(
 fn required_files(batch: &Path, mode: WorldMode) -> Vec<PathBuf> {
     let artifact = |relative: &str| batch.join(relative);
     match mode {
+        WorldMode::Native => vec![batch.join("world_artifact.json")],
         // A preview has exactly two files, so listing the certified seven would
         // make every preview permanently unloadable.
         WorldMode::Preview => vec![
@@ -1354,6 +1466,9 @@ fn first_missing_artifact(batch: &Path, mode: WorldMode) -> Option<String> {
 }
 
 fn source_files(config: &ViewerConfig) -> Vec<PathBuf> {
+    if config.mode == WorldMode::Native {
+        return config.native_world.iter().cloned().collect();
+    }
     required_files(&config.batch, config.mode)
 }
 
@@ -1427,6 +1542,59 @@ fn monitor_compiled_world(
         }
     }
     match load_world(&config, signature) {
+        Ok(LoadedWorld::Native(world)) => {
+            let world = *world;
+            for entity in &generated {
+                commands.entity(entity).despawn();
+            }
+            *heightfield = world.heightfield;
+            let terrain = meshes.add(world.mesh);
+            let native_material = materials.add(StandardMaterial {
+                base_color: Color::srgb(0.34, 0.47, 0.38),
+                perceptual_roughness: 0.94,
+                metallic: 0.0,
+                ..default()
+            });
+            let root = commands
+                .spawn((
+                    GeneratedWorld,
+                    Name::new(format!("NativeWorld:{}", world.world.body.world_id)),
+                    Transform::default(),
+                    Visibility::default(),
+                ))
+                .id();
+            commands.entity(root).with_children(|parent| {
+                parent.spawn((
+                    Name::new("NativeCertifiedTerrain"),
+                    Mesh3d(terrain),
+                    MeshMaterial3d(native_material),
+                ));
+            });
+            *overlay = SemanticOverlay::default();
+            camera_frame.transform = Some(world.camera_transform);
+            camera_frame.pending = true;
+            let body = &world.world.body;
+            status.text = format!(
+                "NATIVE CERTIFIED REFERENCE WORLD\n{} · {}\nworld {} · fields {}\n{}^2 over {:.0} x {:.0} m · relief {:.1} m · {} vertices\n{} spawns · {} encounters · {} route cells\nRust/Julia artifact revalidated · R reload · F frame",
+                body.world_id,
+                body.title,
+                &world.world.artifact_sha256[..world.world.artifact_sha256.len().min(20)],
+                &body.fields.spatial_sha256[..body.fields.spatial_sha256.len().min(20)],
+                body.fields.resolution,
+                world.terrain_size_m.x,
+                world.terrain_size_m.y,
+                world.relief_m,
+                world.terrain_vertices,
+                body.spawns.len(),
+                body.encounters.len(),
+                body.navigation.route_cells.len(),
+            );
+            status.error = None;
+            reload.signature = world.source_signature;
+            reload.candidate_signature = world.source_signature;
+            reload.stable_polls = 0;
+            info!("loaded {}", status.text.replace('\n', " | "));
+        }
         Ok(LoadedWorld::Crops(library)) => {
             let library = *library;
             for entity in &generated {
@@ -1894,6 +2062,9 @@ fn load_surround(path: &Path, offset: Vec3) -> Result<(Mesh, Transform)> {
 /// Dispatch on what the batch directory actually is.
 fn load_world(config: &ViewerConfig, signature: u64) -> Result<LoadedWorld> {
     match config.mode {
+        WorldMode::Native => Ok(LoadedWorld::Native(Box::new(load_native_world(
+            config, signature,
+        )?))),
         WorldMode::CropLibrary => Ok(LoadedWorld::Crops(Box::new(load_crop_library(
             config, signature,
         )?))),
@@ -1904,6 +2075,66 @@ fn load_world(config: &ViewerConfig, signature: u64) -> Result<LoadedWorld> {
             config, signature,
         )?))),
     }
+}
+
+/// Load the engine-neutral WGE world artifact and nothing else.
+///
+/// The artifact is revalidated from its embedded layout, Julia provenance,
+/// collision, spawns, and navigation before a mesh is built. This keeps Bevy
+/// a renderer/inspection consumer rather than a second semantic authority.
+fn load_native_world(config: &ViewerConfig, signature: u64) -> Result<NativeWorld> {
+    let path = config
+        .native_world
+        .as_ref()
+        .context("native world mode has no world artifact path")?;
+    let world: wge_reference_runtime::WorldArtifact = serde_json::from_slice(
+        &fs::read(path).with_context(|| format!("cannot read native world {}", path.display()))?,
+    )
+    .context("native world artifact is not valid JSON")?;
+    wge_reference_runtime::validate_world_artifact(&world)
+        .map_err(|error| anyhow::anyhow!("native world validation failed: {error}"))?;
+    let layout = &world.body.authored_layout;
+    let resolution = layout.resolution;
+    let width = layout.width_m as f32;
+    let length = layout.length_m as f32;
+    let heights = world
+        .body
+        .fields
+        .heights_m
+        .iter()
+        .map(|height| {
+            if !height.is_finite() || *height < f32::MIN as f64 || *height > f32::MAX as f64 {
+                return Err(anyhow::anyhow!(
+                    "native world contains an unrepresentable height"
+                ));
+            }
+            Ok(*height as f32)
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let (height_min, height_max) = height_range(&heights)?;
+    let mesh = build_terrain_mesh(&heights, resolution, width, length)?;
+    let terrain_vertices = mesh.count_vertices();
+    Ok(NativeWorld {
+        world,
+        mesh,
+        terrain_size_m: Vec2::new(width, length),
+        relief_m: height_max - height_min,
+        source_signature: signature,
+        terrain_vertices,
+        camera_transform: inspection_camera(
+            &config.capture_view,
+            width,
+            length,
+            height_min,
+            height_max,
+        ),
+        heightfield: TerrainHeightfield {
+            heights,
+            resolution,
+            width,
+            length,
+        },
+    })
 }
 
 /// Load terrain, and refuse to pretend it is anything more.
@@ -3046,6 +3277,7 @@ mod tests {
         };
         let config = ViewerConfig {
             batch,
+            native_world: None,
             renderer_root: PathBuf::new(),
             capture_path: None,
             capture_view: "overview".to_owned(),
@@ -3205,6 +3437,7 @@ mod tests {
         fs::write(terrain.join("heightfield_f32le.bin"), heights).unwrap();
         ViewerConfig {
             batch: directory.to_path_buf(),
+            native_world: None,
             renderer_root: directory.to_path_buf(),
             capture_path: None,
             capture_view: "overview".to_owned(),

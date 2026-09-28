@@ -325,6 +325,8 @@ fn validate_gameplay(
     )?;
     runtime::validate_gameplay_world_binding(&world, &traversal, capture, &visual, &binding)
         .map_err(runtime_error)?;
+    runtime::validate_general_gameplay_evidence(&world, &binding.body.general_gameplay)
+        .map_err(runtime_error)?;
     let evidence = runtime_evidence_set(
         &payload.world_artifact_id,
         &payload.traversal_artifact_id,

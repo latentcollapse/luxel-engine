@@ -5,19 +5,29 @@
 //! world artifact identity, checks collision and navigation, runs traversal,
 //! renders a deterministic reference capture, and revalidates its evidence.
 
+mod bevy_capture;
 mod fields;
 mod gameplay_binding;
+mod general_gameplay;
 mod model;
 mod runtime;
 mod visual;
 mod worker;
 mod world;
 
+pub use bevy_capture::{
+    BEVY_CAPTURE_FORMAT, BEVY_CAPTURE_PROVENANCE_SCHEMA, BevyCaptureProvenance,
+    BevyRendererIdentity, build_bevy_capture_provenance, validate_bevy_capture_provenance,
+};
 pub use fields::{JuliaFieldProvenance, JuliaFieldResponse, NumericalFields};
 pub use gameplay_binding::{
     GameplayTickTelemetry, GameplayWorldBinding, GameplayWorldBindingBody, RuntimeCaptureMetadata,
     RuntimeCapturePhase, RuntimeEntityPose, build_gameplay_world_binding,
     validate_gameplay_world_binding,
+};
+pub use general_gameplay::{
+    GENERAL_GAMEPLAY_EVIDENCE_SCHEMA, GeneralGameplayEvidence, GeneralGameplayEvidenceBody,
+    build_general_gameplay_evidence, validate_general_gameplay_evidence,
 };
 pub use model::{
     AuthoredLayout, EncounterSpec, ObstacleSpec, ReferenceCamera, SemanticRegion, SpawnRole,

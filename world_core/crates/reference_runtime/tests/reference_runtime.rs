@@ -7,9 +7,10 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use wge_gameplay_contract::{FailureCode, GameOutcome, InputEvent, run_replay};
 use wge_reference_runtime::{
-    AuthoredLayout, GameplayWorldBinding, REFERENCE_TICK_RATE_HZ, RuntimeCapturePhase,
-    TraversalEvidence, TraversalOutcome, VisualEvidence, VisualGateStatus, WorldArtifact,
-    build_from_layout_path, validate_gameplay_world_binding, validate_layout,
+    AuthoredLayout, BevyRendererIdentity, GameplayWorldBinding, REFERENCE_TICK_RATE_HZ,
+    RuntimeCapturePhase, TraversalEvidence, TraversalOutcome, VisualEvidence, VisualGateStatus,
+    WorldArtifact, build_bevy_capture_provenance, build_from_layout_path,
+    validate_bevy_capture_provenance, validate_gameplay_world_binding, validate_layout,
     validate_traversal_evidence, validate_visual_evidence, validate_world_artifact,
 };
 
@@ -18,6 +19,11 @@ static TEMP_ID: AtomicU64 = AtomicU64::new(0);
 fn example_layout() -> AuthoredLayout {
     serde_json::from_str(include_str!("../examples/riverwatch.layout.json"))
         .expect("authored example layout must deserialize")
+}
+
+fn second_example_layout() -> AuthoredLayout {
+    serde_json::from_str(include_str!("../examples/quartz_marsh.layout.json"))
+        .expect("second authored example layout must deserialize")
 }
 
 fn temp_dir(label: &str) -> PathBuf {
@@ -96,6 +102,30 @@ fn reseal_visual(evidence: &mut VisualEvidence) {
 
 fn reseal_gameplay(binding: &mut GameplayWorldBinding) {
     binding.evidence_sha256 = digest(&binding.body);
+}
+
+#[test]
+fn bevy_capture_provenance_binds_world_renderer_and_final_png_bytes() {
+    let build = build_layout(&example_layout(), "bevy-provenance").unwrap();
+    let image = b"\x89PNG\r\n\x1a\nsynthetic-capture";
+    let provenance = build_bevy_capture_provenance(
+        &build.world,
+        image,
+        "overview",
+        BevyRendererIdentity {
+            renderer_id: "bevy".into(),
+            viewer_package: "codeweald-world-viewer".into(),
+            viewer_version: "test".into(),
+        },
+    )
+    .unwrap();
+    validate_bevy_capture_provenance(&build.world, image, &provenance).unwrap();
+
+    let mut changed = provenance.clone();
+    changed.image_sha256 =
+        "sha256:0000000000000000000000000000000000000000000000000000000000000000".into();
+    assert!(validate_bevy_capture_provenance(&build.world, image, &changed).is_err());
+    assert!(validate_bevy_capture_provenance(&build.world, b"not-a-png", &provenance).is_err());
 }
 
 #[test]
@@ -289,6 +319,34 @@ fn world_bound_gameplay_ticks_cover_the_real_route_and_bind_capture_metadata() {
         RuntimeCapturePhase::WorldOverviewBeforePlaythrough
     );
     assert_eq!(capture.simulation_tick, 0);
+}
+
+#[test]
+fn second_materially_different_layout_builds_through_the_same_native_path() {
+    let layout = second_example_layout();
+    assert_ne!(layout.world_id, example_layout().world_id);
+    assert_ne!(layout.width_m, example_layout().width_m);
+    assert!(layout.encounters.len() > 1);
+    assert!(layout.regions.len() > 1);
+
+    let built = build_layout(&layout, "runtime-second-world").unwrap();
+    assert_eq!(built.world.body.world_id, "quartz_marsh");
+    assert_eq!(built.traversal.body.outcome, TraversalOutcome::Completed);
+    assert_eq!(built.gameplay.body.outcome, GameOutcome::Won);
+    assert_eq!(built.visual.body.status, VisualGateStatus::Passed);
+    assert!(built.world.body.navigation.route_cells.len() > 2);
+    assert_eq!(built.world.body.encounters.len(), 2);
+    validate_world_artifact(&built.world).unwrap();
+    validate_traversal_evidence(&built.world, &built.traversal).unwrap();
+    validate_visual_evidence(&built.world, &built.capture_bytes, &built.visual).unwrap();
+    validate_gameplay_world_binding(
+        &built.world,
+        &built.traversal,
+        &built.capture_bytes,
+        &built.visual,
+        &built.gameplay,
+    )
+    .unwrap();
 }
 
 #[test]

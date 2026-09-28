@@ -9,6 +9,7 @@ members = [
     "crates/reference_runtime",
     "crates/intake_repair_contract",
     "crates/certification_authority",
+    "crates/wge_control_plane",
 ]
 resolver = "3"
 

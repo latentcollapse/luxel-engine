@@ -45,12 +45,12 @@ river."*
 
 Two consequences fall out of it, and both are strategic.
 
-**It sets the skill floor.** If the model is doing arithmetic, model quality is
-irrelevant — arithmetic is right or wrong, and a 3B and a 27B will score the
+**It sets the model-burden floor.** If the model is doing arithmetic, model
+quality is irrelevant — arithmetic is right or wrong, and models will score the
 same because the design set the outcome, not the model. That result is already
 on record for this project. Every piece of derivable work left in the model's
 lap is a wasted measurement, and a barrier to entry for no return. Push the
-arithmetic into solvers and a small local model becomes a viable world author.
+arithmetic into solvers and a smaller local model becomes a viable world author.
 
 **It makes style a first-class axis instead of noise.** Once the model supplies
 only intent and art, *different models produce recognisably different worlds

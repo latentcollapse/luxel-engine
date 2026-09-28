@@ -1664,7 +1664,9 @@ WGE language 1.0 is ready only when:
 - sword, rock, bottle, and tree fixtures meet declared certification gates;
 - certification independently validates every realized hard constraint rather
   than trusting producer/solver success;
-- at least one small model completes the benchmark at the agreed threshold;
+- model capability is treated as an efficiency/stress-test axis, while product
+  success is minimizing the model capability required for professional
+  game-development work without sacrificing output quality;
 - every component selected by the §21 bakeoff, and every boundary between those
   components, satisfies §21.1 selected-component readiness;
 - two independent frontier-model red teams have been resolved into tests;

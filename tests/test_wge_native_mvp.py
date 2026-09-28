@@ -620,8 +620,8 @@ def _project_template(source: Path, preflight: Path) -> Path:
             },
         ],
         "target": {
-            "engine": "unity",
-            "engine_version": "2022.3",
+            "engine": "reference",
+            "engine_version": "wge.reference-runtime/v1",
             "platform": "linux-desktop",
             "coordinate_system": "right-handed-xz-up-y",
             "build_profile": "wge-native-reference",

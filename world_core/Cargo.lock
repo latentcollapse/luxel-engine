@@ -1988,6 +1988,7 @@ dependencies = [
  "bevy",
  "codeweald-worldspec",
  "serde_json",
+ "wge-reference-runtime",
 ]
 
 [[package]]
@@ -5277,6 +5278,18 @@ dependencies = [
  "wge-asset-contract",
  "wge-gameplay-contract",
  "wge-intake-repair-contract",
+ "wge-project-ledger",
+ "wge-reference-runtime",
+]
+
+[[package]]
+name = "wge-control-plane"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+ "wge-certification-authority",
  "wge-project-ledger",
  "wge-reference-runtime",
 ]

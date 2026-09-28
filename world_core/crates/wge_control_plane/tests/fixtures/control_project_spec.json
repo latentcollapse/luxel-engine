@@ -1,0 +1,177 @@
+{
+  "schema_version": "wge.project-spec/v1",
+  "project_id": "control-test",
+  "title": "Control plane transaction fixture",
+  "brief": {
+    "text": "Reach the beacon across a small test world.",
+    "sources": [
+      {
+        "source_id": "brief",
+        "kind": "brief",
+        "path": "brief.md",
+        "sha256": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "claims": [],
+    "conflicts": [],
+    "style_target": {
+      "visual_language": "clear",
+      "palette": ["green"],
+      "camera": "overview",
+      "reference_source_ids": []
+    },
+    "assumptions": [],
+    "design_constraints": [],
+    "intake_provenance": null
+  },
+  "target": {
+    "engine": "reference",
+    "engine_version": "wge.reference-runtime/v1",
+    "platform": "linux",
+    "coordinate_system": "right-handed-xz-up-y",
+    "build_profile": "inspection"
+  },
+  "world": {
+    "world_id": "world",
+    "dimensions_m": [8.0, 8.0],
+    "terrain": {
+      "artifact_id": "terrain",
+      "kind": "fixture",
+      "schema_version": "fixture/v1",
+      "path": "terrain.bin",
+      "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "producer": "test"
+    },
+    "collision": {
+      "artifact_id": "collision",
+      "kind": "fixture",
+      "schema_version": "fixture/v1",
+      "path": "collision.bin",
+      "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "producer": "test"
+    },
+    "navigation": {
+      "artifact_id": "navigation",
+      "kind": "fixture",
+      "schema_version": "fixture/v1",
+      "path": "navigation.bin",
+      "sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "producer": "test"
+    },
+    "spawns": [
+      {
+        "spawn_id": "player",
+        "team": "player",
+        "position_xz_m": [0.0, 0.0],
+        "required": true
+      }
+    ],
+    "objective": {
+      "objective_id": "goal",
+      "kind": "reach",
+      "required_interaction_tag": "claim",
+      "win_condition": "won",
+      "loss_condition": "lost"
+    }
+  },
+  "assets": [],
+  "gameplay": {
+    "runtime_package": {
+      "artifact_id": "gameplay",
+      "kind": "fixture",
+      "schema_version": "fixture/v1",
+      "path": "gameplay.bin",
+      "sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "producer": "test"
+    },
+    "input_trace": {
+      "artifact_id": "input",
+      "kind": "fixture",
+      "schema_version": "fixture/v1",
+      "path": "input.bin",
+      "sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "producer": "test"
+    },
+    "start_entity_id": "player",
+    "objective_id": "goal"
+  },
+  "artifact_graph": [
+    {
+      "artifact": {
+        "artifact_id": "terrain",
+        "kind": "fixture",
+        "schema_version": "fixture/v1",
+        "path": "terrain.bin",
+        "sha256": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "producer": "test"
+      },
+      "dependencies": []
+    },
+    {
+      "artifact": {
+        "artifact_id": "collision",
+        "kind": "fixture",
+        "schema_version": "fixture/v1",
+        "path": "collision.bin",
+        "sha256": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "producer": "test"
+      },
+      "dependencies": []
+    },
+    {
+      "artifact": {
+        "artifact_id": "navigation",
+        "kind": "fixture",
+        "schema_version": "fixture/v1",
+        "path": "navigation.bin",
+        "sha256": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "producer": "test"
+      },
+      "dependencies": []
+    },
+    {
+      "artifact": {
+        "artifact_id": "gameplay",
+        "kind": "fixture",
+        "schema_version": "fixture/v1",
+        "path": "gameplay.bin",
+        "sha256": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "producer": "test"
+      },
+      "dependencies": []
+    },
+    {
+      "artifact": {
+        "artifact_id": "input",
+        "kind": "fixture",
+        "schema_version": "fixture/v1",
+        "path": "input.bin",
+        "sha256": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "producer": "test"
+      },
+      "dependencies": []
+    }
+  ],
+  "work_orders": [
+    {
+      "schema_version": "wge.work-order/v1",
+      "work_order_id": "build-terrain",
+      "operation": "build",
+      "snapshot_id": "GENESIS",
+      "allowed_artifacts": ["terrain"],
+      "required_capabilities": ["terrain"],
+      "required_gates": ["semantic"],
+      "parent_snapshot_id": "GENESIS",
+      "input_artifacts": [],
+      "output_artifacts": ["terrain"],
+      "write_scope": ["work-output"],
+      "budget": {
+        "max_artifacts": 1,
+        "max_total_bytes": 1024
+      }
+    }
+  ],
+  "required_gates": [
+    {"gate_id": "semantic", "evidence_kind": "semantic"}
+  ]
+}

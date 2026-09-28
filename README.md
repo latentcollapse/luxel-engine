@@ -22,7 +22,7 @@ model. Every design difference follows from that one substitution:
 | Verification | A person looks at it | Gates measure it and can fail the build |
 | Iteration | Drag, undo, re-render | Compile, diff, repair-carrying diagnostics |
 | Correctness | Convention and review | Provenance binding and a stable world hash |
-| Skill floor | A trained artist | A 3B-class model |
+| Skill floor | A trained artist | Minimized model capability, measured by quality and repair efficiency |
 
 What makes something an engine is that it owns the authoritative representation of the world and
 the rules for constructing it — terrain, hydrology, traversal, collision, navigation, placement,
@@ -57,11 +57,12 @@ Two things make that hard, and WGE is organised around both:
 2. **The author should not have to be an expert.** See below — this is the part that shapes the
    whole design.
 
-## The skill floor is the point
+## Model capability is an efficiency axis
 
-The success criterion for WGE is **not** that a frontier model can drive it. It is that a **3B-class
-model can**. Opus building a map with WGE proves nothing. A small local model building a playable
-map from concept art is a different thing entirely.
+The success criterion for WGE is **not** a parameter-count threshold. WGE minimizes the model
+capability required for professional game-development work without sacrificing output quality.
+Small-model runs remain valuable stress tests for authoring ergonomics, recovery, and tool cost;
+they are an efficiency axis, not the definition of product success.
 
 This is why the authoring language is Python-shaped: every model already writes Python, so nobody
 starts from a near-empty prior. But syntax turns out to be the easy half. Measured results on the
@@ -78,20 +79,22 @@ complete vocabulary in the prompt but no starting file, a small model invented a
 exist, every single time. **Recognition beats recall.** Documentation does not prevent hallucination;
 a valid artifact to edit does.
 
-So the design rule throughout: a change that makes WGE more expressive but harder for a small model
-to drive is a **regression**, not a feature.
+So the design rule throughout: a change that makes WGE more expressive but materially harder to
+drive, verify, or repair is a **regression**, not a feature. Model capability and cost are measured
+alongside final mechanical and visual quality.
 
 ## Architecture
 
-Four languages, each doing the thing it is actually best at:
+The native path has four language/runtime responsibilities, each doing the thing it is actually
+best at:
 
 | Layer | Language | Responsibility |
 |---|---|---|
 | Authoring DSL | Python (parsed, never executed) | What the author — human or model — writes |
-| Compiler & pipeline | Python | Concept intake, rasterization, asset planning, adapters |
-| Contracts & identity | Rust | WorldSpec validation, provenance, stable world hashing |
-| Solvers | Julia | Terrain analysis, hydrology, placement solving |
-| Backends | Godot / UE5 / Unity / Bevy | Rendering and runtime only |
+| Native compiler & transaction authority | Rust | Typed lowering boundary, ProjectSpec, identity, receipts, gates, promotion |
+| Numerical solvers | Julia | Terrain analysis, hydrology, placement solving, spatial fields |
+| Provider and backend glue | Python | Source staging, image/Blender/Gaea/provider IO, process transport, adapters |
+| Reference renderer / delivery backends | Bevy / Godot / UE5 / Unity | Inspection or delivery runtime only; backend gates are explicit |
 
 ### The authoring DSL
 
@@ -255,11 +258,19 @@ julia --project=. test/runtests.jl           # from terrain_lab/
 ## Engine-neutral native MVP
 
 The current model-facing vertical slice is driven by the Rust-owned native
-contracts. Python only stages provider input and packages the deterministic
-handoff; it is not semantic authority. The transaction accepts a fresh typed
-intake, compiles a project specification, builds the Julia/Rust world path,
-produces reference-runtime and visual evidence, exercises bounded repair, and
-reopens the certified snapshot through the authority plane.
+contracts. `wge-control-plane` is the canonical project transaction, pointer,
+candidate, receipt, repair, and promotion authority. Python authoring/provider
+modules parse or stage caller-owned bytes and transport typed requests; they do
+not decide semantic identity, gate status, or promotion. The Rust project
+ledger compiles the typed intake/template into `ProjectSpec`, Julia supplies
+bounded numerical fields, and the Rust reference runtime owns world,
+traversal, gameplay, capture, and revalidation.
+
+`semantic_kernel` and the older Python snapshot/build paths remain available
+as compatibility/regression lanes. They cannot promote a native current
+snapshot; the native transaction and registered Rust validators are the source
+of truth for the converged path. The Neura-MCP launcher exposes that same
+bounded operation surface without moving semantics into MCP.
 
 Run the focused acceptance suite:
 
@@ -278,11 +289,13 @@ python3 pipeline/wge_native_mvp.py \
   --output-dir <certified-handoff>
 ```
 
-The supplied bad GLB remains a permanent rejection control. Rigging quality is
-tested with the separate known-good structural control; arbitrary mesh-to-
-character generation is not silently claimed. Unity import/build/playthrough
-and any Unity-versus-WGE benchmark are intentionally deferred. This checkpoint
-is judged by WGE's own semantic, mechanical, traversal, visual, repair,
+That command remains the native-MVP regression oracle. The engine-neutral
+convergence path uses the same typed intake/world artifacts through
+`wge-control-plane` and deliberately leaves production rigging, skinning,
+retargeting, arbitrary mesh-to-character generation, Unity
+import/build/playthrough, and Unity-versus-WGE benchmarking deferred. The
+supplied bad GLB remains a permanent negative control. This checkpoint is
+judged by WGE's own semantic, mechanical, traversal, visual, repair,
 determinism, provenance, and archive-revalidation gates.
 
 ## As substrate for a world model (Project Aisling)
@@ -302,8 +315,8 @@ shrinks from "represent a world" to "have taste about a world."
 Four concrete uses:
 
 1. **The output space collapses.** ~50 lines of DSL instead of a 66,049-vertex mesh. This is what
-   makes a small model viable as a world author at all: a 3B can emit a paragraph of Python, and
-   cannot emit a coherent mesh. Same thesis as the skill floor, one level up.
+   makes a model viable as a world author: it emits a compact, typed intent surface instead of
+   having to serialize a coherent mesh directly. Same thesis as the skill floor, one level up.
 2. **A programmatic verifier.** WGE's gates are exact, not learned — traversal certification,
    hydrology reversal rejection, provenance binding, style scoring. That makes them usable as an RL
    reward signal that **cannot be hacked the way a neural critic can**, because there is no critic

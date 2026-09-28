@@ -18,7 +18,7 @@
     "independent_verdict": "freeze_yes"
   },
   "sha256": {
-    "docs/DSL docs/WGE_LANGUAGE_SPEC.md": "aa13b5450cded9077fdba5caeae92af434b06d0f15edcade82960cf8f1f23306",
+    "docs/DSL docs/WGE_LANGUAGE_SPEC.md": "83de9283ec24e04780958cc4772b128fb5bf1ca9e0a0bb58b1abef594d9709f7",
     "docs/DSL docs/LANGUAGE_SPEC_FREEZE_VERIFICATION_01.md": "cf4e911782d3470d67623c61d5d3dfe01e9ed1a64ffc15028f58dd9ba4b672c9",
     "tests/dsl_conformance/closure_v06.json": "adfacae3be9308689df908da29f50faf9db759435e8d65ab9758fe5831400c2e",
     "tests/dsl_conformance/migration_worldbuilder_v1.json": "b7e5f1e5ccba0a72aa90f36d4b82c47f4e1cc804a9629a1c5fa4991f17b323a7",

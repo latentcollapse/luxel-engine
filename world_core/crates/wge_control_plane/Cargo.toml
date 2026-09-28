@@ -1,0 +1,20 @@
+[package]
+name = "wge-control-plane"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+description = "Canonical bounded native WGE project transaction and agent operation surface"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+wge-certification-authority = { path = "../certification_authority" }
+wge-project-ledger = { path = "../project_ledger" }
+wge-reference-runtime = { path = "../reference_runtime" }
+
+[[bin]]
+name = "wge-control-plane"
+path = "src/main.rs"

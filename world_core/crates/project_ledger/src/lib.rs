@@ -24,6 +24,7 @@ pub const EVIDENCE_SCHEMA: &str = "wge.evidence/v1";
 pub const SNAPSHOT_SCHEMA: &str = "wge.project-snapshot/v1";
 pub const UNITY_IMPORT_SCHEMA: &str = "wge.unity-mvp-import/v1";
 pub const WORK_ORDER_SCHEMA: &str = "wge.work-order/v1";
+pub const REFERENCE_RUNTIME_PROFILE: &str = "wge.reference-runtime/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerError {
@@ -203,16 +204,98 @@ pub struct DesignConstraint {
 #[serde(deny_unknown_fields)]
 pub struct TargetProfile {
     pub engine: Engine,
+    /// The runtime that owns semantic inspection and acceptance.  The
+    /// reference runtime is deliberately independent of any delivery backend.
+    #[serde(default)]
+    pub runtime_profile: RuntimeProfile,
+    /// Optional delivery adapter.  Missing/none is the engine-neutral form;
+    /// the legacy `engine` field remains readable for existing templates.
+    #[serde(default)]
+    pub delivery_backend: DeliveryBackend,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backend_id: Option<String>,
     pub engine_version: String,
     pub platform: String,
     pub coordinate_system: String,
     pub build_profile: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeProfile {
+    #[default]
+    Reference,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryBackend {
+    #[default]
+    None,
+    Unity,
+    Unreal,
+    Godot,
+    Custom,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Engine {
+    Reference,
     Unity,
+    Unreal,
+    Godot,
+    Custom,
+}
+
+impl TargetProfile {
+    /// The delivery backend represented by this profile, accepting the old
+    /// Unity-only wire form as a compatibility reader.
+    pub fn effective_delivery_backend(&self) -> DeliveryBackend {
+        if self.delivery_backend != DeliveryBackend::None {
+            return self.delivery_backend.clone();
+        }
+        match self.engine {
+            Engine::Reference => DeliveryBackend::None,
+            Engine::Unity => DeliveryBackend::Unity,
+            Engine::Unreal => DeliveryBackend::Unreal,
+            Engine::Godot => DeliveryBackend::Godot,
+            Engine::Custom => DeliveryBackend::Custom,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), LedgerError> {
+        if self.runtime_profile != RuntimeProfile::Reference {
+            return Err(LedgerError::Contract(
+                "only the registered reference runtime may own semantic acceptance".into(),
+            ));
+        }
+        let legacy_backend = match self.engine {
+            Engine::Reference => DeliveryBackend::None,
+            Engine::Unity => DeliveryBackend::Unity,
+            Engine::Unreal => DeliveryBackend::Unreal,
+            Engine::Godot => DeliveryBackend::Godot,
+            Engine::Custom => DeliveryBackend::Custom,
+        };
+        if self.delivery_backend != DeliveryBackend::None && self.delivery_backend != legacy_backend
+        {
+            return Err(LedgerError::Contract(
+                "target engine and delivery_backend disagree".into(),
+            ));
+        }
+        if self.effective_delivery_backend() == DeliveryBackend::Custom
+            && self.backend_id.as_deref().unwrap_or("").trim().is_empty()
+        {
+            return Err(LedgerError::Contract(
+                "custom delivery backend requires backend_id".into(),
+            ));
+        }
+        nonempty("target.engine_version", &self.engine_version)?;
+        nonempty("target.platform", &self.platform)?;
+        nonempty("target.coordinate_system", &self.coordinate_system)?;
+        nonempty("target.build_profile", &self.build_profile)?;
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -312,6 +395,26 @@ pub struct WorkOrder {
     pub allowed_artifacts: Vec<String>,
     pub required_capabilities: Vec<String>,
     pub required_gates: Vec<String>,
+    /// Optional executable binding fields. They default empty for legacy
+    /// readers, but a native control-plane execution requires them to be
+    /// explicit and checks them against the candidate before running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_snapshot_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub input_artifacts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub output_artifacts: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub write_scope: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<WorkOrderBudget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct WorkOrderBudget {
+    pub max_artifacts: u32,
+    pub max_total_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -430,6 +533,21 @@ pub fn spec_digest(spec: &ProjectSpec) -> Result<String, LedgerError> {
         )
         .as_bytes(),
     ))
+}
+
+/// Digest the semantic project content without delivery-backend metadata.
+///
+/// A Unity, Unreal, Godot, or engine-neutral adapter is a delivery choice. It
+/// must not create a different semantic world identity when the brief, world,
+/// assets, gameplay, artifact graph, work orders, and gates are unchanged.
+pub fn semantic_spec_digest(spec: &ProjectSpec) -> Result<String, LedgerError> {
+    let mut value =
+        serde_json::to_value(spec).map_err(|error| LedgerError::Json(error.to_string()))?;
+    value
+        .as_object_mut()
+        .ok_or_else(|| LedgerError::Contract("project spec must be an object".into()))?
+        .remove("target");
+    Ok(sha256_prefixed(canonical_json(&value).as_bytes()))
 }
 
 pub fn artifact_graph_digest(nodes: &[ArtifactNode]) -> Result<String, LedgerError> {
@@ -641,15 +759,7 @@ pub fn validate_spec(spec: &ProjectSpec) -> Result<(), LedgerError> {
             )));
         }
     }
-    if spec.target.engine != Engine::Unity {
-        return Err(LedgerError::Contract(
-            "MVP target engine must be Unity".into(),
-        ));
-    }
-    nonempty("target.engine_version", &spec.target.engine_version)?;
-    nonempty("target.platform", &spec.target.platform)?;
-    nonempty("target.coordinate_system", &spec.target.coordinate_system)?;
-    nonempty("target.build_profile", &spec.target.build_profile)?;
+    spec.target.validate()?;
     if spec
         .world
         .dimensions_m
@@ -741,6 +851,93 @@ pub fn validate_spec(spec: &ProjectSpec) -> Result<(), LedgerError> {
                 )));
             }
         }
+    }
+    Ok(())
+}
+
+/// Validate the authority binding of an executable work order.  The control
+/// plane may still decide how to invoke a provider, but it cannot broaden the
+/// parent, capabilities, gates, artifact set, or write scope accepted here.
+pub fn validate_work_order_binding(
+    spec: &ProjectSpec,
+    order: &WorkOrder,
+    parent_snapshot_id: &str,
+    granted_capabilities: &BTreeSet<String>,
+) -> Result<(), LedgerError> {
+    validate_spec(spec)?;
+    if order.schema_version != WORK_ORDER_SCHEMA {
+        return Err(LedgerError::Contract(format!(
+            "work order {} has unsupported schema",
+            order.work_order_id
+        )));
+    }
+    nonempty("work_order.work_order_id", &order.work_order_id)?;
+    nonempty("work_order.operation", &order.operation)?;
+    let declared_parent = order
+        .parent_snapshot_id
+        .as_deref()
+        .unwrap_or(order.snapshot_id.as_str());
+    if declared_parent != parent_snapshot_id {
+        return Err(LedgerError::Provenance(format!(
+            "work order {} is bound to parent {}, not {}",
+            order.work_order_id, declared_parent, parent_snapshot_id
+        )));
+    }
+    for capability in &order.required_capabilities {
+        if !granted_capabilities.contains(capability) {
+            return Err(LedgerError::Contract(format!(
+                "work order {} requires capability {}",
+                order.work_order_id, capability
+            )));
+        }
+    }
+    let artifact_ids: BTreeSet<&str> = spec
+        .artifact_graph
+        .iter()
+        .map(|node| node.artifact.artifact_id.as_str())
+        .collect();
+    for id in order
+        .input_artifacts
+        .iter()
+        .chain(order.output_artifacts.iter())
+        .chain(order.allowed_artifacts.iter())
+    {
+        if !artifact_ids.contains(id.as_str()) {
+            return Err(LedgerError::Contract(format!(
+                "work order {} references undeclared artifact {}",
+                order.work_order_id, id
+            )));
+        }
+    }
+    let allowed: BTreeSet<&str> = order.allowed_artifacts.iter().map(String::as_str).collect();
+    for id in order
+        .input_artifacts
+        .iter()
+        .chain(order.output_artifacts.iter())
+    {
+        if !allowed.contains(id.as_str()) {
+            return Err(LedgerError::Contract(format!(
+                "work order {} uses artifact {} outside its allowed set",
+                order.work_order_id, id
+            )));
+        }
+    }
+    if order.output_artifacts.is_empty() || order.write_scope.is_empty() {
+        return Err(LedgerError::Contract(format!(
+            "work order {} must declare output_artifacts and write_scope",
+            order.work_order_id
+        )));
+    }
+    for scope in &order.write_scope {
+        validate_relative_path(scope, "work order write scope")?;
+    }
+    if let Some(budget) = &order.budget
+        && (budget.max_artifacts == 0 || budget.max_total_bytes == 0)
+    {
+        return Err(LedgerError::Contract(format!(
+            "work order {} budget must be positive",
+            order.work_order_id
+        )));
     }
     Ok(())
 }
@@ -1011,6 +1208,11 @@ pub fn build_unity_import_manifest(
 ) -> Result<UnityImportManifest, LedgerError> {
     validate_spec(spec)?;
     validate_snapshot(snapshot)?;
+    if spec.target.effective_delivery_backend() != DeliveryBackend::Unity {
+        return Err(LedgerError::Contract(
+            "Unity import manifest requires a Unity delivery backend; semantic projects may remain engine-neutral".into(),
+        ));
+    }
     let gameplay_artifact_id = spec.gameplay.runtime_package.artifact_id.clone();
     if !snapshot
         .artifacts
@@ -1212,6 +1414,9 @@ pub(crate) mod tests {
             },
             target: TargetProfile {
                 engine: Engine::Unity,
+                runtime_profile: RuntimeProfile::Reference,
+                delivery_backend: DeliveryBackend::Unity,
+                backend_id: None,
                 engine_version: "2022.3".into(),
                 platform: "linux-desktop".into(),
                 coordinate_system: "right-handed-xz-up-y".into(),
@@ -1271,6 +1476,11 @@ pub(crate) mod tests {
                 allowed_artifacts: vec!["terrain".into()],
                 required_capabilities: vec!["terrain".into()],
                 required_gates: vec!["semantic".into()],
+                parent_snapshot_id: None,
+                input_artifacts: Vec::new(),
+                output_artifacts: Vec::new(),
+                write_scope: Vec::new(),
+                budget: None,
             }],
             required_gates: vec![
                 GateRequirement {
@@ -1446,6 +1656,28 @@ pub(crate) mod tests {
         );
         assert_eq!(first, second);
         assert_eq!(manifest.snapshot_sha256, snapshot.snapshot_sha256);
+    }
+
+    #[test]
+    fn engine_neutral_profile_validates_without_unity_and_keeps_semantic_identity() {
+        let unity = spec();
+        let mut reference = unity.clone();
+        reference.target.engine = Engine::Reference;
+        reference.target.delivery_backend = DeliveryBackend::None;
+        reference.target.backend_id = None;
+        reference.target.engine_version = REFERENCE_RUNTIME_PROFILE.into();
+        reference.target.build_profile = "reference-inspection".into();
+
+        validate_spec(&reference).unwrap();
+        assert_eq!(
+            semantic_spec_digest(&unity).unwrap(),
+            semantic_spec_digest(&reference).unwrap(),
+            "delivery metadata must not change semantic project identity"
+        );
+        let evidence = evidence(&reference);
+        let snapshot = commit_snapshot(&reference, &evidence).unwrap();
+        let error = build_unity_import_manifest(&reference, &snapshot).unwrap_err();
+        assert!(error.to_string().contains("Unity delivery backend"));
     }
 
     #[test]

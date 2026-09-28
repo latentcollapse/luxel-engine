@@ -1,0 +1,125 @@
+{
+  "schema_version": "wge.authored-world-layout/v1",
+  "world_id": "quartz_marsh",
+  "title": "Quartz Marsh",
+  "width_m": 120.0,
+  "length_m": 84.0,
+  "resolution": 65,
+  "seed": 194027,
+  "terrain": {
+    "base_elevation_m": 6.0,
+    "noise_amplitude_m": 0.18,
+    "features": [
+      {
+        "feature_id": "north_quartz_dune",
+        "center_xz_m": [-28.0, 18.0],
+        "radius_x_m": 20.0,
+        "radius_z_m": 10.0,
+        "elevation_m": 5.0
+      },
+      {
+        "feature_id": "southern_salt_basin",
+        "center_xz_m": [15.0, -18.0],
+        "radius_x_m": 16.0,
+        "radius_z_m": 14.0,
+        "elevation_m": -3.0
+      },
+      {
+        "feature_id": "eastern_mesa",
+        "center_xz_m": [37.0, 5.0],
+        "radius_x_m": 12.0,
+        "radius_z_m": 22.0,
+        "elevation_m": 4.0
+      }
+    ]
+  },
+  "regions": [
+    {
+      "region_id": "western_marsh",
+      "code": 1,
+      "priority": 10,
+      "blocks_traversal": true,
+      "polygon_xz_m": [
+        [-59.0, -10.0],
+        [-36.0, -10.0],
+        [-36.0, 26.0],
+        [-59.0, 26.0]
+      ]
+    },
+    {
+      "region_id": "central_salt_pool",
+      "code": 2,
+      "priority": 20,
+      "blocks_traversal": true,
+      "polygon_xz_m": [
+        [-10.0, -8.0],
+        [8.0, -8.0],
+        [8.0, 6.0],
+        [-10.0, 6.0]
+      ]
+    }
+  ],
+  "obstacles": [
+    {
+      "obstacle_id": "collapsed_obelisk",
+      "center_xz_m": [4.0, -28.0],
+      "radius_m": 3.5,
+      "height_m": 6.0
+    },
+    {
+      "obstacle_id": "east_bridgefall",
+      "center_xz_m": [30.0, 22.0],
+      "radius_m": 4.0,
+      "height_m": 4.0
+    }
+  ],
+  "spawns": [
+    {
+      "spawn_id": "marsh_entry",
+      "role": "player_start",
+      "position_xz_m": [-50.0, -32.0]
+    },
+    {
+      "spawn_id": "quartz_sentinel",
+      "role": "opponent",
+      "position_xz_m": [18.0, 0.0]
+    },
+    {
+      "spawn_id": "bridge_sentinel",
+      "role": "opponent",
+      "position_xz_m": [42.0, 18.0]
+    }
+  ],
+  "encounters": [
+    {
+      "encounter_id": "quartz_sentinel_encounter",
+      "center_xz_m": [18.0, 0.0],
+      "radius_m": 5.0,
+      "required": true,
+      "traversal_order": 1,
+      "opponent_spawn_id": "quartz_sentinel"
+    },
+    {
+      "encounter_id": "bridge_sentinel_encounter",
+      "center_xz_m": [42.0, 18.0],
+      "radius_m": 5.0,
+      "required": false,
+      "traversal_order": 2,
+      "opponent_spawn_id": "bridge_sentinel"
+    }
+  ],
+  "traversal": {
+    "start_spawn_id": "marsh_entry",
+    "objective_id": "quartz_beacon",
+    "objective_position_xz_m": [52.0, 32.0],
+    "agent_radius_m": 0.6,
+    "maximum_grade": 0.75
+  },
+  "reference_camera": {
+    "projection": "top_down_orthographic",
+    "width_px": 384,
+    "height_px": 256,
+    "orthographic_span_m": 136.0,
+    "distance_m": 190.0
+  }
+}

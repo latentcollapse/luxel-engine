@@ -7,6 +7,12 @@
 mod model;
 mod runtime;
 
+/// Versioned generalized gameplay substrate. The original v1 vertical-slice
+/// contract remains available for certified legacy bundles; new scenarios
+/// should use this bounded, data-driven contract instead of adding another
+/// fixture-specific branch to v1.
+pub mod general;
+
 pub use model::{
     AbilityId, AbilitySpec, Control, EntityAttributes, EntityId, EntitySpec, GameSnapshot,
     GameplayEffect, GameplayTag, LocationId, NavigationGraph, NpcBehavior, ObjectivePrerequisite,
