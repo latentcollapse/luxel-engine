@@ -1,6 +1,7 @@
 using Base64
 using SHA
 using Test
+using WGEGraphics
 
 include(joinpath(@__DIR__, "..", "src", "LavaAdapter.jl"))
 using .LavaAdapter
@@ -18,6 +19,44 @@ using .LavaAdapter
     @test size(matrix) == (2, 3)
     @test matrix[1, 1] == (1.0f0 / 255.0f0, 2.0f0 / 255.0f0, 3.0f0 / 255.0f0, 4.0f0 / 255.0f0)
     @test matrix[2, 3] == (21.0f0 / 255.0f0, 22.0f0 / 255.0f0, 23.0f0 / 255.0f0, 24.0f0 / 255.0f0)
+end
+
+@testset "camera projection lowering" begin
+    orthographic = WGEGraphics.CameraPacket(
+        "orthographic",
+        WGEGraphics.OrthographicProjection(20.0f0),
+        (0.0f0, 10.0f0, 0.0f0),
+        (0.0f0, -1.0f0, 0.0f0),
+        (0.0f0, 0.0f0, -1.0f0),
+        0.1f0,
+        100.0f0,
+        UInt32(320),
+        UInt32(240),
+    )
+    orthographic_frame = LavaAdapter._camera_frame(orthographic)
+    orthographic_center = LavaAdapter._project_point(orthographic_frame, (0.0f0, 0.0f0, 0.0f0))
+    @test orthographic_frame.mode == 0.0f0
+    @test orthographic_center[1] ≈ 0.0f0
+    @test orthographic_center[2] ≈ 0.0f0
+    @test 0.0f0 < orthographic_center[3] < 1.0f0
+
+    perspective = WGEGraphics.CameraPacket(
+        "perspective",
+        WGEGraphics.PerspectiveProjection(60.0f0),
+        (0.0f0, 10.0f0, 0.0f0),
+        (0.0f0, -1.0f0, 0.0f0),
+        (0.0f0, 0.0f0, -1.0f0),
+        0.1f0,
+        100.0f0,
+        UInt32(320),
+        UInt32(240),
+    )
+    perspective_frame = LavaAdapter._camera_frame(perspective)
+    perspective_center = LavaAdapter._project_point(perspective_frame, (0.0f0, 0.0f0, 0.0f0))
+    @test perspective_frame.mode == 1.0f0
+    @test perspective_center[1] ≈ 0.0f0
+    @test perspective_center[2] ≈ 0.0f0
+    @test 0.0f0 < perspective_center[3] < 1.0f0
 end
 
 @testset "persistent Lava adapter" begin

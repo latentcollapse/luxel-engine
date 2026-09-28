@@ -4,8 +4,8 @@ use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 use wge_native_graphics_contract::{
-    GraphicsReady, GraphicsWorkerSupervisor, lower_reference_world, seal_scene_packet,
-    validate_frame_receipt, validate_ready, validate_scene_packet,
+    CameraProjection, GraphicsReady, GraphicsWorkerSupervisor, lower_reference_world,
+    seal_scene_packet, validate_frame_receipt, validate_ready, validate_scene_packet,
 };
 use wge_reference_runtime::build_from_layout_path;
 
@@ -171,6 +171,7 @@ fn rust_packet_renders_through_the_pinned_lava_worker() {
     fs::create_dir_all(&output_dir).expect("test output directory is writable");
     let input = output_dir.join("layout.json");
     let packet_path = output_dir.join("packet.json");
+    let perspective_packet_path = output_dir.join("perspective-packet.json");
     fs::copy(&layout, &input).expect("test layout copies");
     let build = build_from_layout_path(&input, &julia_executable(), &terrain_lab)
         .expect("reference world builds");
@@ -191,11 +192,21 @@ fn rust_packet_renders_through_the_pinned_lava_worker() {
         .indices
         .len() as u64;
     let packet = seal_scene_packet(body).expect("instanced packet seals");
+    let mut perspective_body = packet.body.clone();
+    perspective_body.camera.projection = CameraProjection::Perspective {
+        fov_y_degrees: 60.0,
+    };
+    let perspective_packet = seal_scene_packet(perspective_body).expect("perspective packet seals");
     fs::write(
         &packet_path,
         serde_json::to_vec(&packet).expect("packet serializes"),
     )
     .expect("packet writes");
+    fs::write(
+        &perspective_packet_path,
+        serde_json::to_vec(&perspective_packet).expect("perspective packet serializes"),
+    )
+    .expect("perspective packet writes");
 
     let script = r#"
 using JSON3
@@ -203,7 +214,10 @@ include(ENV["WGE_GRAPHICS_WORKER"])
 packet = JSON3.read(read(ENV["WGE_PACKET_PATH"], String))
 response = JSON3.read(handle(JSON3.write((op="render_packet", packet=packet))))
 response["kind"] == "frame_rendered" || error(JSON3.write(response))
-println(JSON3.write(response["frame"]))
+perspective_packet = JSON3.read(read(ENV["WGE_PERSPECTIVE_PACKET_PATH"], String))
+perspective_response = JSON3.read(handle(JSON3.write((op="render_packet", packet=perspective_packet))))
+perspective_response["kind"] == "frame_rendered" || error(JSON3.write(perspective_response))
+println(JSON3.write((orthographic=response["frame"], perspective=perspective_response["frame"])))
 "#;
     let output = Command::new(julia_executable())
         .arg(format!("--project={}", graphics_lab.display()))
@@ -212,6 +226,7 @@ println(JSON3.write(response["frame"]))
         .arg(script)
         .env("WGE_GRAPHICS_WORKER", &worker)
         .env("WGE_PACKET_PATH", &packet_path)
+        .env("WGE_PERSPECTIVE_PACKET_PATH", &perspective_packet_path)
         .output()
         .expect("graphics Julia worker starts");
     assert!(
@@ -219,7 +234,8 @@ println(JSON3.write(response["frame"]))
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let frame: serde_json::Value = serde_json::from_slice(&output.stdout).expect("frame JSON");
+    let frames: serde_json::Value = serde_json::from_slice(&output.stdout).expect("frame JSON");
+    let frame = &frames["orthographic"];
     assert_eq!(frame["schema"], "wge.lava-frame/v1");
     assert_eq!(frame["packet_sha256"], packet.packet_sha256);
     assert_eq!(frame["width_px"], packet.body.capture.width_px);
@@ -265,6 +281,24 @@ println(JSON3.write(response["frame"]))
     assert_eq!(
         frame["telemetry"]["mesh_vertex_count"].as_u64().unwrap(),
         base_mesh_vertex_count
+    );
+    let perspective_frame = &frames["perspective"];
+    assert_eq!(perspective_frame["schema"], "wge.lava-frame/v1");
+    assert_eq!(
+        perspective_frame["packet_sha256"],
+        perspective_packet.packet_sha256
+    );
+    assert!(
+        perspective_frame["capture_sha256"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:")
+    );
+    assert!(
+        perspective_frame["measurements"]["distinct_terrain_colors"]
+            .as_u64()
+            .unwrap()
+            > 1
     );
 
     fs::remove_dir_all(output_dir).expect("test output directory is removed");

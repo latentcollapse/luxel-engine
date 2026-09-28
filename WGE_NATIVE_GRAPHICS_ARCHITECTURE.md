@@ -250,7 +250,8 @@ explicitly deferred/indeterminate.
 The Rust packet contract and protocol worker are implemented. The Lava adapter
 has passed real offscreen color/readback, depth-attachment, and texture/sampler
 probes through a persistent Julia process and renders the certified `riverwatch`
-packet: terrain height/slope buffers, the canonical orthographic camera,
+packet: terrain height/slope buffers, the canonical orthographic camera plus a
+validated perspective camera variant,
 terrain material intent, and gameplay-visible route/spawn/encounter/objective
 overlays all cross the native path. The Rust supervisor validates the exact
 Lava/adapter identity, packet binding, capture digest, bounded telemetry, and
@@ -259,10 +260,10 @@ independently recomputed visual measurements before promoting a receipt.
 The supported scene profile is intentionally fail-closed while quality systems
 are being built: the Lava adapter accepts one directional light, opaque
 material intents with one shared, content-addressed inline RGBA8
-albedo payload, an orthographic native terrain projection, and typed
+albedo payload, orthographic and perspective native terrain projections, and typed
 sky/fog/exposure intent. The payload is dimension-checked and digest-checked in
-both Rust and Julia before Lava creates a sampler binding. Perspective cameras,
-point lights, multiple texture sets, and blend/mask materials are typed and
+both Rust and Julia before Lava creates a sampler binding. Point lights,
+multiple texture sets, and blend/mask materials are typed and
 validated at the boundary but rejected by the adapter until their semantics
 are implemented. Metallic/roughness response is supported by the bounded
 material path, but it is not yet a complete production PBR graph. This keeps

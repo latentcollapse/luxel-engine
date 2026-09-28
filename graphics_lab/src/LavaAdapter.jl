@@ -92,6 +92,15 @@ struct DirectionalLighting
     intensity::Float32
 end
 
+struct CameraFrame
+    position::Vec4f
+    right::Vec4f
+    up::Vec4f
+    forward::Vec4f
+    projection::Vec4f
+    mode::Float32
+end
+
 mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP}
     context::C
     queue::Q
@@ -359,6 +368,37 @@ function _apply_fog(
     )
 end
 
+function _project_world(
+    world_position::Vec4f,
+    camera_position::Vec4f,
+    camera_right::Vec4f,
+    camera_up::Vec4f,
+    camera_forward::Vec4f,
+    camera_projection::Vec4f,
+    camera_mode::Float32,
+)::Vec4f
+    relative = Vec4f(
+        world_position[1] - camera_position[1],
+        world_position[2] - camera_position[2],
+        world_position[3] - camera_position[3],
+        0.0f0,
+    )
+    horizontal = _dot_vector(camera_right, relative)
+    vertical = _dot_vector(camera_up, relative)
+    forward_distance = _dot_vector(camera_forward, relative)
+    perspective_distance = max(forward_distance, camera_projection[3])
+    scale = 1.0f0 - camera_mode + camera_mode * perspective_distance
+    ndc_x = horizontal / (camera_projection[1] * scale)
+    ndc_y = vertical / (camera_projection[2] * scale)
+    depth = clamp(
+        (forward_distance - camera_projection[3]) /
+            max(camera_projection[4] - camera_projection[3], 1.0f-4),
+        0.0f0,
+        1.0f0,
+    )
+    return Vec4f(ndc_x, ndc_y, depth, 1.0f0)
+end
+
 function _terrain_normal(
     heights::Lava.LavaDeviceArray{Float32,1},
     resolution::Int32,
@@ -407,8 +447,12 @@ function _terrain_vertex(
     resolution::Int32,
     width_m::Float32,
     length_m::Float32,
-    span_m::Float32,
-    aspect::Float32,
+    camera_position::Vec4f,
+    camera_right::Vec4f,
+    camera_up::Vec4f,
+    camera_forward::Vec4f,
+    camera_projection::Vec4f,
+    camera_mode::Float32,
     base_color::Vec4f,
     metallic::Float32,
     roughness::Float32,
@@ -418,7 +462,6 @@ function _terrain_vertex(
     ambient_color::Vec4f,
     fog_color::Vec4f,
     fog_density::Float32,
-    camera_position::Vec4f,
     exposure::Float32,
     texture_enabled::Float32,
 )
@@ -440,10 +483,18 @@ function _terrain_vertex(
     normalized_z = Float32(sample_z) / Float32(cells_per_axis)
     world_x = (normalized_x - 0.5f0) * width_m
     world_z = (0.5f0 - normalized_z) * length_m
-    ndc_x = world_x / (span_m * aspect * 0.5f0)
-    ndc_y = -world_z / (span_m * 0.5f0)
-    depth = 0.5f0 - height * 0.001f0
-    Lava.set_position!(Vec4f(ndc_x, ndc_y, depth, 1.0f0))
+    world_position = Vec4f(world_x, height, world_z, 1.0f0)
+    Lava.set_position!(
+        _project_world(
+            world_position,
+            camera_position,
+            camera_right,
+            camera_up,
+            camera_forward,
+            camera_projection,
+            camera_mode,
+        ),
+    )
     slope_factor = min(max(slope * 0.8f0, 0.0f0), 1.0f0)
     region_tint = 0.82f0 + min(Float32(region) * 0.015f0, 0.18f0)
     shade = (1.0f0 - 0.45f0 * slope_factor) * region_tint
@@ -456,7 +507,7 @@ function _terrain_vertex(
     uv = Vec2f(normalized_x, normalized_z)
     Lava.gfx_output(0, terrain_color)
     Lava.gfx_output(1, _terrain_normal(heights, resolution, sample_x, sample_z, width_m, length_m))
-    Lava.gfx_output(2, Vec4f(world_x, height, world_z, 1.0f0))
+    Lava.gfx_output(2, world_position)
     Lava.gfx_output(3, uv)
     Lava.gfx_output(4, Vec4f(metallic, roughness, 0.0f0, 0.0f0))
     Lava.gfx_output(5, light_direction)
@@ -476,15 +527,18 @@ function _mesh_vertex(
     scales::Lava.LavaDeviceArray{Vec4f,1},
     colors::Lava.LavaDeviceArray{Vec4f,1},
     material_parameters::Lava.LavaDeviceArray{Vec4f,1},
-    span_m::Float32,
-    aspect::Float32,
+    camera_position::Vec4f,
+    camera_right::Vec4f,
+    camera_up::Vec4f,
+    camera_forward::Vec4f,
+    camera_projection::Vec4f,
+    camera_mode::Float32,
     light_direction::Vec4f,
     light_color::Vec4f,
     light_intensity::Float32,
     ambient_color::Vec4f,
     fog_color::Vec4f,
     fog_density::Float32,
-    camera_position::Vec4f,
     exposure::Float32,
     texture_enabled::Float32,
 )
@@ -511,10 +565,17 @@ function _mesh_vertex(
         1.0f0,
     )
     normal = _rotate_vector(rotation, local_normal)
-    ndc_x = world_position[1] / (span_m * aspect * 0.5f0)
-    ndc_y = -world_position[3] / (span_m * 0.5f0)
-    depth = 0.5f0 - world_position[2] * 0.001f0
-    Lava.set_position!(Vec4f(ndc_x, ndc_y, depth, 1.0f0))
+    Lava.set_position!(
+        _project_world(
+            world_position,
+            camera_position,
+            camera_right,
+            camera_up,
+            camera_forward,
+            camera_projection,
+            camera_mode,
+        ),
+    )
     uv = Vec2f(
         clamp(world_position[1] * 0.02f0 + 0.5f0, 0.0f0, 1.0f0),
         clamp(0.5f0 - world_position[3] * 0.02f0, 0.0f0, 1.0f0),
@@ -986,17 +1047,76 @@ function render_texture_probe(state::LavaBackend=backend())
     )
 end
 
-function _orthographic_span(projection::WGEGraphics.OrthographicProjection)::Float32
-    span = projection.span_m
-    span > 0.0f0 || throw(AdapterError("invalid_projection", "orthographic span must be positive"))
-    return span
+function _cross_vector(first::Vec4f, second::Vec4f)::Vec4f
+    return Vec4f(
+        first[2] * second[3] - first[3] * second[2],
+        first[3] * second[1] - first[1] * second[3],
+        first[1] * second[2] - first[2] * second[1],
+        0.0f0,
+    )
 end
 
-function _orthographic_span(::WGEGraphics.PerspectiveProjection)::Float32
-    throw(AdapterError("unsupported_projection", "native terrain path requires orthographic projection"))
+function _camera_projection(
+    projection::WGEGraphics.OrthographicProjection,
+    aspect::Float32,
+    near_plane::Float32,
+    far_plane::Float32,
+)::Tuple{Vec4f,Float32}
+    projection.span_m > 0.0f0 ||
+        throw(AdapterError("invalid_projection", "orthographic span must be positive"))
+    return (
+        Vec4f(
+            projection.span_m * aspect * 0.5f0,
+            projection.span_m * 0.5f0,
+            near_plane,
+            far_plane,
+        ),
+        0.0f0,
+    )
 end
 
-_orthographic_span(camera::WGEGraphics.CameraPacket) = _orthographic_span(camera.projection)
+function _camera_projection(
+    projection::WGEGraphics.PerspectiveProjection,
+    aspect::Float32,
+    near_plane::Float32,
+    far_plane::Float32,
+)::Tuple{Vec4f,Float32}
+    half_fov = Float32(tan(Float64(projection.fov_y_degrees) * pi / 360.0))
+    half_fov > 0.0f0 ||
+        throw(AdapterError("invalid_projection", "perspective field of view is invalid"))
+    return (
+        Vec4f(half_fov * aspect, half_fov, near_plane, far_plane),
+        1.0f0,
+    )
+end
+
+function _camera_frame(camera::WGEGraphics.CameraPacket)::CameraFrame
+    position = Vec4f(camera.position_xyz_m..., 0.0f0)
+    forward = _normalize_vector(Vec4f(camera.forward_xyz..., 0.0f0))
+    requested_up = _normalize_vector(Vec4f(camera.up_xyz..., 0.0f0))
+    right = _normalize_vector(_cross_vector(forward, requested_up))
+    up = _normalize_vector(_cross_vector(right, forward))
+    aspect = Float32(camera.width_px) / Float32(camera.height_px)
+    projection, mode = _camera_projection(
+        camera.projection,
+        aspect,
+        camera.near_plane_m,
+        camera.far_plane_m,
+    )
+    return CameraFrame(position, right, up, forward, projection, mode)
+end
+
+function _project_point(frame::CameraFrame, point::NTuple{3,<:Real})::Vec4f
+    return _project_world(
+        Vec4f(Float32(point[1]), Float32(point[2]), Float32(point[3]), 1.0f0),
+        frame.position,
+        frame.right,
+        frame.up,
+        frame.forward,
+        frame.projection,
+        frame.mode,
+    )
+end
 
 function _terrain_material(packet::WGEGraphics.GraphicsScenePacket)::WGEGraphics.MaterialPacket
     return _material(packet, packet.terrain.material_id)
@@ -1091,18 +1211,6 @@ function _terrain_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsSce
     return created
 end
 
-function _project_point(
-    camera::WGEGraphics.CameraPacket,
-    point::NTuple{3,<:Real},
-)::Vec4f
-    span = _orthographic_span(camera)
-    aspect = Float32(camera.width_px) / Float32(camera.height_px)
-    x = Float32(point[1]) / (span * aspect * 0.5f0)
-    y = -Float32(point[3]) / (span * 0.5f0)
-    depth = 0.45f0 - Float32(point[2]) * 0.001f0
-    return Vec4f(x, y, depth, 1.0f0)
-end
-
 function _append_segment!(positions::Vector{Vec4f}, colors::Vector{Vec4f}, first::Vec4f, last::Vec4f, color::Vec4f)
     push!(positions, first)
     push!(positions, last)
@@ -1119,7 +1227,7 @@ function _append_overlay!(
     positions::Vector{Vec4f},
     colors::Vector{Vec4f},
     overlay::WGEGraphics.PointOverlay,
-    camera::WGEGraphics.CameraPacket,
+    frame::CameraFrame,
 )
     center = overlay.position_xyz_m
     radius = overlay.radius_m
@@ -1127,15 +1235,15 @@ function _append_overlay!(
     _append_segment!(
         positions,
         colors,
-        _project_point(camera, (center[1] - radius, center[2], center[3])),
-        _project_point(camera, (center[1] + radius, center[2], center[3])),
+        _project_point(frame, (center[1] - radius, center[2], center[3])),
+        _project_point(frame, (center[1] + radius, center[2], center[3])),
         color,
     )
     _append_segment!(
         positions,
         colors,
-        _project_point(camera, (center[1], center[2], center[3] - radius)),
-        _project_point(camera, (center[1], center[2], center[3] + radius)),
+        _project_point(frame, (center[1], center[2], center[3] - radius)),
+        _project_point(frame, (center[1], center[2], center[3] + radius)),
         color,
     )
     return nothing
@@ -1145,7 +1253,7 @@ function _append_overlay!(
     positions::Vector{Vec4f},
     colors::Vector{Vec4f},
     overlay::WGEGraphics.CircleOverlay,
-    camera::WGEGraphics.CameraPacket,
+    frame::CameraFrame,
 )
     center = overlay.center_xyz_m
     color = _overlay_color(overlay)
@@ -1163,7 +1271,7 @@ function _append_overlay!(
             center[2],
             center[3] + overlay.radius_m * sin(last_angle),
         )
-        _append_segment!(positions, colors, _project_point(camera, first), _project_point(camera, last), color)
+        _append_segment!(positions, colors, _project_point(frame, first), _project_point(frame, last), color)
     end
     return nothing
 end
@@ -1172,35 +1280,46 @@ function _append_overlay!(
     positions::Vector{Vec4f},
     colors::Vector{Vec4f},
     overlay::WGEGraphics.PolylineOverlay,
-    camera::WGEGraphics.CameraPacket,
+    frame::CameraFrame,
 )
     color = _overlay_color(overlay)
     for index in 1:(length(overlay.points_xyz_m)-1)
-        first = _project_point(camera, overlay.points_xyz_m[index])
-        last = _project_point(camera, overlay.points_xyz_m[index+1])
+        first = _project_point(frame, overlay.points_xyz_m[index])
+        last = _project_point(frame, overlay.points_xyz_m[index+1])
         _append_segment!(positions, colors, first, last, color)
     end
     return nothing
 end
 
 function _instance_visible(
-    packet::WGEGraphics.GraphicsScenePacket,
+    frame::CameraFrame,
     instance::WGEGraphics.InstancePacket,
 )
-    center = _project_point(packet.camera, instance.transform.translation_xyz_m)
-    span = _orthographic_span(packet.camera)
-    aspect = Float32(packet.camera.width_px) / Float32(packet.camera.height_px)
+    center = _project_point(frame, instance.transform.translation_xyz_m)
     radius = max(instance.transform.scale_xyz...)
-    margin_y = radius / (span * 0.5f0)
-    margin_x = radius / (span * aspect * 0.5f0)
-    return -1.0f0 - margin_x <= center[1] <= 1.0f0 + margin_x &&
+    relative = Vec4f(
+        instance.transform.translation_xyz_m[1] - frame.position[1],
+        instance.transform.translation_xyz_m[2] - frame.position[2],
+        instance.transform.translation_xyz_m[3] - frame.position[3],
+        0.0f0,
+    )
+    forward_distance = _dot_vector(frame.forward, relative)
+    projection_scale = 1.0f0 - frame.mode + frame.mode * max(forward_distance, frame.projection[3])
+    margin_x = radius / (frame.projection[1] * projection_scale)
+    margin_y = radius / (frame.projection[2] * projection_scale)
+    in_front = frame.mode < 0.5f0 || forward_distance + radius >= frame.projection[3]
+    return in_front &&
+        -1.0f0 - margin_x <= center[1] <= 1.0f0 + margin_x &&
         -1.0f0 - margin_y <= center[2] <= 1.0f0 + margin_y
 end
 
-function _mesh_visibility(packet::WGEGraphics.GraphicsScenePacket)::MeshVisibility
+function _mesh_visibility(
+    packet::WGEGraphics.GraphicsScenePacket,
+    frame::CameraFrame,
+)::MeshVisibility
     instance_count = length(packet.instances)
     visible_instance_count = count(
-        instance -> _instance_visible(packet, instance),
+        instance -> _instance_visible(frame, instance),
         packet.instances,
     )
     return MeshVisibility(
@@ -1213,13 +1332,14 @@ end
 function _mesh_resources!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
-    visibility::MeshVisibility=_mesh_visibility(packet),
+    frame::CameraFrame,
+    visibility::MeshVisibility=_mesh_visibility(packet, frame),
 )::Union{Nothing,MeshResources}
     current = state.mesh_resources
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
     groups = Dict{Tuple{String,String},Vector{WGEGraphics.InstancePacket}}()
     for instance in packet.instances
-        _instance_visible(packet, instance) || continue
+        _instance_visible(frame, instance) || continue
         key = (instance.mesh_id, instance.material_id)
         instances = get!(groups, key) do
             WGEGraphics.InstancePacket[]
@@ -1293,13 +1413,17 @@ function _mesh_resources!(
     return created
 end
 
-function _overlay_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)
+function _overlay_resources!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    frame::CameraFrame,
+)
     current = state.overlay_resources
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
     positions = Vec4f[]
     colors = Vec4f[]
     for overlay in packet.overlays
-        _append_overlay!(positions, colors, overlay, packet.camera)
+        _append_overlay!(positions, colors, overlay, frame)
     end
     isempty(positions) && return nothing
     gpu_positions = Lava.LavaArray{Vec4f,1}(positions; bq=state.queue)
@@ -1355,15 +1479,13 @@ function render_scene(
     end
     ambient_color = _ambient_color(packet.environment)
     texture_enabled = _material_texture_enabled(material)
-    camera_position = Vec4f(packet.camera.position_xyz_m..., 0.0f0)
+    camera_frame = _camera_frame(packet.camera)
     lighting = _lighting(packet)
-    span = _orthographic_span(packet.camera)
-    aspect = Float32(width) / Float32(height)
     texture_resources = _material_texture_resources!(state, packet)
     resources = _terrain_resources!(state, packet)
-    visibility = _mesh_visibility(packet)
-    mesh_resources = _mesh_resources!(state, packet, visibility)
-    overlay_resources = _overlay_resources!(state, packet)
+    visibility = _mesh_visibility(packet, camera_frame)
+    mesh_resources = _mesh_resources!(state, packet, camera_frame, visibility)
+    overlay_resources = _overlay_resources!(state, packet, camera_frame)
     framebuffer = _framebuffer!(state, width, height, true)
     target = OffscreenTarget(framebuffer)
     terrain_vertices = 6 * (packet.terrain.resolution - 1)^2
@@ -1397,8 +1519,12 @@ function render_scene(
             resources.resolution,
             Float32(packet.terrain.width_m),
             Float32(packet.terrain.length_m),
-            span,
-            aspect,
+            camera_frame.position,
+            camera_frame.right,
+            camera_frame.up,
+            camera_frame.forward,
+            camera_frame.projection,
+            camera_frame.mode,
             Vec4f(material.base_color_rgba...),
             material.metallic,
             material.roughness,
@@ -1408,7 +1534,6 @@ function render_scene(
             ambient_color,
             Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
             packet.environment.fog_density,
-            camera_position,
             packet.environment.exposure,
             texture_enabled,
         ),
@@ -1436,15 +1561,18 @@ function render_scene(
                     batch.scales,
                     batch.colors,
                     batch.material_parameters,
-                    span,
-                    aspect,
+                    camera_frame.position,
+                    camera_frame.right,
+                    camera_frame.up,
+                    camera_frame.forward,
+                    camera_frame.projection,
+                    camera_frame.mode,
                     lighting.direction,
                     lighting.color,
                     Float32(lighting.intensity),
                     ambient_color,
                     Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
                     packet.environment.fog_density,
-                    camera_position,
                     packet.environment.exposure,
                     texture_enabled,
                 ),

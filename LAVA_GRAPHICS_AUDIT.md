@@ -281,8 +281,8 @@ silently discarding those intents. The current supported render profile is
 therefore explicit: one opaque material family with bounded
 metallic/roughness response, one shared content-addressed inline RGBA8 albedo
 payload, one directional light, typed sky/fog/exposure intent, camera-aware
-Cook–Torrance-style roughness/metalness, orthographic terrain projection,
-depth-tested raster, and line-based semantic overlays. Texture dimensions and
+Cook–Torrance-style roughness/metalness, orthographic and perspective terrain
+projections, depth-tested raster, and line-based semantic overlays. Texture dimensions and
 payload digests are validated in Rust and Julia, and the same typed descriptor
 binding is used by terrain and mesh draws. The pinned Lava revision has a
 compatibility hazard where `frag_args` affects the fragment signature but is
