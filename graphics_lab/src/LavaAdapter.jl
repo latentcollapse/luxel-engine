@@ -6,18 +6,23 @@ using Lava
 using SHA
 using Statistics
 using Vulkan
+import WGEGraphics
 
 export AdapterError,
     LavaBackend,
     backend,
     backend_probe,
+    backend_ready,
     render_probe,
+    render_depth_probe,
+    render_texture_probe,
     render_scene
 
 const ADAPTER_REVISION = "wge.lava-adapter/v1"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 const VULKAN_REVISION = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"
 const VULKAN_CORE_REVISION = "1d02829e8fa92da430d879db4dd7bf564a872035"
+const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
 
 struct AdapterError <: Exception
     code::String
@@ -30,6 +35,7 @@ struct TerrainResources
     packet_sha256::String
     heights::Lava.LavaArray{Float32, 1}
     slopes::Lava.LavaArray{Float32, 1}
+    regions::Lava.LavaArray{UInt8, 1}
     resolution::Int32
 end
 
@@ -40,15 +46,34 @@ struct OverlayResources
     vertex_count::Int
 end
 
-mutable struct LavaBackend{C, Q, PP, TP, OP}
+struct MeshResources
+    packet_sha256::String
+    positions::Lava.LavaArray{Vec4f, 1}
+    normals::Lava.LavaArray{Vec4f, 1}
+    colors::Lava.LavaArray{Vec4f, 1}
+    vertex_count::Int
+end
+
+struct TextureProbeResources
+    texture::Lava.LavaTexture2D{NTuple{4, Float32}}
+    sampler::Lava.LavaSampler
+    bindings::Lava.TextureBindings
+end
+
+mutable struct LavaBackend{C, Q, PP, TP, OP, MP, TXP, DP}
     context::C
     queue::Q
     probe_pipeline::PP
     terrain_pipeline::TP
     overlay_pipeline::OP
-    framebuffers::Dict{Tuple{Int, Int}, Lava.LavaFramebuffer}
+    mesh_pipeline::MP
+    texture_pipeline::TXP
+    depth_pipeline::DP
+    framebuffers::Dict{Tuple{Int, Int, Bool}, Lava.LavaFramebuffer}
     terrain_resources::Union{Nothing, TerrainResources}
     overlay_resources::Union{Nothing, OverlayResources}
+    mesh_resources::Union{Nothing, MeshResources}
+    texture_resources::Union{Nothing, TextureProbeResources}
     upload_bytes::UInt64
     draw_calls::UInt64
     readback_bytes::UInt64
@@ -56,6 +81,9 @@ mutable struct LavaBackend{C, Q, PP, TP, OP}
     probe_compiled::Bool
     terrain_compiled::Bool
     overlay_compiled::Bool
+    mesh_compiled::Bool
+    texture_compiled::Bool
+    depth_compiled::Bool
 end
 
 const BACKEND_REF = Ref{Union{Nothing, LavaBackend}}(nothing)
@@ -74,15 +102,51 @@ function _probe_fragment()
     return nothing
 end
 
+function _texture_probe_vertex()
+    vertex_id = Lava.vertex_index() - Int32(1)
+    x = Float32(Int32(vertex_id & Int32(1)) * 4 - 1)
+    y = Float32(Int32((vertex_id >> Int32(1)) & Int32(1)) * 4 - 1)
+    Lava.set_position!(Vec4f(x, y, 0.5f0, 1.0f0))
+    return nothing
+end
+
+function _texture_probe_fragment()
+    red = Lava.sample_texture_2d(UInt32(0), 0.5f0, 0.5f0, UInt32(0))
+    green = Lava.sample_texture_2d(UInt32(0), 0.5f0, 0.5f0, UInt32(1))
+    blue = Lava.sample_texture_2d(UInt32(0), 0.5f0, 0.5f0, UInt32(2))
+    alpha = Lava.sample_texture_2d(UInt32(0), 0.5f0, 0.5f0, UInt32(3))
+    Lava.gfx_output(0, Vec4f(red, green, blue, alpha))
+    return nothing
+end
+
+function _depth_probe_vertex(color::Vec4f, depth::Float32)
+    vertex_id = Lava.vertex_index() - Int32(1)
+    x = Float32(Int32(vertex_id & Int32(1)) * 4 - 1)
+    y = Float32(Int32((vertex_id >> Int32(1)) & Int32(1)) * 4 - 1)
+    Lava.set_position!(Vec4f(x, y, depth, 1.0f0))
+    Lava.gfx_output(0, color)
+    return nothing
+end
+
+function _depth_probe_fragment()
+    Lava.gfx_output(0, Lava.gfx_input(Vec4f, 0))
+    return nothing
+end
+
 function _terrain_vertex(
     heights::Lava.LavaDeviceArray{Float32, 1},
     slopes::Lava.LavaDeviceArray{Float32, 1},
+    regions::Lava.LavaDeviceArray{UInt8, 1},
     resolution::Int32,
     width_m::Float32,
     length_m::Float32,
     span_m::Float32,
     aspect::Float32,
     base_color::Vec4f,
+    light_direction::Vec4f,
+    light_color::Vec4f,
+    light_intensity::Float32,
+    ambient::Float32,
 )
     vertex_id = Lava.vertex_index() - Int32(1)
     cells_per_axis = resolution - Int32(1)
@@ -97,6 +161,7 @@ function _terrain_vertex(
     sample_index = sample_z * resolution + sample_x + Int32(1)
     height = heights[sample_index]
     slope = slopes[sample_index]
+    region = regions[sample_index]
     normalized_x = Float32(sample_x) / Float32(cells_per_axis)
     normalized_z = Float32(sample_z) / Float32(cells_per_axis)
     world_x = (normalized_x - 0.5f0) * width_m
@@ -106,8 +171,49 @@ function _terrain_vertex(
     depth = 0.5f0 - height * 0.001f0
     Lava.set_position!(Vec4f(ndc_x, ndc_y, depth, 1.0f0))
     slope_factor = min(max(slope * 0.8f0, 0.0f0), 1.0f0)
-    shade = 1.0f0 - 0.45f0 * slope_factor
-    Lava.gfx_output(0, Vec4f(base_color[1] * shade, base_color[2] * shade, base_color[3] * shade, base_color[4]))
+    region_tint = 0.82f0 + min(Float32(region) * 0.015f0, 0.18f0)
+    shade = (1.0f0 - 0.45f0 * slope_factor) * region_tint
+    illumination = min(ambient + light_intensity * max(-light_direction[2], 0.0f0), 2.0f0)
+    Lava.gfx_output(
+        0,
+        Vec4f(
+            min(base_color[1] * light_color[1] * shade * illumination, 1.0f0),
+            min(base_color[2] * light_color[2] * shade * illumination, 1.0f0),
+            min(base_color[3] * light_color[3] * shade * illumination, 1.0f0),
+            base_color[4],
+        ),
+    )
+    return nothing
+end
+
+function _mesh_vertex(
+    positions::Lava.LavaDeviceArray{Vec4f, 1},
+    normals::Lava.LavaDeviceArray{Vec4f, 1},
+    colors::Lava.LavaDeviceArray{Vec4f, 1},
+    light_direction::Vec4f,
+    light_color::Vec4f,
+    light_intensity::Float32,
+    ambient::Float32,
+)
+    vertex_id = Lava.vertex_index()
+    position = positions[vertex_id]
+    normal = normals[vertex_id]
+    diffuse = max(
+        -(normal[1] * light_direction[1] + normal[2] * light_direction[2] + normal[3] * light_direction[3]),
+        0.0f0,
+    )
+    illumination = min(ambient + light_intensity * diffuse, 2.0f0)
+    base_color = colors[vertex_id]
+    Lava.set_position!(position)
+    Lava.gfx_output(
+        0,
+        Vec4f(
+            min(base_color[1] * light_color[1] * illumination, 1.0f0),
+            min(base_color[2] * light_color[2] * illumination, 1.0f0),
+            min(base_color[3] * light_color[3] * illumination, 1.0f0),
+            base_color[4],
+        ),
+    )
     return nothing
 end
 
@@ -151,7 +257,7 @@ function backend()::LavaBackend
             fragment=_terrain_fragment,
             blend=Opaque(),
             cull=NoCull(),
-            depth=DepthOff(),
+            depth=DepthLess(),
         )
         overlay_pipeline = GraphicsPipeline(
             ;
@@ -162,19 +268,51 @@ function backend()::LavaBackend
             cull=NoCull(),
             depth=DepthOff(),
         )
+        mesh_pipeline = GraphicsPipeline(
+            ;
+            vertex=_mesh_vertex,
+            fragment=_terrain_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthLess(),
+        )
+        texture_pipeline = GraphicsPipeline(
+            ;
+            vertex=_texture_probe_vertex,
+            fragment=_texture_probe_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthOff(),
+        )
+        depth_pipeline = GraphicsPipeline(
+            ;
+            vertex=_depth_probe_vertex,
+            fragment=_depth_probe_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthLess(),
+        )
         created = LavaBackend(
             context,
             context.default_bq,
             probe_pipeline,
             terrain_pipeline,
             overlay_pipeline,
-            Dict{Tuple{Int, Int}, Lava.LavaFramebuffer}(),
+            mesh_pipeline,
+            texture_pipeline,
+            depth_pipeline,
+            Dict{Tuple{Int, Int, Bool}, Lava.LavaFramebuffer}(),
+            nothing,
+            nothing,
             nothing,
             nothing,
             UInt64(0),
             UInt64(0),
             UInt64(0),
             UInt64(0),
+            false,
+            false,
+            false,
             false,
             false,
             false,
@@ -187,17 +325,19 @@ end
 function _validate_dimensions(width_px::Integer, height_px::Integer)
     1 <= width_px <= 8192 || throw(AdapterError("invalid_dimensions", "width is outside the adapter bound"))
     1 <= height_px <= 8192 || throw(AdapterError("invalid_dimensions", "height is outside the adapter bound"))
+    width_px * height_px * 4 <= MAX_CAPTURE_BYTES ||
+        throw(AdapterError("invalid_dimensions", "capture byte length exceeds the native frame bound"))
     return (Int(width_px), Int(height_px))
 end
 
-function _framebuffer!(state::LavaBackend, width_px::Int, height_px::Int)::Lava.LavaFramebuffer
-    key = (width_px, height_px)
+function _framebuffer!(state::LavaBackend, width_px::Int, height_px::Int, depth::Bool=false)::Lava.LavaFramebuffer
+    key = (width_px, height_px, depth)
     return get!(state.framebuffers, key) do
         Lava.LavaFramebuffer(
             width_px,
             height_px;
             ctx=state.context,
-            depth=false,
+            depth=depth,
             color_format=Vulkan.FORMAT_R32G32B32A32_SFLOAT,
         )
     end
@@ -210,9 +350,12 @@ end
 function _capture_bytes(pixels::AbstractMatrix{<:NTuple{4, <:Real}})::Vector{UInt8}
     bytes = Vector{UInt8}(undef, 4 * length(pixels))
     offset = 1
-    for row in axes(pixels, 1), column in axes(pixels, 2)
-        rgba = _rgba8(pixels[row, column])
-        bytes[offset:(offset + 3)] = collect(rgba)
+    # Lava readback is indexed as (x, y); the contract stores rows top-to-bottom.
+    for row in axes(pixels, 2), column in axes(pixels, 1)
+        rgba = _rgba8(pixels[column, row])
+        for component in 1:4
+            bytes[offset + component - 1] = rgba[component]
+        end
         offset += 4
     end
     return bytes
@@ -246,9 +389,30 @@ function backend_probe(state::LavaBackend=backend())
         hardware_ray_tracing=state.context.rt_pipeline_properties !== nothing,
         persistent_context=true,
         offscreen_raster=state.probe_compiled,
-        depth_attachment=false,
-        texture_sampling=false,
+        depth_attachment=state.depth_compiled,
+        texture_sampling=state.texture_compiled,
         readback=state.probe_compiled,
+    )
+end
+
+function backend_ready(state::LavaBackend=backend())
+    properties = _physical_properties(state.context)
+    return (
+        schema_version="wge.graphics-ready/v1",
+        backend_id="lava-vulkan",
+        adapter_revision=ADAPTER_REVISION,
+        lava_revision=LAVA_REVISION,
+        julia_version=string(VERSION),
+        vulkan_api_version=string(properties.api_version),
+        device_name=state.context.device_name,
+        device_uuid=_device_uuid(state.context),
+        features=(
+            offscreen_raster=state.probe_compiled,
+            depth_attachment=state.depth_compiled,
+            texture_sampling=state.texture_compiled,
+            readback=state.probe_compiled,
+            hardware_ray_tracing=state.context.rt_pipeline_properties !== nothing,
+        ),
     )
 end
 
@@ -294,34 +458,207 @@ function render_probe(
     )
 end
 
-function _orthographic_span(camera)
-    projection = camera.projection
-    hasproperty(projection, :span_m) ||
-        throw(AdapterError("unsupported_projection", "native terrain path requires orthographic projection"))
-    span = Float32(projection.span_m)
+function render_depth_probe(state::LavaBackend=backend())
+    width, height = (16, 16)
+    framebuffer = _framebuffer!(state, width, height, true)
+    target = OffscreenTarget(framebuffer)
+    draw!(
+        state.queue,
+        state.depth_pipeline,
+        target,
+        3;
+        args=(Vec4f(0.0f0, 0.0f0, 1.0f0, 1.0f0), 0.3f0),
+        clear_color=(0.0f0, 0.0f0, 0.0f0, 1.0f0),
+    )
+    draw!(
+        state.queue,
+        state.depth_pipeline,
+        target,
+        3;
+        args=(Vec4f(1.0f0, 0.0f0, 0.0f0, 1.0f0), 0.7f0),
+        clear_color=nothing,
+        depth_clear=nothing,
+    )
+    state.draw_calls += 2
+    if !state.depth_compiled
+        state.depth_compiled = true
+        state.pipeline_compilations += 1
+    end
+    Lava.vk_flush!(state.context)
+    pixels = readback_framebuffer(framebuffer)
+    center = pixels[cld(size(pixels, 1), 2), cld(size(pixels, 2), 2)]
+    return (
+        schema="wge.lava-depth-probe/v1",
+        width_px=width,
+        height_px=height,
+        center_rgba=collect(center),
+        nearer_fragment_won=center[3] > 0.9f0 && center[1] < 0.1f0,
+        depth_attachment=true,
+    )
+end
+
+function _texture_resources!(state::LavaBackend)
+    current = state.texture_resources
+    current !== nothing && return current
+    texel = (0.2f0, 0.7f0, 0.9f0, 1.0f0)
+    data = fill(texel, 4, 4)
+    texture = Lava.LavaTexture2D(data; ctx=state.context, filter=:nearest, wrap=:clamp)
+    sampler = Lava.LavaSampler(ctx=state.context, filter=:nearest, wrap=:clamp)
+    bindings = Lava.bind_textures([texture * sampler])
+    created = TextureProbeResources(texture, sampler, bindings)
+    state.texture_resources = created
+    state.upload_bytes += UInt64(sizeof(texel) * length(data))
+    return created
+end
+
+function render_texture_probe(state::LavaBackend=backend())
+    resource = _texture_resources!(state)
+    width, height = (16, 16)
+    framebuffer = _framebuffer!(state, width, height, false)
+    target = OffscreenTarget(framebuffer)
+    draw!(
+        state.queue,
+        state.texture_pipeline,
+        target,
+        3;
+        descriptor_set_layout=resource.bindings.layout,
+        descriptor_set=resource.bindings.set,
+        clear_color=(0.0f0, 0.0f0, 0.0f0, 1.0f0),
+    )
+    state.draw_calls += 1
+    if !state.texture_compiled
+        state.texture_compiled = true
+        state.pipeline_compilations += 1
+    end
+    Lava.vk_flush!(state.context)
+    pixels = readback_framebuffer(framebuffer)
+    center = pixels[cld(size(pixels, 1), 2), cld(size(pixels, 2), 2)]
+    expected = (0.2f0, 0.7f0, 0.9f0, 1.0f0)
+    return (
+        schema="wge.lava-texture-probe/v1",
+        width_px=width,
+        height_px=height,
+        center_rgba=collect(center),
+        expected_rgba=collect(expected),
+        texture_sampled=all(isapprox(center[index], expected[index]; atol=0.05f0) for index in 1:4),
+        texture_binding_count=1,
+    )
+end
+
+function _orthographic_span(projection::WGEGraphics.OrthographicProjection)
+    span = projection.span_m
     span > 0.0f0 || throw(AdapterError("invalid_projection", "orthographic span must be positive"))
     return span
 end
 
-function _terrain_material(packet)
-    for material in packet.materials
-        material.material_id == packet.terrain.material_id && return material
-    end
-    throw(AdapterError("provenance", "terrain material is absent from the validated packet"))
+function _orthographic_span(::WGEGraphics.PerspectiveProjection)
+    throw(AdapterError("unsupported_projection", "native terrain path requires orthographic projection"))
 end
 
-function _terrain_resources!(state::LavaBackend, packet)
+_orthographic_span(camera::WGEGraphics.CameraPacket) = _orthographic_span(camera.projection)
+
+function _terrain_material(packet::WGEGraphics.GraphicsScenePacket)::WGEGraphics.MaterialPacket
+    return _material(packet, packet.terrain.material_id)
+end
+
+function _directional_lighting(
+    kind::WGEGraphics.DirectionalLightPacket,
+    color_rgb::NTuple{3, Float32},
+    intensity::Float32,
+)
+    return (
+        direction=Vec4f(kind.direction_xyz..., 0.0f0),
+        color=Vec4f(color_rgb..., 1.0f0),
+        intensity,
+        ambient=0.22f0,
+    )
+end
+
+function _directional_lighting(
+    ::WGEGraphics.PointLightPacket,
+    ::NTuple{3, Float32},
+    ::Float32,
+)
+    throw(AdapterError("unsupported_light", "native material path currently requires a directional light"))
+end
+
+function _lighting(packet::WGEGraphics.GraphicsScenePacket)
+    length(packet.lights) == 1 ||
+        throw(AdapterError("unsupported_lighting", "native material path requires exactly one light intent"))
+    light = only(packet.lights)
+    return _directional_lighting(light.kind, light.color_rgb, light.intensity)
+end
+
+function _material(packet::WGEGraphics.GraphicsScenePacket, material_id::String)::WGEGraphics.MaterialPacket
+    for material in packet.materials
+        if material.material_id == material_id
+            isempty(material.texture_ids) ||
+                throw(AdapterError("unsupported_material", "native path does not yet sample scene textures"))
+            material.alpha_mode == :opaque ||
+                throw(AdapterError("unsupported_material", "native path requires opaque materials"))
+            iszero(material.metallic) ||
+                throw(AdapterError("unsupported_material", "native path requires non-metallic materials"))
+            return material
+        end
+    end
+    throw(AdapterError("provenance", "mesh references an absent material"))
+end
+
+function _rotate_vector(rotation::NTuple{4, Float32}, vector::NTuple{3, Float32})
+    x, y, z, w = rotation
+    norm_squared = x * x + y * y + z * z + w * w
+    norm_squared > eps(Float32) || throw(AdapterError("malformed_packet", "instance rotation is degenerate"))
+    inverse_norm = inv(sqrt(norm_squared))
+    x *= inverse_norm
+    y *= inverse_norm
+    z *= inverse_norm
+    w *= inverse_norm
+    vx, vy, vz = vector
+    tx = 2.0f0 * (y * vz - z * vy)
+    ty = 2.0f0 * (z * vx - x * vz)
+    tz = 2.0f0 * (x * vy - y * vx)
+    return (
+        vx + w * tx + (y * tz - z * ty),
+        vy + w * ty + (z * tx - x * tz),
+        vz + w * tz + (x * ty - y * tx),
+    )
+end
+
+function _transform_position(
+    transform::WGEGraphics.TransformPacket,
+    position::NTuple{3, Float32},
+)
+    scaled = ntuple(index -> position[index] * transform.scale_xyz[index], 3)
+    rotated = _rotate_vector(transform.rotation_xyzw, scaled)
+    return ntuple(index -> rotated[index] + transform.translation_xyz_m[index], 3)
+end
+
+function _transform_normal(
+    transform::WGEGraphics.TransformPacket,
+    normal::NTuple{3, Float32},
+)
+    return _rotate_vector(transform.rotation_xyzw, normal)
+end
+
+function _terrain_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)
     current = state.terrain_resources
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
     heights = Lava.LavaArray{Float32, 1}(packet.terrain.heights_m; bq=state.queue)
     slopes = Lava.LavaArray{Float32, 1}(packet.terrain.slope_grade; bq=state.queue)
-    state.upload_bytes += UInt64(sizeof(Float32) * (length(packet.terrain.heights_m) + length(packet.terrain.slope_grade)))
-    created = TerrainResources(packet.packet_sha256, heights, slopes, Int32(packet.terrain.resolution))
+    regions = Lava.LavaArray{UInt8, 1}(packet.terrain.region_codes; bq=state.queue)
+    state.upload_bytes += UInt64(
+        sizeof(Float32) * (length(packet.terrain.heights_m) + length(packet.terrain.slope_grade)) +
+        sizeof(UInt8) * length(packet.terrain.region_codes),
+    )
+    created = TerrainResources(packet.packet_sha256, heights, slopes, regions, Int32(packet.terrain.resolution))
     state.terrain_resources = created
     return created
 end
 
-function _project_point(camera, terrain, point::NTuple{3, <:Real})::Vec4f
+function _project_point(
+    camera::WGEGraphics.CameraPacket,
+    point::NTuple{3, <:Real},
+)::Vec4f
     span = _orthographic_span(camera)
     aspect = Float32(camera.width_px) / Float32(camera.height_px)
     x = Float32(point[1]) / (span * aspect * 0.5f0)
@@ -338,73 +675,115 @@ function _append_segment!(positions::Vector{Vec4f}, colors::Vector{Vec4f}, first
     return nothing
 end
 
-function _overlay_color(overlay)::Vec4f
+function _overlay_color(overlay::WGEGraphics.OverlayPacket)::Vec4f
     return Vec4f(overlay.color_rgba...)
 end
 
-function _append_overlay!(positions, colors, ::Val{:point}, overlay, camera, terrain)
+function _append_overlay!(
+    positions::Vector{Vec4f},
+    colors::Vector{Vec4f},
+    overlay::WGEGraphics.PointOverlay,
+    camera::WGEGraphics.CameraPacket,
+)
     center = overlay.position_xyz_m
     radius = overlay.radius_m
     color = _overlay_color(overlay)
     _append_segment!(
         positions,
         colors,
-        _project_point(camera, terrain, (center[1] - radius, center[2], center[3])),
-        _project_point(camera, terrain, (center[1] + radius, center[2], center[3])),
+        _project_point(camera, (center[1] - radius, center[2], center[3])),
+        _project_point(camera, (center[1] + radius, center[2], center[3])),
         color,
     )
     _append_segment!(
         positions,
         colors,
-        _project_point(camera, terrain, (center[1], center[2], center[3] - radius)),
-        _project_point(camera, terrain, (center[1], center[2], center[3] + radius)),
+        _project_point(camera, (center[1], center[2], center[3] - radius)),
+        _project_point(camera, (center[1], center[2], center[3] + radius)),
         color,
     )
     return nothing
 end
 
-function _append_overlay!(positions, colors, ::Val{:circle}, overlay, camera, terrain)
+function _append_overlay!(
+    positions::Vector{Vec4f},
+    colors::Vector{Vec4f},
+    overlay::WGEGraphics.CircleOverlay,
+    camera::WGEGraphics.CameraPacket,
+)
     center = overlay.center_xyz_m
     color = _overlay_color(overlay)
     steps = 16
     for index in 0:(steps - 1)
         first_angle = 2.0f0 * Float32(pi) * Float32(index) / Float32(steps)
         last_angle = 2.0f0 * Float32(pi) * Float32(index + 1) / Float32(steps)
-        first = (center[1] + overlay.radius_m * cos(first_angle), center[2], center[3] + overlay.radius_m * sin(first_angle))
-        last = (center[1] + overlay.radius_m * cos(last_angle), center[2], center[3] + overlay.radius_m * sin(last_angle))
-        _append_segment!(positions, colors, _project_point(camera, terrain, first), _project_point(camera, terrain, last), color)
+        first = (
+            center[1] + overlay.radius_m * cos(first_angle),
+            center[2],
+            center[3] + overlay.radius_m * sin(first_angle),
+        )
+        last = (
+            center[1] + overlay.radius_m * cos(last_angle),
+            center[2],
+            center[3] + overlay.radius_m * sin(last_angle),
+        )
+        _append_segment!(positions, colors, _project_point(camera, first), _project_point(camera, last), color)
     end
     return nothing
 end
 
-function _append_overlay!(positions, colors, ::Val{:polyline}, overlay, camera, terrain)
+function _append_overlay!(
+    positions::Vector{Vec4f},
+    colors::Vector{Vec4f},
+    overlay::WGEGraphics.PolylineOverlay,
+    camera::WGEGraphics.CameraPacket,
+)
     color = _overlay_color(overlay)
     for index in 1:(length(overlay.points_xyz_m) - 1)
-        first = _project_point(camera, terrain, overlay.points_xyz_m[index])
-        last = _project_point(camera, terrain, overlay.points_xyz_m[index + 1])
+        first = _project_point(camera, overlay.points_xyz_m[index])
+        last = _project_point(camera, overlay.points_xyz_m[index + 1])
         _append_segment!(positions, colors, first, last, color)
     end
     return nothing
 end
 
-function _append_overlay!(positions, colors, overlay, camera, terrain)
-    if hasproperty(overlay, :position_xyz_m)
-        return _append_overlay!(positions, colors, Val(:point), overlay, camera, terrain)
-    elseif hasproperty(overlay, :center_xyz_m)
-        return _append_overlay!(positions, colors, Val(:circle), overlay, camera, terrain)
-    elseif hasproperty(overlay, :points_xyz_m)
-        return _append_overlay!(positions, colors, Val(:polyline), overlay, camera, terrain)
+function _mesh_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)
+    current = state.mesh_resources
+    current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
+    positions = Vec4f[]
+    normals = Vec4f[]
+    colors = Vec4f[]
+    for instance in packet.instances
+        mesh = findfirst(mesh -> mesh.mesh_id == instance.mesh_id, packet.meshes)
+        mesh === nothing && throw(AdapterError("provenance", "instance references an absent mesh"))
+        mesh_packet = packet.meshes[mesh]
+        material = _material(packet, instance.material_id)
+        for index in mesh_packet.indices
+            vertex = Int(index) + 1
+            world_position = _transform_position(instance.transform, mesh_packet.positions_m[vertex])
+            world_normal = _transform_normal(instance.transform, mesh_packet.normals[vertex])
+            push!(positions, _project_point(packet.camera, world_position))
+            push!(normals, Vec4f(world_normal..., 0.0f0))
+            push!(colors, Vec4f(material.base_color_rgba...))
+        end
     end
-    throw(AdapterError("unsupported_overlay", "validated overlay has no renderable geometry"))
+    isempty(positions) && return nothing
+    gpu_positions = Lava.LavaArray{Vec4f, 1}(positions; bq=state.queue)
+    gpu_normals = Lava.LavaArray{Vec4f, 1}(normals; bq=state.queue)
+    gpu_colors = Lava.LavaArray{Vec4f, 1}(colors; bq=state.queue)
+    state.upload_bytes += UInt64(sizeof(Vec4f) * (length(positions) + length(normals) + length(colors)))
+    created = MeshResources(packet.packet_sha256, gpu_positions, gpu_normals, gpu_colors, length(positions))
+    state.mesh_resources = created
+    return created
 end
 
-function _overlay_resources!(state::LavaBackend, packet)
+function _overlay_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)
     current = state.overlay_resources
     current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
     positions = Vec4f[]
     colors = Vec4f[]
     for overlay in packet.overlays
-        _append_overlay!(positions, colors, overlay, packet.camera, packet.terrain)
+        _append_overlay!(positions, colors, overlay, packet.camera)
     end
     isempty(positions) && return nothing
     gpu_positions = Lava.LavaArray{Vec4f, 1}(positions; bq=state.queue)
@@ -432,7 +811,10 @@ function _role_pixels(pixels, overlays, role::Symbol)
     return count(pixel -> _rgba8(pixel) in colors, pixels)
 end
 
-function _scene_measurements(pixels, packet)
+function _scene_measurements(
+    pixels::AbstractMatrix{<:NTuple{4, <:Real}},
+    packet::WGEGraphics.GraphicsScenePacket,
+)
     luminance = Float64[_pixel_luminance(pixel) for pixel in pixels]
     return (
         terrain_luminance_stddev=std(luminance; corrected=false),
@@ -445,13 +827,19 @@ function _scene_measurements(pixels, packet)
     )
 end
 
-function render_scene(packet, state::LavaBackend=backend())
+function render_scene(
+    packet::WGEGraphics.GraphicsScenePacket,
+    state::LavaBackend=backend(),
+)
+    started_ns = time_ns()
     width, height = _validate_dimensions(packet.width_px, packet.height_px)
     resources = _terrain_resources!(state, packet)
+    mesh_resources = _mesh_resources!(state, packet)
     overlay_resources = _overlay_resources!(state, packet)
-    framebuffer = _framebuffer!(state, width, height)
+    framebuffer = _framebuffer!(state, width, height, true)
     target = OffscreenTarget(framebuffer)
     material = _terrain_material(packet)
+    lighting = _lighting(packet)
     span = _orthographic_span(packet.camera)
     aspect = Float32(width) / Float32(height)
     terrain_vertices = 6 * (packet.terrain.resolution - 1)^2
@@ -460,15 +848,20 @@ function render_scene(packet, state::LavaBackend=backend())
         state.terrain_pipeline,
         target,
         terrain_vertices;
-        args=(
-            resources.heights,
-            resources.slopes,
+            args=(
+                resources.heights,
+                resources.slopes,
+                resources.regions,
             resources.resolution,
             Float32(packet.terrain.width_m),
             Float32(packet.terrain.length_m),
             span,
             aspect,
             Vec4f(material.base_color_rgba...),
+            lighting.direction,
+            lighting.color,
+            Float32(lighting.intensity),
+            lighting.ambient,
         ),
         clear_color=(0.035f0, 0.045f0, 0.06f0, 1.0f0),
     )
@@ -476,6 +869,30 @@ function render_scene(packet, state::LavaBackend=backend())
     if !state.terrain_compiled
         state.terrain_compiled = true
         state.pipeline_compilations += 1
+    end
+    if mesh_resources !== nothing
+        draw!(
+            state.queue,
+            state.mesh_pipeline,
+            target,
+            mesh_resources.vertex_count;
+            args=(
+                mesh_resources.positions,
+                mesh_resources.normals,
+                mesh_resources.colors,
+                lighting.direction,
+                lighting.color,
+                Float32(lighting.intensity),
+                lighting.ambient,
+            ),
+            clear_color=nothing,
+            depth_clear=nothing,
+        )
+        state.draw_calls += 1
+        if !state.mesh_compiled
+            state.mesh_compiled = true
+            state.pipeline_compilations += 1
+        end
     end
     if overlay_resources !== nothing
         draw!(
@@ -514,6 +931,7 @@ function render_scene(packet, state::LavaBackend=backend())
             draw_calls=Int(state.draw_calls),
             dispatch_calls=0,
             pipeline_compilations=Int(state.pipeline_compilations),
+            frame_time_us=Int(cld(time_ns() - started_ns, UInt64(1_000))),
         ),
     )
 end

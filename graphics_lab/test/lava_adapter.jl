@@ -31,4 +31,18 @@ using .LavaAdapter
     @test second.telemetry.draw_calls == 2
     @test second.telemetry.pipeline_compilations == 1
     @test length(base64decode(second.capture_base64)) == 8 * 6 * 4
+
+    depth = LavaAdapter.render_depth_probe(state)
+    @test depth.nearer_fragment_won
+    @test depth.center_rgba[3] > 0.9f0
+
+    texture = LavaAdapter.render_texture_probe(state)
+    @test texture.texture_sampled
+    @test texture.center_rgba ≈ texture.expected_rgba atol=0.05f0
+
+    final_capabilities = LavaAdapter.backend_probe(state)
+    @test final_capabilities.offscreen_raster
+    @test final_capabilities.readback
+    @test final_capabilities.depth_attachment
+    @test final_capabilities.texture_sampling
 end

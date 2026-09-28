@@ -20,6 +20,10 @@ include(joinpath(@__DIR__, "..", "bin", "wge_graphics_worker.jl"))
     @test failed["code"] == "unsupported_operation"
     malformed = JSON3.read(handle("not-json"))
     @test malformed["code"] == "malformed_request"
+    malformed_op = JSON3.read(handle(JSON3.write((op=42,))))
+    @test malformed_op["code"] == "malformed_request"
+    malformed_dimension = JSON3.read(handle(JSON3.write((op="probe_backend", width_px="wide"))))
+    @test malformed_dimension["code"] == "malformed_request"
 end
 
 @testset "protocol packet parser rejects authority-shaped fakes" begin

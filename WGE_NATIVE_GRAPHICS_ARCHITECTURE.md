@@ -1,7 +1,7 @@
 # WGE Native Graphics Architecture
 
-Status: executable adapter checkpoint; packet lowering and Rust receipt
-promotion remain ahead.
+Status: supervised native Lava checkpoint green; high-quality renderer breadth
+and engine-neutral parity remain ahead.
 
 Date: 2026-09-28
 
@@ -52,7 +52,9 @@ Lava.jl pinned revision -> Vulkan device/context/queues -> offscreen target
 The worker owns exactly one long-lived `VkContext` and its GPU resources. The
 supervisor owns the worker process and the authoritative packet/capture
 identity. A worker restart invalidates all GPU handles and forces a complete
-scene re-upload; it cannot resume from an unproven partial frame.
+scene re-upload; it cannot resume from an unproven partial frame. The current
+Rust supervisor has an explicit restart path and the integration gate proves
+that a clean restart reproduces the exact capture bytes.
 
 The first implementation is offscreen and headless. A window/swapchain path is
 diagnostic tooling only. The first certified frame is a fixed-size capture from
@@ -118,11 +120,17 @@ The Rust side independently checks the response. At minimum it recomputes:
 
 - packet and capture-request digests;
 - output bytes and declared dimensions/format;
+- visual measurements from the RGBA8 bytes and packet marker colors, rather
+  than trusting producer claims;
 - finite measurements and bounded telemetry;
 - backend identity and exact Lava/source revisions;
 - expected world/spatial/camera identities;
 - deterministic replay by requesting the same frame again after a clean worker
   reset.
+
+The canonical `rgba8_srgb` payload is row-major, top-to-bottom RGBA8. The
+Rust receipt stores the independently recomputed measurements and the adapter
+reports render-through-readback time in microseconds.
 
 Visual evidence remains a real gate. The reference Rust capture and the Lava
 capture are compared for semantic markers and measured properties first, then
@@ -201,10 +209,10 @@ Each layer must be green before the next depends on it:
    types, fail-closed malformed input.
 3. Lava adapter probes: device discovery, minimal shader, buffer upload,
    offscreen clear, depth, texture, readback, teardown.
-4. Rust-supervised process tests: ready handshake, timeout, crash/restart,
-   device-loss classification, stale-packet rejection.
+4. Rust-supervised process tests: ready handshake, restart, schema/provenance
+   checks, stale-packet rejection, and bounded response handling.
 5. Native frame test: certified WGE world -> packet -> Lava frame -> Rust
-   validation -> deterministic replay.
+   validation -> clean-restart deterministic replay.
 6. Bevy parity test: same packet intent and camera produce semantically
    equivalent marker/terrain measurements; representation may differ.
 7. Adversarial tests: forged status, wrong digest, stale packet, changed
@@ -239,14 +247,34 @@ explicitly deferred/indeterminate.
 6. Add repair/rebuild and deterministic restart evidence.
 7. Measure and improve visual quality only inside the certified boundary.
 
-The Rust packet contract and protocol worker are now implemented. The Lava
-adapter has passed a real offscreen color/readback probe through a persistent
-Julia process and now renders the certified `riverwatch` packet: terrain
-height/slope buffers, the canonical orthographic camera, terrain material
-intent, and gameplay-visible route/spawn/encounter/objective overlays all
-cross the native path. The Rust integration gate checks packet binding,
-dimensions, non-flat terrain color, and route visibility.
+The Rust packet contract and protocol worker are implemented. The Lava adapter
+has passed real offscreen color/readback, depth-attachment, and texture/sampler
+probes through a persistent Julia process and renders the certified `riverwatch`
+packet: terrain height/slope buffers, the canonical orthographic camera,
+terrain material intent, and gameplay-visible route/spawn/encounter/objective
+overlays all cross the native path. The Rust supervisor validates the exact
+Lava/adapter identity, packet binding, capture digest, bounded telemetry, and
+independently recomputed visual measurements before promoting a receipt.
 
-The next code slice is depth and texture capability proof followed by
-Rust-owned frame-receipt promotion. No renderer implementation should bypass
-this contract or use Bevy types as the native scene model.
+The supported scene profile is intentionally fail-closed while quality systems
+are being built: the Lava adapter accepts one directional light, opaque
+non-metallic material intents without scene-texture bindings, and an
+orthographic native terrain projection. Perspective cameras, point lights,
+textured materials, blend/mask materials, and metallic materials are typed and
+validated at the boundary but rejected by the adapter until their semantics
+are implemented. This keeps the packet extensible without silently rendering
+less than the model requested.
+
+The supervised integration test also restarts Julia and proves the same packet
+produces byte-identical RGBA8 capture bytes after a clean GPU-context rebuild.
+The `render-layout` CLI can emit an inspectable PPM plus the promoted receipt.
+The receipt additionally binds the physical device UUID, worker-script digest,
+and a renderer-identity digest over the validated capability and worker-ready
+messages. Rust rejects flat/black captures, insufficient RGB diversity, and
+missing pixels for any semantic marker role present in the packet; producer
+measurements are compared against Rust’s independent recomputation.
+The inspected frame is intentionally only a coarse diagnostic slice: terrain
+shading is height/slope-based, overlays are line primitives, and the path does
+not yet claim PBR, shadows, IBL, foliage, particles, post-processing, or
+Elden-Ring-level visual quality. Those are quality-gap work behind this native
+authority boundary, not reasons to weaken the current evidence gate.

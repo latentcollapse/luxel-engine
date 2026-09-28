@@ -9,13 +9,14 @@ using .LavaAdapter
 
 const WORKER_SCHEMA = "wge.graphics-worker/v1"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
+const MAX_WORKER_FRAME_BYTES = 64 * 1024 * 1024
 
-function read_frame(io::IO)
+function read_frame(io::IO)::Union{Nothing, String}
     header = read(io, 4)
     isempty(header) && return nothing
     length(header) == 4 || error("truncated frame header")
     length_bytes = (Int(header[1]) << 24) | (Int(header[2]) << 16) | (Int(header[3]) << 8) | Int(header[4])
-    0 <= length_bytes <= 16_777_216 || error("frame length is outside the worker bound")
+    0 <= length_bytes <= MAX_WORKER_FRAME_BYTES || error("frame length is outside the worker bound")
     payload = read(io, length_bytes)
     length(payload) == length_bytes || error("truncated frame payload")
     return String(payload)
@@ -23,7 +24,8 @@ end
 
 function write_frame(io::IO, payload::AbstractString)
     bytes = Vector{UInt8}(payload)
-    length(bytes) <= typemax(UInt32) || error("response is too large")
+    length(bytes) <= MAX_WORKER_FRAME_BYTES || error("response is outside the worker bound")
+    length(bytes) <= typemax(UInt32) || error("response length overflows frame header")
     n = UInt32(length(bytes))
     write(io, UInt8[(n >> 24) & 0xff, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff])
     write(io, bytes)
@@ -42,7 +44,9 @@ function handle(payload::AbstractString)::String
         return failure("malformed_request", "JSON decode failed: $(sprint(showerror, error))")
     end
     value isa JSON3.Object || return failure("malformed_request", "request must be an object")
-    operation = String(get(value, "op", ""))
+    raw_operation = get(value, "op", nothing)
+    raw_operation isa AbstractString || return failure("malformed_request", "op must be a string")
+    operation = String(raw_operation)
     try
         if operation == "validate_packet"
             Set(String(key) for key in keys(value)) == Set(("op", "packet")) ||
@@ -67,8 +71,10 @@ function handle(payload::AbstractString)::String
             allowed = Set(("op", "width_px", "height_px"))
             request_keys = Set(String(key) for key in keys(value))
             request_keys ⊆ allowed || return failure("malformed_request", "probe_backend request fields are closed")
-            width = haskey(value, "width_px") ? Int(value["width_px"]) : 16
-            height = haskey(value, "height_px") ? Int(value["height_px"]) : 16
+            width = _request_dimension(value, "width_px", 16)
+            height = _request_dimension(value, "height_px", 16)
+            width === nothing && return failure("malformed_request", "width_px must be a positive integer")
+            height === nothing && return failure("malformed_request", "height_px must be a positive integer")
             state = LavaAdapter.backend()
             render = LavaAdapter.render_probe(width, height, state)
             capabilities = LavaAdapter.backend_probe(state)
@@ -84,6 +90,23 @@ function handle(payload::AbstractString)::String
             packet = validate_scene_packet(JSON3.write(value["packet"]))
             frame = LavaAdapter.render_scene(packet)
             return JSON3.write((schema=WORKER_SCHEMA, kind="frame_rendered", frame=frame))
+        elseif operation == "probe_capabilities"
+            Set(String(key) for key in keys(value)) == Set(("op",)) ||
+                return failure("malformed_request", "probe_capabilities request fields are closed")
+            state = LavaAdapter.backend()
+            color = LavaAdapter.render_probe(16, 16, state)
+            depth = LavaAdapter.render_depth_probe(state)
+            texture = LavaAdapter.render_texture_probe(state)
+            capabilities = LavaAdapter.backend_probe(state)
+            return JSON3.write((
+                schema=WORKER_SCHEMA,
+                kind="capabilities_probed",
+                capabilities=capabilities,
+                ready=LavaAdapter.backend_ready(state),
+                color=color,
+                depth=depth,
+                texture=texture,
+            ))
         else
             return failure("unsupported_operation", "operation is not available in the graphics worker")
         end
@@ -95,8 +118,21 @@ function handle(payload::AbstractString)::String
     end
 end
 
-function main()
-    script_sha256 = bytes2hex(sha256(read(PROGRAM_FILE)))
+function _request_dimension(value::JSON3.Object, key::String, default::Int)::Union{Nothing, Int}
+    haskey(value, key) || return default
+    candidate = value[key]
+    if candidate isa Integer
+        integer = Int(candidate)
+        return 1 <= integer <= 8192 ? integer : nothing
+    elseif candidate isa AbstractFloat && isfinite(candidate) && isinteger(candidate)
+        integer = Int(candidate)
+        return 1 <= integer <= 8192 ? integer : nothing
+    end
+    return nothing
+end
+
+function main()::Nothing
+    script_sha256 = "sha256:" * bytes2hex(sha256(read(PROGRAM_FILE)))
     write_frame(stdout, JSON3.write((
         schema=WORKER_SCHEMA,
         kind="ready",

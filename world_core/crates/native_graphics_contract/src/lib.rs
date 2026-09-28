@@ -14,8 +14,23 @@ use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artif
 pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v1";
 pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
 pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
+pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v1";
+pub const LAVA_BACKEND_ID: &str = "lava-vulkan";
+pub const LAVA_REVISION: &str = "11c7e31bdf62408d22bf379e9e59510f69d2103e";
 pub const MAX_PACKET_ELEMENTS: usize = 16 * 1024 * 1024;
 pub const MAX_CAPTURE_DIMENSION: u32 = 8192;
+pub const MAX_CAPTURE_BYTES: usize = 32 * 1024 * 1024;
+const MAX_TELEMETRY_COUNTER: usize = 1 << 40;
+const MAX_FRAME_TIME_US: u64 = 60_000_000;
+const MIN_NATIVE_LUMINANCE_STDDEV: f64 = 0.01;
+const MIN_NATIVE_DISTINCT_COLORS: usize = 3;
+
+pub mod supervisor;
+
+pub use supervisor::{
+    GraphicsFrameOutput, GraphicsWorkerError, GraphicsWorkerSupervisor, PromotedFrame,
+    WORKER_SCHEMA,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphicsContractError {
@@ -399,6 +414,11 @@ pub struct GraphicsFrameReceiptBody {
     pub packet_sha256: String,
     pub capture_id: String,
     pub backend_id: String,
+    pub adapter_revision: String,
+    pub lava_revision: String,
+    pub device_uuid: String,
+    pub worker_script_sha256: String,
+    pub renderer_identity_sha256: String,
     pub status: FrameStatus,
     pub format: CaptureFormat,
     pub width_px: u32,
@@ -591,13 +611,218 @@ pub fn seal_frame_receipt(
         body,
         receipt_sha256,
     };
-    validate_frame_receipt(&receipt, &[])?;
+    validate_frame_receipt_shape(&receipt)?;
+    Ok(receipt)
+}
+
+pub fn seal_frame_receipt_with_capture(
+    body: GraphicsFrameReceiptBody,
+    capture_bytes: &[u8],
+) -> Result<GraphicsFrameReceipt, GraphicsContractError> {
+    let receipt = seal_frame_receipt(body)?;
+    validate_frame_receipt(&receipt, capture_bytes)?;
     Ok(receipt)
 }
 
 pub fn validate_frame_receipt(
     receipt: &GraphicsFrameReceipt,
     capture_bytes: &[u8],
+) -> Result<(), GraphicsContractError> {
+    validate_frame_receipt_shape(receipt)?;
+    match receipt.body.status {
+        FrameStatus::Passed => {
+            if capture_bytes.is_empty() {
+                return Err(GraphicsContractError::provenance(
+                    "passed frame receipt has no capture bytes",
+                ));
+            }
+            let declared = receipt.body.capture_sha256.as_deref().ok_or_else(|| {
+                GraphicsContractError::provenance("passed frame receipt has no capture digest")
+            })?;
+            if declared != sha256_prefixed(capture_bytes) {
+                return Err(GraphicsContractError::provenance(
+                    "capture bytes do not match frame receipt digest",
+                ));
+            }
+        }
+        FrameStatus::Failed | FrameStatus::Unsupported => {
+            if !capture_bytes.is_empty() {
+                return Err(GraphicsContractError::provenance(
+                    "failed or unsupported frame cannot carry capture bytes",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn measure_frame_capture(
+    packet: &GraphicsScenePacket,
+    capture_bytes: &[u8],
+) -> Result<GraphicsFrameMeasurements, GraphicsContractError> {
+    validate_scene_packet(packet)?;
+    let width = usize::try_from(packet.body.capture.width_px)
+        .map_err(|_| GraphicsContractError::malformed("capture width overflows usize"))?;
+    let height = usize::try_from(packet.body.capture.height_px)
+        .map_err(|_| GraphicsContractError::malformed("capture height overflows usize"))?;
+    let expected_bytes = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| {
+            GraphicsContractError::malformed("capture dimensions overflow byte length")
+        })?;
+    if capture_bytes.len() != expected_bytes {
+        return Err(GraphicsContractError::provenance(format!(
+            "capture has {} bytes, expected {expected_bytes}",
+            capture_bytes.len()
+        )));
+    }
+
+    let mut distinct_colors = BTreeSet::new();
+    let mut role_colors: [BTreeSet<[u8; 4]>; 5] = std::array::from_fn(|_| BTreeSet::new());
+    for overlay in &packet.body.overlays {
+        let index = marker_role_index(overlay_role(overlay));
+        role_colors[index].insert(rgba8(overlay_color(overlay))?);
+    }
+
+    let mut role_pixels = [0usize; 5];
+    let mut mean = 0.0f64;
+    let mut sum_squared_delta = 0.0f64;
+    let mut sample_count = 0.0f64;
+    for pixel in capture_bytes.chunks_exact(4) {
+        let rgba = [pixel[0], pixel[1], pixel[2], pixel[3]];
+        distinct_colors.insert((rgba[0], rgba[1], rgba[2]));
+        let luminance = 0.2126 * f64::from(rgba[0]) / 255.0
+            + 0.7152 * f64::from(rgba[1]) / 255.0
+            + 0.0722 * f64::from(rgba[2]) / 255.0;
+        sample_count += 1.0;
+        let delta = luminance - mean;
+        mean += delta / sample_count;
+        sum_squared_delta += delta * (luminance - mean);
+        for (index, colors) in role_colors.iter().enumerate() {
+            if colors.contains(&rgba) {
+                role_pixels[index] += 1;
+            }
+        }
+    }
+    let variance = sum_squared_delta / sample_count;
+    let measurements = GraphicsFrameMeasurements {
+        terrain_luminance_stddev: variance.sqrt(),
+        distinct_terrain_colors: distinct_colors.len(),
+        route_visible_pixels: role_pixels[marker_role_index(MarkerRole::Route)],
+        player_spawn_visible_pixels: role_pixels[marker_role_index(MarkerRole::PlayerSpawn)],
+        opponent_spawn_visible_pixels: role_pixels[marker_role_index(MarkerRole::OpponentSpawn)],
+        encounter_visible_pixels: role_pixels[marker_role_index(MarkerRole::Encounter)],
+        objective_visible_pixels: role_pixels[marker_role_index(MarkerRole::Objective)],
+    };
+    validate_measurements(&measurements)?;
+    validate_measurement_counts(&measurements, expected_bytes / 4)?;
+    Ok(measurements)
+}
+
+pub fn validate_native_visual_gate(
+    packet: &GraphicsScenePacket,
+    measurements: &GraphicsFrameMeasurements,
+) -> Result<(), GraphicsContractError> {
+    validate_scene_packet(packet)?;
+    validate_measurements(measurements)?;
+    let pixel_count = usize::try_from(packet.body.capture.width_px)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(packet.body.capture.height_px)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .ok_or_else(|| {
+            GraphicsContractError::malformed("capture dimensions overflow pixel count")
+        })?;
+    validate_measurement_counts(measurements, pixel_count)?;
+    if measurements.terrain_luminance_stddev < MIN_NATIVE_LUMINANCE_STDDEV {
+        return Err(GraphicsContractError::provenance(
+            "native visual gate failed: terrain capture is visually flat",
+        ));
+    }
+    if measurements.distinct_terrain_colors < MIN_NATIVE_DISTINCT_COLORS {
+        return Err(GraphicsContractError::provenance(
+            "native visual gate failed: terrain capture lacks useful color diversity",
+        ));
+    }
+    for role in [
+        MarkerRole::Route,
+        MarkerRole::PlayerSpawn,
+        MarkerRole::OpponentSpawn,
+        MarkerRole::Encounter,
+        MarkerRole::Objective,
+    ] {
+        if packet
+            .body
+            .overlays
+            .iter()
+            .any(|overlay| overlay_role(overlay) == role)
+            && role_visible_pixels(measurements, role) == 0
+        {
+            return Err(GraphicsContractError::provenance(format!(
+                "native visual gate failed: {role:?} overlay is not visible"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn marker_role_index(role: MarkerRole) -> usize {
+    match role {
+        MarkerRole::Route => 0,
+        MarkerRole::PlayerSpawn => 1,
+        MarkerRole::OpponentSpawn => 2,
+        MarkerRole::Encounter => 3,
+        MarkerRole::Objective => 4,
+    }
+}
+
+fn role_visible_pixels(measurements: &GraphicsFrameMeasurements, role: MarkerRole) -> usize {
+    match role {
+        MarkerRole::Route => measurements.route_visible_pixels,
+        MarkerRole::PlayerSpawn => measurements.player_spawn_visible_pixels,
+        MarkerRole::OpponentSpawn => measurements.opponent_spawn_visible_pixels,
+        MarkerRole::Encounter => measurements.encounter_visible_pixels,
+        MarkerRole::Objective => measurements.objective_visible_pixels,
+    }
+}
+
+fn overlay_role(overlay: &SemanticOverlay) -> MarkerRole {
+    match overlay {
+        SemanticOverlay::Point { role, .. }
+        | SemanticOverlay::Circle { role, .. }
+        | SemanticOverlay::Polyline { role, .. } => *role,
+    }
+}
+
+fn overlay_color(overlay: &SemanticOverlay) -> &[f32; 4] {
+    match overlay {
+        SemanticOverlay::Point { color_rgba, .. }
+        | SemanticOverlay::Circle { color_rgba, .. }
+        | SemanticOverlay::Polyline { color_rgba, .. } => color_rgba,
+    }
+}
+
+fn rgba8(color: &[f32; 4]) -> Result<[u8; 4], GraphicsContractError> {
+    color
+        .iter()
+        .map(|value| {
+            if !value.is_finite() || !(0.0..=1.0).contains(value) {
+                return Err(GraphicsContractError::malformed(
+                    "visual measurement color is outside [0, 1]",
+                ));
+            }
+            Ok((value * 255.0).round() as u8)
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .try_into()
+        .map_err(|_| GraphicsContractError::malformed("visual measurement color has wrong arity"))
+}
+
+fn validate_frame_receipt_shape(
+    receipt: &GraphicsFrameReceipt,
 ) -> Result<(), GraphicsContractError> {
     let body_digest = sha256_prefixed(&canonical_json(&receipt.body)?);
     if receipt.receipt_sha256 != body_digest {
@@ -615,35 +840,39 @@ pub fn validate_frame_receipt(
     valid_sha(&body.packet_sha256, "packet_sha256")?;
     valid_id(&body.capture_id, "capture_id")?;
     valid_id(&body.backend_id, "backend_id")?;
+    valid_id(&body.adapter_revision, "adapter_revision")?;
+    valid_id(&body.lava_revision, "lava_revision")?;
+    valid_id(&body.device_uuid, "device_uuid")?;
+    valid_sha(&body.worker_script_sha256, "worker_script_sha256")?;
+    valid_sha(&body.renderer_identity_sha256, "renderer_identity_sha256")?;
     validate_dimensions(body.width_px, body.height_px, "frame receipt")?;
     validate_measurements(&body.measurements)?;
+    let pixel_count = usize::try_from(body.width_px)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(body.height_px)
+                .ok()
+                .and_then(|height| width.checked_mul(height))
+        })
+        .ok_or_else(|| GraphicsContractError::malformed("frame dimensions overflow pixel count"))?;
+    validate_measurement_counts(&body.measurements, pixel_count)?;
+    validate_telemetry(&body.telemetry)?;
     if body.detail.trim().is_empty() {
         return Err(GraphicsContractError::malformed(
             "frame receipt detail must not be empty",
         ));
     }
-
     match body.status {
         FrameStatus::Passed => {
-            if capture_bytes.is_empty() {
-                return Err(GraphicsContractError::provenance(
-                    "passed frame receipt has no capture bytes",
-                ));
-            }
             let declared = body.capture_sha256.as_deref().ok_or_else(|| {
                 GraphicsContractError::provenance("passed frame receipt has no capture digest")
             })?;
             valid_sha(declared, "capture_sha256")?;
-            if declared != sha256_prefixed(capture_bytes) {
-                return Err(GraphicsContractError::provenance(
-                    "capture bytes do not match frame receipt digest",
-                ));
-            }
         }
         FrameStatus::Failed | FrameStatus::Unsupported => {
-            if body.capture_sha256.is_some() || !capture_bytes.is_empty() {
+            if body.capture_sha256.is_some() {
                 return Err(GraphicsContractError::provenance(
-                    "failed or unsupported frame cannot carry pass-shaped capture bytes",
+                    "failed or unsupported frame cannot carry a capture digest",
                 ));
             }
         }
@@ -685,6 +914,104 @@ pub fn validate_ready(ready: &GraphicsReady) -> Result<(), GraphicsContractError
     Ok(())
 }
 
+fn obstacle_mesh() -> MeshPacket {
+    let mut positions = Vec::with_capacity(24);
+    let mut normals = Vec::with_capacity(24);
+    let mut indices = Vec::with_capacity(36);
+    append_mesh_face(
+        &mut positions,
+        &mut normals,
+        &mut indices,
+        [
+            [-1.0, 0.0, -1.0],
+            [1.0, 0.0, -1.0],
+            [1.0, 0.0, 1.0],
+            [-1.0, 0.0, 1.0],
+        ],
+        [0.0, -1.0, 0.0],
+    );
+    append_mesh_face(
+        &mut positions,
+        &mut normals,
+        &mut indices,
+        [
+            [-1.0, 1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+        ],
+        [0.0, 1.0, 0.0],
+    );
+    append_mesh_face(
+        &mut positions,
+        &mut normals,
+        &mut indices,
+        [
+            [-1.0, 0.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [1.0, 1.0, -1.0],
+            [1.0, 0.0, -1.0],
+        ],
+        [0.0, 0.0, -1.0],
+    );
+    append_mesh_face(
+        &mut positions,
+        &mut normals,
+        &mut indices,
+        [
+            [1.0, 0.0, -1.0],
+            [1.0, 1.0, -1.0],
+            [1.0, 1.0, 1.0],
+            [1.0, 0.0, 1.0],
+        ],
+        [1.0, 0.0, 0.0],
+    );
+    append_mesh_face(
+        &mut positions,
+        &mut normals,
+        &mut indices,
+        [
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [-1.0, 1.0, 1.0],
+            [-1.0, 0.0, 1.0],
+        ],
+        [0.0, 0.0, 1.0],
+    );
+    append_mesh_face(
+        &mut positions,
+        &mut normals,
+        &mut indices,
+        [
+            [-1.0, 0.0, 1.0],
+            [-1.0, 1.0, 1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, 0.0, -1.0],
+        ],
+        [-1.0, 0.0, 0.0],
+    );
+    MeshPacket {
+        mesh_id: "obstacle-prism".into(),
+        positions_m: positions,
+        normals,
+        indices,
+        material_id: "obstacle-default".into(),
+    }
+}
+
+fn append_mesh_face(
+    positions: &mut Vec<[f32; 3]>,
+    normals: &mut Vec<[f32; 3]>,
+    indices: &mut Vec<u32>,
+    face: [[f32; 3]; 4],
+    normal: [f32; 3],
+) {
+    let first = positions.len() as u32;
+    positions.extend(face);
+    normals.extend([normal; 4]);
+    indices.extend([first, first + 1, first + 2, first, first + 2, first + 3]);
+}
+
 pub fn lower_reference_world(
     world: &WorldArtifact,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
@@ -719,6 +1046,49 @@ pub fn lower_reference_world(
     };
 
     let mut overlays = Vec::new();
+    let mut materials = vec![MaterialIntent {
+        material_id: "terrain-default".into(),
+        base_color_rgba: [0.29, 0.38, 0.28, 1.0],
+        metallic: 0.0,
+        roughness: 0.92,
+        alpha_mode: AlphaMode::Opaque,
+        texture_ids: Vec::new(),
+    }];
+    let mut meshes = Vec::new();
+    let mut instances = Vec::new();
+    if !layout.obstacles.is_empty() {
+        materials.push(MaterialIntent {
+            material_id: "obstacle-default".into(),
+            base_color_rgba: [0.27, 0.24, 0.20, 1.0],
+            metallic: 0.0,
+            roughness: 0.78,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: Vec::new(),
+        });
+        meshes.push(obstacle_mesh());
+        for obstacle in &layout.obstacles {
+            let [x, z] = obstacle.center_xz_m;
+            let cell = nearest_cell(layout.width_m, layout.length_m, resolution, [x, z]);
+            instances.push(InstancePacket {
+                instance_id: obstacle.obstacle_id.clone(),
+                mesh_id: "obstacle-prism".into(),
+                material_id: "obstacle-default".into(),
+                transform: Transform3d {
+                    translation_xyz_m: [
+                        finite_f32(x, "obstacle x")?,
+                        finite_f32(world.body.fields.heights_m[cell], "obstacle height")?,
+                        finite_f32(z, "obstacle z")?,
+                    ],
+                    rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
+                    scale_xyz: [
+                        finite_f32(obstacle.radius_m, "obstacle radius")?,
+                        finite_f32(obstacle.height_m, "obstacle height")?,
+                        finite_f32(obstacle.radius_m, "obstacle radius")?,
+                    ],
+                },
+            });
+        }
+    }
     let route_points = world
         .body
         .navigation
@@ -831,17 +1201,10 @@ pub fn lower_reference_world(
                 world.body.fields.region_codes.clone(),
             ),
         },
-        materials: vec![MaterialIntent {
-            material_id: terrain_material_id,
-            base_color_rgba: [0.29, 0.38, 0.28, 1.0],
-            metallic: 0.0,
-            roughness: 0.92,
-            alpha_mode: AlphaMode::Opaque,
-            texture_ids: Vec::new(),
-        }],
+        materials,
         textures: Vec::new(),
-        meshes: Vec::new(),
-        instances: Vec::new(),
+        meshes,
+        instances,
         lights: vec![LightIntent {
             light_id: "key-directional".into(),
             kind: LightKind::Directional {
@@ -1033,7 +1396,7 @@ fn validate_mesh(
             mesh.mesh_id
         )));
     }
-    if mesh.indices.is_empty() || mesh.indices.len() % 3 != 0 {
+    if mesh.indices.is_empty() || !mesh.indices.len().is_multiple_of(3) {
         return Err(GraphicsContractError::malformed(format!(
             "mesh {} needs a non-empty triangle index array",
             mesh.mesh_id
@@ -1068,6 +1431,16 @@ fn validate_transform(transform: &Transform3d) -> Result<(), GraphicsContractErr
     finite_values(&transform.translation_xyz_m, "instance translation")?;
     finite_values(&transform.rotation_xyzw, "instance rotation")?;
     finite_values(&transform.scale_xyz, "instance scale")?;
+    let rotation_norm_squared = transform
+        .rotation_xyzw
+        .iter()
+        .map(|value| value * value)
+        .sum::<f32>();
+    if rotation_norm_squared <= f32::EPSILON {
+        return Err(GraphicsContractError::malformed(
+            "instance rotation must be non-degenerate",
+        ));
+    }
     if transform.scale_xyz.iter().any(|value| *value <= 0.0) {
         return Err(GraphicsContractError::malformed(
             "instance scale must be positive",
@@ -1191,6 +1564,21 @@ fn validate_capture(
             "native certification requires deterministic captures",
         ));
     }
+    let capture_bytes = usize::try_from(capture.width_px)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(capture.height_px)
+                .ok()
+                .and_then(|height| width.checked_mul(height)?.checked_mul(4))
+        })
+        .ok_or_else(|| {
+            GraphicsContractError::malformed("capture dimensions overflow byte length")
+        })?;
+    if capture_bytes > MAX_CAPTURE_BYTES {
+        return Err(GraphicsContractError::malformed(
+            "capture byte length exceeds the bounded native frame size",
+        ));
+    }
     Ok(())
 }
 
@@ -1198,10 +1586,68 @@ fn validate_measurements(
     measurements: &GraphicsFrameMeasurements,
 ) -> Result<(), GraphicsContractError> {
     if !measurements.terrain_luminance_stddev.is_finite()
-        || measurements.terrain_luminance_stddev < 0.0
+        || !(0.0..=1.0).contains(&measurements.terrain_luminance_stddev)
     {
         return Err(GraphicsContractError::malformed(
-            "frame luminance measurement must be finite and non-negative",
+            "frame luminance measurement must be finite and within [0, 1]",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_measurement_counts(
+    measurements: &GraphicsFrameMeasurements,
+    pixel_count: usize,
+) -> Result<(), GraphicsContractError> {
+    for (value, label) in [
+        (
+            measurements.distinct_terrain_colors,
+            "distinct_terrain_colors",
+        ),
+        (measurements.route_visible_pixels, "route_visible_pixels"),
+        (
+            measurements.player_spawn_visible_pixels,
+            "player_spawn_visible_pixels",
+        ),
+        (
+            measurements.opponent_spawn_visible_pixels,
+            "opponent_spawn_visible_pixels",
+        ),
+        (
+            measurements.encounter_visible_pixels,
+            "encounter_visible_pixels",
+        ),
+        (
+            measurements.objective_visible_pixels,
+            "objective_visible_pixels",
+        ),
+    ] {
+        if value > pixel_count {
+            return Err(GraphicsContractError::malformed(format!(
+                "{label} exceeds capture pixel count"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_telemetry(telemetry: &GraphicsTelemetry) -> Result<(), GraphicsContractError> {
+    for (value, label) in [
+        (telemetry.upload_bytes, "upload_bytes"),
+        (telemetry.readback_bytes, "readback_bytes"),
+        (telemetry.draw_calls, "draw_calls"),
+        (telemetry.dispatch_calls, "dispatch_calls"),
+        (telemetry.pipeline_compilations, "pipeline_compilations"),
+    ] {
+        if value > MAX_TELEMETRY_COUNTER {
+            return Err(GraphicsContractError::malformed(format!(
+                "telemetry {label} exceeds the bounded counter limit"
+            )));
+        }
+    }
+    if telemetry.frame_time_us > MAX_FRAME_TIME_US {
+        return Err(GraphicsContractError::malformed(
+            "telemetry frame time exceeds the bounded limit",
         ));
     }
     Ok(())
@@ -1417,13 +1863,18 @@ mod tests {
             packet_sha256: sha256_prefixed(b"packet"),
             capture_id: "capture".into(),
             backend_id: "wge.lava".into(),
+            adapter_revision: ADAPTER_REVISION.into(),
+            lava_revision: LAVA_REVISION.into(),
+            device_uuid: "device".into(),
+            worker_script_sha256: sha256_prefixed(b"worker"),
+            renderer_identity_sha256: sha256_prefixed(b"renderer"),
             status: FrameStatus::Passed,
             format: CaptureFormat::Rgba8Srgb,
             width_px: 2,
             height_px: 2,
             capture_sha256: Some(sha256_prefixed(b"frame")),
             measurements: GraphicsFrameMeasurements {
-                terrain_luminance_stddev: 4.0,
+                terrain_luminance_stddev: 0.4,
                 distinct_terrain_colors: 3,
                 route_visible_pixels: 2,
                 player_spawn_visible_pixels: 2,
@@ -1441,11 +1892,60 @@ mod tests {
             },
             detail: "measured".into(),
         };
-        let receipt = GraphicsFrameReceipt {
+        let mut receipt = GraphicsFrameReceipt {
             receipt_sha256: sha256_prefixed(&canonical_json(&body).expect("body JSON")),
             body,
         };
         assert!(validate_frame_receipt(&receipt, &[]).is_err());
         validate_frame_receipt(&receipt, b"frame").expect("matching capture validates");
+        receipt.body.telemetry.frame_time_us = MAX_FRAME_TIME_US + 1;
+        receipt.receipt_sha256 =
+            sha256_prefixed(&canonical_json(&receipt.body).expect("tampered body JSON"));
+        assert!(validate_frame_receipt(&receipt, b"frame").is_err());
+    }
+
+    #[test]
+    fn rust_visual_measurement_recomputes_semantic_overlay_visibility() {
+        let packet = packet();
+        let mut capture = vec![0u8; 32 * 32 * 4];
+        capture[..4].copy_from_slice(&[0, 255, 255, 255]);
+        let measurements = measure_frame_capture(&packet, &capture).expect("capture measures");
+        assert_eq!(measurements.route_visible_pixels, 1);
+        assert_eq!(measurements.distinct_terrain_colors, 2);
+    }
+
+    #[test]
+    fn rust_visual_measurement_rejects_truncated_capture() {
+        let packet = packet();
+        let error = measure_frame_capture(&packet, &[0u8; 4]).expect_err("truncated capture fails");
+        assert_eq!(error.code, "provenance");
+    }
+
+    #[test]
+    fn native_visual_gate_rejects_flat_capture_and_accepts_useful_capture() {
+        let packet = packet();
+        let flat = vec![0u8; 32 * 32 * 4];
+        let flat_measurements =
+            measure_frame_capture(&packet, &flat).expect("flat capture measures");
+        assert!(validate_native_visual_gate(&packet, &flat_measurements).is_err());
+
+        let mut useful = [50u8, 60, 70, 255].repeat(32 * 32);
+        useful[..4].copy_from_slice(&[0, 255, 255, 255]);
+        useful[4..8].copy_from_slice(&[200, 200, 200, 255]);
+        let useful_measurements =
+            measure_frame_capture(&packet, &useful).expect("useful capture measures");
+        validate_native_visual_gate(&packet, &useful_measurements)
+            .expect("useful capture passes the native visual gate");
+    }
+
+    #[test]
+    fn capture_bound_rejects_a_worker_frame_that_would_exceed_the_protocol_budget() {
+        let packet = packet();
+        let mut body = packet.body.clone();
+        body.camera.width_px = 8192;
+        body.camera.height_px = 8192;
+        body.capture.width_px = 8192;
+        body.capture.height_px = 8192;
+        assert!(seal_scene_packet(body).is_err());
     }
 }

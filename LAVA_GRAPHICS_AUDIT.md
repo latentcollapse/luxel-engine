@@ -1,6 +1,7 @@
 # WGE Lava Graphics Audit
 
-Status: Phase 0 complete; renderer implementation has not started.
+Status: Phase 0 audit complete; supervised native Lava adapter checkpoint
+implemented and independently verified.
 
 Date: 2026-09-28
 
@@ -222,19 +223,18 @@ Completed:
 - produced this implementation matrix before starting renderer construction;
 - committed the preceding Julia quality hardening separately as `f8fee90`.
 
-Not claimed:
+The audit record now has an executable native follow-up. It still does not
+claim:
 
-- no Lava dependency has been added to WGE;
-- no GPU device or driver has been certified for WGE;
-- no native Lava frame has been promoted;
-- no visual-quality gate has been weakened or marked passed by fixture;
-- no rigging, Unity integration, engine comparison, or post-MVP breadth has
-  started.
+- high-end game-renderer quality or broad material/lighting breadth;
+- engine parity, Unity integration, rigging, or post-MVP asset generation;
+- a Bevy representation as canonical graphics state;
+- that a producer-reported measurement is authoritative without Rust
+  remeasurement.
 
-The next checkpoint is the architecture/contract document. It must preserve
-the conclusions above, especially the Rust authority plane, separate Julia
-graphics process, exact dependency lock, engine-neutral packet boundary, and
-Bevy-as-oracle rule.
+The architecture/contract document preserves the conclusions above, especially
+the Rust authority plane, separate Julia graphics process, exact dependency
+lock, engine-neutral packet boundary, and Bevy-as-oracle rule.
 
 ## Post-audit substrate checkpoint
 
@@ -258,11 +258,44 @@ different target sizes through the same cached context and pipeline. This is
 substrate evidence only: it does not certify depth, texture sampling, terrain
 lowering, or Rust receipt promotion.
 
-The next checkpoint now also renders the actual Rust-lowered `riverwatch`
-packet: Julia retains camera/material/light/overlay intent as concrete types,
-uploads the certified height and slope fields to Lava buffers, draws terrain
-triangles and gameplay-visible route/spawn/encounter/objective overlays, and
-returns deterministic capture bytes plus telemetry. The Rust integration gate
-independently checks packet binding, dimensions, non-flat terrain color, and
-route visibility. Depth/texture capability promotion and Rust frame-receipt
-validation remain separate gates.
+The current native checkpoint renders the actual Rust-lowered `riverwatch`
+packet: Julia retains camera/material/light/texture/mesh/instance/overlay
+intent as concrete types, uploads the certified height and slope fields to
+Lava buffers, draws terrain triangles and gameplay-visible
+route/spawn/encounter/objective overlays, and returns deterministic capture
+bytes plus telemetry. Depth attachment and texture sampling are each proven by
+real probes in the same persistent context.
+
+The Julia adapter received a code-quality pass before this checkpoint was
+accepted. Packet data is represented by concrete domain structs; closed JSON
+variants use dispatch on typed values rather than property probing; payload
+hashing dispatches on the decoded buffer element type and preserves the Rust
+little-endian identity; and parser/worker helpers have bounded concrete
+signatures. The adapter rejects material features it does not yet implement
+(scene textures, non-opaque alpha modes, and metallic shading) instead of
+silently discarding those intents. The current supported render profile is
+therefore explicit: one opaque, non-metallic material family, one directional
+light, orthographic terrain projection, depth-tested raster, and line-based
+semantic overlays.
+
+Rust now supervises the persistent worker, checks the exact audited Lava and
+adapter revisions, validates the typed ready payload, binds the frame to the
+scene packet and capture request, decodes and hashes the capture bytes, bounds
+telemetry, independently recomputes visual measurements, and promotes a typed
+frame receipt only after capture-backed validation. A clean worker restart has
+been exercised; the same `riverwatch` packet reproduced byte-identical RGBA8
+capture bytes and identical Rust measurements.
+
+The native visual gate is authority-owned rather than appearance-shaped: Rust
+recomputes luminance variation, RGB color diversity, and exact semantic
+role-color visibility from the returned RGBA8 bytes. Flat/black captures and
+captures that omit any semantic role present in the packet fail promotion.
+Promoted receipts bind the device UUID, exact adapter/Lava revisions, the
+worker script digest, and a digest of the validated capability/worker identity.
+
+The inspected `render-layout` capture is deliberately recorded as a quality
+gap, not a success-by-appearance claim: it is a coarse height/slope terrain
+diagnostic with line-based semantic overlays. High-end material, lighting,
+shadow, foliage, particle, water, post-processing, and asset-rich quality work
+remain downstream of this certified substrate. No rigging, Unity, Bevy
+canonicalization, or broad text-to-3D work was used to close this checkpoint.

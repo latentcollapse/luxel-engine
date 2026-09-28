@@ -8,6 +8,7 @@ rust-version.workspace = true
 description = "Typed, engine-neutral WGE scene packets and native graphics evidence"
 
 [dependencies]
+base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 sha2 = "0.10"
