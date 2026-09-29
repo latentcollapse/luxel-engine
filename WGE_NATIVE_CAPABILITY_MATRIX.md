@@ -19,6 +19,7 @@ complete for a commercial game.
 | Authored mesh UV0 | green | Closed v6 packet channel; Rust cardinality/finite validation and typed Lava upload |
 | Semantic objective landmark | green | Rust-lowered octagonal beacon with distinct albedo/emissive roles and landmark telemetry |
 | Close-range perspective inspection | green | Typed objective-close packet, real Lava capture, Rust promotion, and deterministic digest check |
+| Composed authored-world profile | green / quality-limited | Real Riverwatch instances plus named shrine through the native path; 40-instance 768x512 receipt is deterministic, while foliage/terrain fidelity remains a documented gap |
 | Opaque mesh materials | partial | Bounded albedo, metallic, roughness, clearcoat, Cook–Torrance-style response, and role-sampled surface maps; richer graph semantics remain |
 | Normal/roughness/occlusion/emissive material roles | green | Rust/Julia role-typed IDs, color-space validation, digest-bound procedural maps, and Lava descriptor bindings |
 | Independent material profiles | green | Riverwatch lowers distinct terrain, stone, and foliage albedo identities; each mesh batch resolves its own typed descriptor set |

@@ -7,8 +7,8 @@ use std::time::Duration;
 use wge_native_graphics_contract::{
     ADAPTER_REVISION, GraphicsReady, GraphicsWorkerSupervisor, LAVA_REVISION,
     lower_dense_benchmark_packet, lower_objective_close_packet, lower_reference_world,
-    lower_showcase_packet, seal_scene_packet, validate_frame_receipt, validate_ready,
-    validate_scene_packet,
+    lower_showcase_packet, lower_world_showcase_packet, seal_scene_packet, validate_frame_receipt,
+    validate_ready, validate_scene_packet,
 };
 use wge_reference_runtime::build_from_layout_path;
 
@@ -144,6 +144,31 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
             .filter(|instance| instance.instance_id.starts_with("showcase-"))
             .count(),
         8
+    );
+
+    let world_showcase = lower_world_showcase_packet(&packet).expect("world showcase packet seals");
+    validate_scene_packet(&world_showcase).expect("world showcase packet validates");
+    assert_eq!(
+        world_showcase.body.camera.camera_id,
+        "native-world-showcase"
+    );
+    assert_eq!(world_showcase.body.camera.width_px, 768);
+    assert_eq!(world_showcase.body.camera.height_px, 512);
+    assert!(world_showcase.body.overlays.is_empty());
+    assert!(world_showcase.body.instances.len() > packet.body.instances.len());
+    assert!(
+        world_showcase
+            .body
+            .instances
+            .iter()
+            .any(|instance| instance.instance_id == "fallen_spire")
+    );
+    assert!(
+        world_showcase
+            .body
+            .instances
+            .iter()
+            .any(|instance| instance.instance_id == "showcase-halo")
     );
 
     let dense = lower_dense_benchmark_packet(&packet, 128).expect("dense benchmark packet seals");

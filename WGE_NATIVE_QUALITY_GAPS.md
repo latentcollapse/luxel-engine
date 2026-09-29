@@ -12,10 +12,13 @@ for an Elden Ring-level presentation.
 
 1. The canonical Riverwatch overview is still visually coarse: a small terrain
    field, simple obstacle geometry, diagnostic gameplay markers, and opaque
-   crossed foliage. The new showcase profile demonstrates composition,
-   procedural stone/metal/emissive roles, normal response, and shadowed
-   perspective rendering, but it is still a bounded authored probe rather than
-   imported hero-asset richness or production environment breadth.
+   crossed foliage. The composed-world profile now proves that real authored
+   instances can coexist with the showcase composition, but its foliage still
+   reads as sparse markers and its terrain remains a diagnostic field. The
+   showcase profile demonstrates composition, procedural
+   stone/metal/emissive roles, normal response, and shadowed perspective
+   rendering, but it is still a bounded authored probe rather than imported
+   hero-asset richness or production environment breadth.
 2. The canonical material contract now has digest-bound albedo, normal,
    roughness, occlusion, and emissive roles plus scalar metallic/roughness and
    clearcoat controls. Alpha, transmission, texture transforms, mip policy, and
@@ -31,11 +34,11 @@ for an Elden Ring-level presentation.
    ecological placement model, impostor, LOD, streaming, or occlusion system.
 6. There are no native water, particle, decal, volumetric, post-processing,
    skeletal animation, or character-rendering paths.
-7. GPU scene scalability is now measured only for a synthetic instanced
-   foliage stress profile: 512 added background instances (544 total) remain
-   one bounded mesh batch, with 15 draw calls, 240 base mesh vertices, and a
-   warm GPU p50/p95 of 477/504 microseconds under pass-level instrumentation.
-   This does not establish authored-scene scalability, traversal-aware culling,
+7. GPU scene scalability is now measured for both a synthetic instanced
+   foliage stress profile and a 40-instance composed authored-world profile.
+   The authored profile remains one bounded small scene (28 draw calls, 4,656
+   submitted mesh vertices), while the synthetic profile still provides the
+   larger 544-instance batch. Neither establishes traversal-aware culling,
    meshlets, GPU-driven indirect draws, residency/streaming policy, or an
    occlusion hierarchy.
 8. Cold startup is currently expensive: the current cold CLI sample took
@@ -71,8 +74,10 @@ may promote them based on a world snapshot or a status-only receipt.
 
 1. Replace or augment the bounded showcase composition with a real
    authored/imported hero asset/material packet with normal, occlusion, and
-   emissive roles, then validate a textured close-range capture. The supplied
-   bad GLB remains a rejection control and is not promoted by this step.
+   emissive roles, then validate a textured close-range capture. The composed
+   world profile is only an intermediate coverage probe; it does not close
+   this requirement. The supplied bad GLB remains a rejection control and is
+   not promoted by this step.
 2. Replace the synthetic stress population with a denser authored scene or
    camera-cut profile, and separate instrumented timing from uninstrumented
    production timing before optimizing cold startup or choosing a frame budget.

@@ -2408,6 +2408,71 @@ pub fn lower_showcase_packet(
     seal_scene_packet(body)
 }
 
+/// Compose the authored world around the deterministic shrine probe. This is
+/// a quality-proof profile, not a new semantic world: the source world
+/// instances remain intact, the showcase geometry is explicitly named, and
+/// the packet stays bound to the same artifact and spatial-field digests.
+pub fn lower_world_showcase_packet(
+    packet: &GraphicsScenePacket,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    validate_scene_packet(packet)?;
+    let source_instances = packet.body.instances.clone();
+    let mut composed = lower_showcase_packet(packet)?;
+    let beacon = composed
+        .body
+        .instances
+        .iter()
+        .find(|instance| instance.instance_id == "objective-beacon")
+        .ok_or_else(|| {
+            GraphicsContractError::provenance(
+                "world showcase requires the lowered objective beacon instance",
+            )
+        })?;
+    let [beacon_x, beacon_y, beacon_z] = beacon.transform.translation_xyz_m;
+    let target = [beacon_x - 2.0, beacon_y + 3.0, beacon_z - 4.0];
+    let position = [beacon_x + 16.0, beacon_y + 10.0, beacon_z + 22.0];
+    let forward = normalize_vector3(
+        [
+            target[0] - position[0],
+            target[1] - position[1],
+            target[2] - position[2],
+        ],
+        "world showcase camera forward",
+    )?;
+    let right = normalize_vector3(
+        cross_vector3(forward, [0.0, 1.0, 0.0]),
+        "world showcase camera right",
+    )?;
+    let up = normalize_vector3(cross_vector3(right, forward), "world showcase camera up")?;
+
+    let mut authored_instances = source_instances
+        .into_iter()
+        .filter(|instance| instance.instance_id != "objective-beacon")
+        .collect::<Vec<_>>();
+    authored_instances.extend(composed.body.instances);
+    composed.body.instances = authored_instances;
+    composed.body.packet_id = format!("{}-world-showcase", packet.body.packet_id);
+    composed.body.camera = GraphicsCamera {
+        camera_id: "native-world-showcase".into(),
+        projection: CameraProjection::Perspective {
+            fov_y_degrees: 58.0,
+        },
+        position_xyz_m: position,
+        forward_xyz: forward,
+        up_xyz: up,
+        near_plane_m: 0.1,
+        far_plane_m: 256.0,
+        width_px: 768,
+        height_px: 512,
+    };
+    composed.body.capture.capture_id = format!("{}-world-showcase", packet.body.capture.capture_id);
+    composed.body.capture.camera_id = composed.body.camera.camera_id.clone();
+    composed.body.capture.width_px = composed.body.camera.width_px;
+    composed.body.capture.height_px = composed.body.camera.height_px;
+    composed.body.overlays.clear();
+    seal_scene_packet(composed.body)
+}
+
 /// Derive a deterministic, explicitly synthetic dense-scene packet for
 /// renderer scalability measurements. The added instances are not authored
 /// world content and must never be promoted as semantic evidence.

@@ -27,6 +27,22 @@ only the objective anchor plus explicitly named showcase instances. Rust seals
 and independently validates the resulting packet before the Julia/Lava worker
 sees it.
 
+## Composed-world stress profile
+
+`render-world-showcase-layout` keeps the authored Riverwatch obstacle and
+foliage instances alongside the shrine instead of retaining only the
+objective. The profile is useful for testing packet size, batch grouping,
+semantic importance accounting, shadow coverage, and a wider perspective
+camera. It is deliberately not promoted as the high-fidelity scene: the
+current crossed foliage remains sparse and the terrain is still a small
+diagnostic field. The first accepted v5 run carried 40 instances (30
+background, 9 landmark, 1 gameplay-critical), 28 draw calls, 4,656 submitted
+mesh vertices, and a deterministic 768x512 capture. That result closes a
+composition-path coverage gap while leaving the measured vegetation/terrain
+quality gap visible. The current camera-cut replay is bound to packet
+`sha256:7aabfd655afcb1473888c0f767c9b5630669f90bcea2cc213763b3bd71577539`
+and capture `sha256:03385a9a9f7912b2554ec3fc81e20f9e664271e33567249401a503324b72bbbd`.
+
 ## Frozen evidence
 
 The accepted v5-adapter replay used:

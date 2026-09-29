@@ -63,6 +63,14 @@ for the earlier 30-frame distribution. It confirms that the clearcoat buffer
 and shader path do not change the existing scene's draw topology or capture
 determinism.
 
+The composed-world camera-cut probe then rendered 40 real instances at 768x512
+with 28 draw calls, 4,656 submitted mesh vertices, 413,297 uploaded bytes, and
+5,843–7,482 distinct RGB colors across the two deterministic camera trials.
+Its latest promoted capture is
+`sha256:03385a9a9f7912b2554ec3fc81e20f9e664271e33567249401a503324b72bbbd`.
+This is coverage and stress evidence, not a claim that the current vegetation
+or terrain presentation has reached the desired high-end bar.
+
 The persistent-worker values are deliberately separated from the cold CLI
 value. The CLI includes Julia startup, capability probing, Lava initialization,
 shader compilation, packet transport, capture, and process teardown. It is a
@@ -200,6 +208,14 @@ cargo run -q -p wge-native-graphics-contract -- render-showcase-layout \
   "/mnt/d/Code Projects/WGE/graphics_lab" \
   "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
   /tmp/wge-riverwatch-native-showcase.ppm
+
+cargo run -q -p wge-native-graphics-contract -- render-world-showcase-layout \
+  crates/reference_runtime/examples/riverwatch.layout.json \
+  /home/mattc/.juliaup/bin/julia \
+  "/mnt/d/Code Projects/WGE/terrain_lab" \
+  "/mnt/d/Code Projects/WGE/graphics_lab" \
+  "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
+  /tmp/wge-riverwatch-native-world-showcase.ppm
 
 cargo run -q -p wge-native-graphics-contract -- benchmark-layout \
   crates/reference_runtime/examples/riverwatch.layout.json \

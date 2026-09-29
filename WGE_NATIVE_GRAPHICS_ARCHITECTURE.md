@@ -199,7 +199,9 @@ world or a claim of imported hero-asset parity.
 `render-showcase-layout` is the stronger visual inspection profile. Rust seals
 its extra geometry and material identities, binds them to the source world and
 spatial-field digests, and independently revalidates the resulting capture.
-The frozen evidence and remaining quality limits are recorded in
+`render-world-showcase-layout` composes that probe with the real Riverwatch
+instances for a wider packet, batching, and culling check. Neither profile is
+claimed as imported hero-asset parity. The frozen evidence and remaining quality limits are recorded in
 [`WGE_NATIVE_SHOWCASE.md`](WGE_NATIVE_SHOWCASE.md).
 
 ## Capability and fallback policy
