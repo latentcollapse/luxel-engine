@@ -1,7 +1,7 @@
 # WGE Native Graphics Architecture
 
-Status: supervised native Lava checkpoint green; high-quality renderer breadth
-and engine-neutral parity remain ahead.
+Status: supervised native Lava checkpoint green; bounded high-quality renderer
+breadth is proven and remaining production gaps are explicit.
 
 Date: 2026-09-28
 

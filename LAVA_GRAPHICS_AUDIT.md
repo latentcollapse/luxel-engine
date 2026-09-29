@@ -1,12 +1,12 @@
 # WGE Lava Graphics Audit
 
-Status: Phase 0 audit complete; supervised native Lava adapter checkpoint
-implemented and independently verified, including the first content-addressed
-scene-texture binding.
+Status: audit complete; supervised native Lava adapter checkpoint green through
+adapter v5, typed clearcoat lowering, composed-world coverage, and independent
+capture promotion.
 
 Date: 2026-09-28
 
-Audited WGE checkpoint: `f8fee90` (`harden Julia numerical and protocol contracts`)
+Audited WGE checkpoint: `10c3823` (`lift native foliage material readability`)
 
 Audited upstream:
 

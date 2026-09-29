@@ -1,6 +1,6 @@
 # WGE Native Graphics Benchmark
 
-Status: reproducible checkpoint, 2026-09-28
+Status: reproducible v5 native checkpoint, 2026-09-28
 
 This report measures the current engine-neutral Riverwatch vertical slice. It
 is a substrate and evidence report, not a claim of AAA visual parity. Unity is
@@ -250,10 +250,11 @@ failure in these runs.
 
 ## Regression evidence
 
-- Rust native graphics contract: 11 unit tests, clippy with `-D warnings`, and
-  the six-test native graphics suite passed.
-- Julia protocol worker: 7 worker protocol tests and 2 fake-rejection tests
-  passed.
+- Rust native graphics contract: 15 unit tests, clippy with `-D warnings`, and
+  the seven-test native graphics suite passed after the foliage-material
+  refresh; the promoted CLI captures are current.
+- Julia protocol worker: 7 worker protocol tests, 2 fake-rejection tests, and
+  3 degenerate-boundary tests passed.
 - Julia Lava adapter: 26 persistent GPU tests plus focused color, lighting,
   importance, capture, and camera test sets passed.
 - Reference runtime: 10 tests passed.
@@ -262,12 +263,11 @@ failure in these runs.
 ## Interpretation and next benchmark improvements
 
 This checkpoint establishes a repeatable native path, a measured 30-frame warm
-distribution, named CPU/GPU pass timing, a deterministic synthetic dense
-profile, a close-range material inspection profile, and a higher-resolution
-native showcase probe. It does not yet establish a production frame budget,
-traversal-aware culling behavior, or imported hero-asset quality. The next
-benchmark slice should add a denser authored scene or camera-cut profile,
-separate uninstrumented-vs-instrumented timings, and explicit
-upload/compilation/render/readback/promotion attribution. Quartz should be
-rerun after the foliage pass so both current reference scenes share the same
-graphics revision.
+distribution plus a current v5 refresh, named CPU/GPU pass timing, a
+deterministic synthetic dense profile, close-range and showcase material
+inspection profiles, and a composed authored-world camera-cut profile. It does
+not establish a production frame budget, meshlet/streaming/occlusion breadth,
+or imported hero-asset quality. Those remain measured gaps rather than hidden
+claims. A future renderer campaign should separate uninstrumented-vs-
+instrumented timings and add higher-fidelity terrain/vegetation, IBL, effects,
+and asset-import paths only behind new typed evidence.
