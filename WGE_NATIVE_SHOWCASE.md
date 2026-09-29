@@ -39,15 +39,15 @@ diagnostic field. The first accepted v5 run carried 40 instances (30
 background, 9 landmark, 1 gameplay-critical), 28 draw calls, 4,656 submitted
 mesh vertices, and a deterministic 768x512 capture. That result closes a
 composition-path coverage gap while leaving the measured vegetation/terrain
-quality gap visible. The current camera-cut replay is bound to packet
-`sha256:7aabfd655afcb1473888c0f767c9b5630669f90bcea2cc213763b3bd71577539`
-and capture `sha256:03385a9a9f7912b2554ec3fc81e20f9e664271e33567249401a503324b72bbbd`.
+quality gap visible. The current foliage-material camera-cut replay is bound to packet
+`sha256:28a91341960a2b67057a5266f0c538f0ca1510bd344d8f6508a56fba987cb2b5`
+and capture `sha256:e68989b5d54a73117fbdc4da7829a27ee3edb6802f67b3c5ca13a1880fd02e33`.
 
 ## Frozen evidence
 
 The accepted v5-adapter replay used:
 
-- packet: `sha256:6927c97d25e481833e4a594cfabdef319b132bbc69d5d7e06713fdaa43c17bc8`;
+- packet: `sha256:dac4f498b67e09239c9c2b34c794dc40c8d8d32832fe4f23cc9fee27cf96a983`;
 - capture: `sha256:e8f960e61145f44c5803a24cfe5e3c2d9b19ac6d4df0dc59c04a2e1dd2172b27`;
 - capture size: 640x480 RGBA8 sRGB;
 - adapter identity: `wge.lava-adapter/v5`;

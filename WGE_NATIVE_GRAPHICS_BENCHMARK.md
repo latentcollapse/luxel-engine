@@ -51,9 +51,9 @@ are recorded immediately above and below it.
 After the material contract moved to packet schema v6 and adapter revision v5,
 a fresh supervised five-warm-frame benchmark remained deterministic:
 
-- packet: `sha256:630b3657192b0088d9588f3b1aa9d21ba03fb03f6bd2bdc26ffeae3cb95aa553`;
-- cold wall time: `30.306 s`; warm wall p50/p95: `251.359/275.839 ms`;
-- warm renderer-frame p50: `46.522 ms`; warm GPU-frame p50: `57 µs`;
+- packet: `sha256:b7f7b3b8b8c3b4d0589f98bcea516f7f4c464bea7a45da000c06b0cda78e9a63`;
+- cold wall time: `26.890 s`; warm wall p50/p95: `292.807/321.597 ms`;
+- warm renderer-frame p50: `46.455 ms`; warm GPU-frame p50: `57 µs`;
 - draw calls: `15`; pipeline compilations: `10`; mesh vertices: `240`;
 - warm capture: `sha256:9e29309aa8a8afd1ea79e9a73278f8b0659b3efdd11ee8d6415a175df2c2f043`;
 - deterministic capture: `true` across cold and all warm frames.
@@ -65,9 +65,9 @@ determinism.
 
 The composed-world camera-cut probe then rendered 40 real instances at 768x512
 with 28 draw calls, 4,656 submitted mesh vertices, 413,297 uploaded bytes, and
-5,843–7,482 distinct RGB colors across the two deterministic camera trials.
+8,056 distinct RGB colors in the foliage-material camera trial.
 Its latest promoted capture is
-`sha256:03385a9a9f7912b2554ec3fc81e20f9e664271e33567249401a503324b72bbbd`.
+`sha256:e68989b5d54a73117fbdc4da7829a27ee3edb6802f67b3c5ca13a1880fd02e33`.
 This is coverage and stress evidence, not a claim that the current vegetation
 or terrain presentation has reached the desired high-end bar.
 

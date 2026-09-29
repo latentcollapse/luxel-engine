@@ -1550,9 +1550,9 @@ fn procedural_stone_albedo_texture() -> TextureReference {
 fn procedural_foliage_albedo_texture() -> TextureReference {
     procedural_material_albedo_texture(
         "riverwatch-foliage-albedo",
-        "procedural-riverwatch-foliage-albedo-v1",
-        [50, 104, 28],
-        [18, 53, 14],
+        "procedural-riverwatch-foliage-albedo-v2",
+        [74, 148, 44],
+        [30, 90, 20],
     )
 }
 
@@ -1848,7 +1848,7 @@ pub fn lower_reference_world(
     if !foliage_instances.is_empty() {
         materials.push(MaterialIntent {
             material_id: "foliage-default".into(),
-            base_color_rgba: [0.16, 0.34, 0.10, 1.0],
+            base_color_rgba: [0.38, 0.62, 0.18, 1.0],
             metallic: 0.0,
             roughness: 0.88,
             clearcoat: 0.0,
@@ -1861,7 +1861,7 @@ pub fn lower_reference_world(
             emissive_texture_id: emissive_texture_id.clone(),
             normal_scale: 0.22,
             occlusion_strength: 0.5,
-            emissive_factor_rgb: [0.0, 0.0, 0.0],
+            emissive_factor_rgb: [0.006, 0.020, 0.002],
         });
         meshes.push(foliage_mesh());
         instances.extend(foliage_instances);
