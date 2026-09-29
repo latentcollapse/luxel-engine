@@ -13,7 +13,7 @@ intentionally not part of this checkpoint.
   `11c7e31bdf62408d22bf379e9e59510f69d2103e`, Vulkan offscreen rendering.
 - Rust authority: `wge-native-graphics-contract` and the reference runtime.
 - World: `riverwatch.layout.json`, lowered to graphics packet
-  `wge.graphics-scene-packet/v5`.
+  `wge.graphics-scene-packet/v6`.
 - Native packet contents: deterministic terrain, one gameplay-critical
   obstacle instance in the Riverwatch fixture, thirty background foliage
   instances, route/spawn/
@@ -21,25 +21,47 @@ intentionally not part of this checkpoint.
   authored mesh UV0 channels, a semantic objective beacon with a distinct
   emissive role, directional shadow map, linear HDR resolve, and semantic
   visibility telemetry.
-- Material contract: `wge.graphics-scene-packet/v5`, adapter identity
-  `wge.lava-adapter/v3`, with digest-bound albedo, normal, roughness,
+- Material contract: `wge.graphics-scene-packet/v6`, adapter identity
+  `wge.lava-adapter/v5`, with digest-bound albedo, normal, roughness,
   occlusion, and emissive roles, including a beacon-specific albedo/emissive
-  pair.
+  pair plus bounded clearcoat response.
 - Capture: deterministic 320x240 PPM for the native Lava path; the Bevy
   inspection capture is 320x240 PNG.
 
-## Results
+## Results (v4 baseline before clearcoat)
+
+The original 30-frame distribution below was collected before the v6/v5
+clearcoat contract refresh. It remains useful as the longer historical timing
+baseline; the current adapter identity and a fresh deterministic smoke sample
+are recorded immediately above and below it.
 
 | Path | Wall time | Max RSS | Result | Notes |
 | --- | ---: | ---: | --- | --- |
 | Reference-runtime `build` | 3.49 s | 383,604 KiB | passed | 78 traversal steps; gameplay won; visual gate passed |
 | Reference-runtime `verify` | 0.75 s | — | passed | independently revalidated world, traversal, gameplay, and visual evidence hashes |
-| Native Lava `render-layout` (cold CLI) | 116.17 s | 1,693,752 KiB | passed | Rust lowered, supervised, rendered, measured, and promoted the v5 receipt |
+| Native Lava `render-layout` (cold CLI) | 116.17 s | 1,693,752 KiB | passed | Rust lowered, supervised, rendered, measured, and promoted the v4 receipt |
 | Persistent Lava worker, first frame | see formal cold sample | — | passed | lazy device/pipeline/scene initialization |
 | Persistent Lava worker, warm frames | 263.067 ms wall p50 | — | passed | 30 supervised warm samples; no new compilation; byte-identical capture digest |
 | Formal persistent benchmark (1 cold + 30 warm) | 28.965 s cold wall; 263.067 ms warm p50 | — | passed | Rust promotion round trip; warm wall p95 289.520 ms, p99 344.163 ms; deterministic captures |
 | Synthetic dense-foliage benchmark (1 cold + 2 warm; 512 added) | 27.352 s cold wall; 329.167 ms warm p50 | — | passed | 544 total instances, 542 synthetic background; benchmark-only scalability evidence |
 | Bevy native inspection capture (cold) | 155.52 s | 6,104,240 KiB | provenance passed | artifact revalidated; visual representation remains coarse and is not used as Lava parity evidence |
+
+### v5 clearcoat contract refresh
+
+After the material contract moved to packet schema v6 and adapter revision v5,
+a fresh supervised five-warm-frame benchmark remained deterministic:
+
+- packet: `sha256:630b3657192b0088d9588f3b1aa9d21ba03fb03f6bd2bdc26ffeae3cb95aa553`;
+- cold wall time: `30.306 s`; warm wall p50/p95: `251.359/275.839 ms`;
+- warm renderer-frame p50: `46.522 ms`; warm GPU-frame p50: `57 µs`;
+- draw calls: `15`; pipeline compilations: `10`; mesh vertices: `240`;
+- warm capture: `sha256:9e29309aa8a8afd1ea79e9a73278f8b0659b3efdd11ee8d6415a175df2c2f043`;
+- deterministic capture: `true` across cold and all warm frames.
+
+The five-frame sample is a contract-refresh smoke benchmark, not a replacement
+for the earlier 30-frame distribution. It confirms that the clearcoat buffer
+and shader path do not change the existing scene's draw topology or capture
+determinism.
 
 The persistent-worker values are deliberately separated from the cold CLI
 value. The CLI includes Julia startup, capability probing, Lava initialization,
@@ -83,7 +105,7 @@ The separate cold `render-layout` receipt reported an 11.972 s adapter
 interval and an 11.913 s graphics-pass GPU interval. Its process consumed
 1,931,268 KiB maximum resident memory including the Rust/Cargo CLI boundary.
 
-The current v3 adapter also reports named pass timings. The 30-frame overview
+The v4 adapter also reports named pass timings. The 30-frame overview
 warm p50s were 9 µs CPU preparation, 443 µs CPU scene raster, 58 µs CPU
 resolve, 46 µs CPU overlay, and 3,007 µs flush/readback. GPU pass p50s were
 1 µs preparation, 484 µs scene raster, 247 µs resolve, and 3 µs overlay. The

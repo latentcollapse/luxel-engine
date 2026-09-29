@@ -71,6 +71,54 @@ end
     @test ground[1:3] == lighting.ground[1:3]
 end
 
+@testset "clearcoat material lobe" begin
+    common = (
+        base_color=Vec4f(0.62f0, 0.48f0, 0.28f0, 1.0f0),
+        normal=Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0),
+        light_direction=Vec4f(0.0f0, -1.0f0, 0.0f0, 0.0f0),
+        light_color=Vec4f(1.0f0, 0.96f0, 0.88f0, 1.0f0),
+        light_intensity=1.5f0,
+        environment_top=Vec4f(0.06f0, 0.12f0, 0.24f0, 1.0f0),
+        environment_horizon=Vec4f(0.42f0, 0.48f0, 0.54f0, 1.0f0),
+        environment_ground=Vec4f(0.10f0, 0.12f0, 0.10f0, 1.0f0),
+        metallic=0.18f0,
+        roughness=0.38f0,
+        shadow_visibility=1.0f0,
+        view_direction=Vec4f(0.0f0, 1.0f0, 2.0f0, 0.0f0),
+        roughness_sample=0.72f0,
+        occlusion_sample=1.0f0,
+        occlusion_strength=0.6f0,
+        emissive_factor=Vec4f(0.0f0, 0.0f0, 0.0f0, 1.0f0),
+        emissive_sample=Vec4f(0.0f0, 0.0f0, 0.0f0, 1.0f0),
+    )
+    response(clearcoat, clearcoat_roughness) = LavaAdapter._material_response(
+        common.base_color,
+        common.normal,
+        common.light_direction,
+        common.light_color,
+        common.light_intensity,
+        common.environment_top,
+        common.environment_horizon,
+        common.environment_ground,
+        common.metallic,
+        common.roughness,
+        clearcoat,
+        clearcoat_roughness,
+        common.shadow_visibility,
+        common.view_direction,
+        common.roughness_sample,
+        common.occlusion_sample,
+        common.occlusion_strength,
+        common.emissive_factor,
+        common.emissive_sample,
+    )
+    without_coat = response(0.0f0, 0.25f0)
+    with_coat = response(1.0f0, 0.12f0)
+    @test with_coat[1] > without_coat[1]
+    @test with_coat[2] > without_coat[2]
+    @test all(isfinite, with_coat)
+end
+
 @testset "semantic importance dispatch" begin
     background = WGEGraphics.BackgroundImportance()
     landmark = WGEGraphics.LandmarkImportance()

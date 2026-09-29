@@ -6,7 +6,7 @@ using SHA
 
 export GraphicsScenePacket, ProtocolError, validate_scene_packet, packet_summary
 
-const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v5"
+const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v6"
 const MAX_PACKET_ELEMENTS = 16 * 1024 * 1024
 const MAX_CAPTURE_DIMENSION = 8192
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
@@ -58,6 +58,8 @@ struct MaterialPacket
     base_color_rgba::NTuple{4,Float32}
     metallic::Float32
     roughness::Float32
+    clearcoat::Float32
+    clearcoat_roughness::Float32
     alpha_mode::Symbol
     texture_ids::Vector{String}
     normal_texture_id::Union{Nothing,String}
@@ -436,6 +438,8 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
             "base_color_rgba",
             "metallic",
             "roughness",
+            "clearcoat",
+            "clearcoat_roughness",
             "alpha_mode",
             "texture_ids",
             "normal_scale",
@@ -464,6 +468,12 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
             throw(ProtocolError("malformed_packet", "material metallic is outside [0, 1]"))
         0.0f0 <= roughness <= 1.0f0 ||
             throw(ProtocolError("malformed_packet", "material roughness is outside [0, 1]"))
+        clearcoat = _finite_float32(object["clearcoat"], "material.clearcoat")
+        clearcoat_roughness = _finite_float32(object["clearcoat_roughness"], "material.clearcoat_roughness")
+        0.0f0 <= clearcoat <= 1.0f0 ||
+            throw(ProtocolError("malformed_packet", "material clearcoat is outside [0, 1]"))
+        0.045f0 <= clearcoat_roughness <= 1.0f0 ||
+            throw(ProtocolError("malformed_packet", "material clearcoat roughness is outside [0.045, 1]"))
         alpha_mode = Symbol(_string(object["alpha_mode"], "material.alpha_mode"))
         alpha_mode in (:opaque, :mask, :blend) ||
             throw(ProtocolError("unsupported", "material alpha mode is unsupported"))
@@ -493,6 +503,8 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
                 color,
                 metallic,
                 roughness,
+                clearcoat,
+                clearcoat_roughness,
                 alpha_mode,
                 texture_ids,
                 normal_texture_id,

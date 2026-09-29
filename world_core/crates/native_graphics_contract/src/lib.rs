@@ -12,10 +12,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
 
-pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v5";
+pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v6";
 pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
 pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
-pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v4";
+pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v5";
 pub const LAVA_BACKEND_ID: &str = "lava-vulkan";
 pub const LAVA_REVISION: &str = "11c7e31bdf62408d22bf379e9e59510f69d2103e";
 pub const MAX_PACKET_ELEMENTS: usize = 16 * 1024 * 1024;
@@ -247,6 +247,8 @@ pub struct MaterialIntent {
     pub base_color_rgba: [f32; 4],
     pub metallic: f32,
     pub roughness: f32,
+    pub clearcoat: f32,
+    pub clearcoat_roughness: f32,
     pub alpha_mode: AlphaMode,
     pub texture_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1785,6 +1787,8 @@ pub fn lower_reference_world(
         base_color_rgba: [0.29, 0.38, 0.28, 1.0],
         metallic: 0.0,
         roughness: 0.92,
+        clearcoat: 0.0,
+        clearcoat_roughness: 0.5,
         alpha_mode: AlphaMode::Opaque,
         texture_ids: vec![terrain_albedo_texture.texture_id.clone()],
         normal_texture_id: normal_texture_id.clone(),
@@ -1803,6 +1807,8 @@ pub fn lower_reference_world(
             base_color_rgba: [0.27, 0.24, 0.20, 1.0],
             metallic: 0.35,
             roughness: 0.78,
+            clearcoat: 0.12,
+            clearcoat_roughness: 0.32,
             alpha_mode: AlphaMode::Opaque,
             texture_ids: vec![stone_albedo_texture.texture_id.clone()],
             normal_texture_id: normal_texture_id.clone(),
@@ -1845,6 +1851,8 @@ pub fn lower_reference_world(
             base_color_rgba: [0.16, 0.34, 0.10, 1.0],
             metallic: 0.0,
             roughness: 0.88,
+            clearcoat: 0.0,
+            clearcoat_roughness: 0.5,
             alpha_mode: AlphaMode::Opaque,
             texture_ids: vec![foliage_albedo_texture.texture_id.clone()],
             normal_texture_id: normal_texture_id.clone(),
@@ -1863,6 +1871,8 @@ pub fn lower_reference_world(
         base_color_rgba: [0.24, 0.29, 0.34, 1.0],
         metallic: 0.45,
         roughness: 0.48,
+        clearcoat: 0.35,
+        clearcoat_roughness: 0.18,
         alpha_mode: AlphaMode::Opaque,
         texture_ids: vec![beacon_albedo_texture.texture_id.clone()],
         normal_texture_id: normal_texture_id.clone(),
@@ -2188,6 +2198,8 @@ pub fn lower_showcase_packet(
             base_color_rgba: [0.80, 0.84, 0.88, 1.0],
             metallic: 0.08,
             roughness: 0.58,
+            clearcoat: 0.18,
+            clearcoat_roughness: 0.24,
             alpha_mode: AlphaMode::Opaque,
             texture_ids: vec![showcase_stone_texture.texture_id.clone()],
             normal_texture_id: common_normal.clone(),
@@ -2203,6 +2215,8 @@ pub fn lower_showcase_packet(
             base_color_rgba: [0.82, 0.38, 0.08, 1.0],
             metallic: 0.92,
             roughness: 0.22,
+            clearcoat: 0.32,
+            clearcoat_roughness: 0.12,
             alpha_mode: AlphaMode::Opaque,
             texture_ids: vec![showcase_metal_texture.texture_id.clone()],
             normal_texture_id: common_normal.clone(),
@@ -2218,6 +2232,8 @@ pub fn lower_showcase_packet(
             base_color_rgba: [0.30, 0.72, 0.85, 1.0],
             metallic: 0.28,
             roughness: 0.30,
+            clearcoat: 0.08,
+            clearcoat_roughness: 0.20,
             alpha_mode: AlphaMode::Opaque,
             texture_ids: vec![showcase_glow_texture.texture_id.clone()],
             normal_texture_id: common_normal,
@@ -2631,6 +2647,15 @@ fn validate_material(material: &MaterialIntent) -> Result<(), GraphicsContractEr
     {
         return Err(GraphicsContractError::malformed(
             "material metallic and roughness must be in [0, 1]",
+        ));
+    }
+    if !material.clearcoat.is_finite()
+        || !material.clearcoat_roughness.is_finite()
+        || !(0.0..=1.0).contains(&material.clearcoat)
+        || !(0.045..=1.0).contains(&material.clearcoat_roughness)
+    {
+        return Err(GraphicsContractError::malformed(
+            "material clearcoat and clearcoat roughness are outside their bounds",
         ));
     }
     if !material.normal_scale.is_finite()
@@ -3325,6 +3350,8 @@ mod tests {
                 base_color_rgba: [0.3, 0.4, 0.3, 1.0],
                 metallic: 0.0,
                 roughness: 0.9,
+                clearcoat: 0.0,
+                clearcoat_roughness: 0.5,
                 alpha_mode: AlphaMode::Opaque,
                 texture_ids: Vec::new(),
                 normal_texture_id: None,
@@ -3429,6 +3456,21 @@ mod tests {
         let mut packet = packet();
         packet.body.materials[0].normal_texture_id = Some("missing-normal".into());
         assert!(validate_scene_packet(&packet).is_err());
+    }
+
+    #[test]
+    fn clearcoat_contract_rejects_non_finite_and_out_of_range_values() {
+        let mut body = packet().body;
+        body.materials[0].clearcoat = f32::NAN;
+        assert!(seal_scene_packet(body).is_err());
+
+        let mut body = packet().body;
+        body.materials[0].clearcoat = 1.01;
+        assert!(seal_scene_packet(body).is_err());
+
+        let mut body = packet().body;
+        body.materials[0].clearcoat_roughness = 0.02;
+        assert!(seal_scene_packet(body).is_err());
     }
 
     #[test]

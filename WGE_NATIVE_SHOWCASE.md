@@ -29,15 +29,16 @@ sees it.
 
 ## Frozen evidence
 
-The accepted replay used:
+The accepted v5-adapter replay used:
 
-- packet: `sha256:362d3726ffe7a74a6fb9ef2ef5585d350948d25235153367ed3344271a330424`;
-- capture: `sha256:468e0612d1fe6e8ef09abd6329ed0ee984698a41acb67ed04cb5a24cb278ca3e`;
+- packet: `sha256:6927c97d25e481833e4a594cfabdef319b132bbc69d5d7e06713fdaa43c17bc8`;
+- capture: `sha256:e8f960e61145f44c5803a24cfe5e3c2d9b19ac6d4df0dc59c04a2e1dd2172b27`;
 - capture size: 640x480 RGBA8 sRGB;
-- Rust measurements: luminance standard deviation `0.1336471737`,
-  `12,638` distinct RGB colors;
+- adapter identity: `wge.lava-adapter/v5`;
+- Rust measurements: luminance standard deviation `0.1382377132`,
+  `12,636` distinct RGB colors;
 - promoted telemetry: 24 draw calls, 9 visible landmark instances, 4,608
-  submitted mesh vertices, 399,665 uploaded bytes, and 1,229,824 readback
+  submitted mesh vertices, 399,953 uploaded bytes, and 1,229,824 readback
   bytes.
 
 A fresh-process replay produced byte-identical PPM bytes and the same capture
@@ -49,7 +50,7 @@ used as evidence.
 
 This is a real native PBR-style material/rendering probe: multiple typed
 material identities, albedo and role textures, normal perturbation, scalar
-metalness/roughness/occlusion, emissive response, directional shadows, camera
+metalness/roughness/occlusion/clearcoat, emissive response, directional shadows, camera
 perspective, depth-tested instancing, deterministic HDR resolve, and
 authority-owned visual promotion all cross the Rust/Julia/Lava boundary.
 

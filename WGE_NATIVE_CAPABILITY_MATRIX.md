@@ -9,17 +9,17 @@ complete for a commercial game.
 
 | Capability | Status | Evidence / boundary |
 | --- | --- | --- |
-| Rust-owned graphics packet | green | Closed `wge.graphics-scene-packet/v5`; exact-key parsing and Rust lowering |
+| Rust-owned graphics packet | green | Closed `wge.graphics-scene-packet/v6`; exact-key parsing and Rust lowering |
 | Rust receipt promotion | green | Native supervisor independently validates packet, backend identity, capture, measurements, and telemetry |
 | Persistent Julia process | green | Typed worker protocol and persistent `LavaBackend` resource caches |
 | Pinned Lava/Vulkan device | green | Lava commit and device identity are bound into the native receipt |
 | Offscreen color/depth rendering | green | Real Lava framebuffer, depth attachment, readback, and deterministic PPM capture |
 | sRGB texture handling | green | Typed RGBA8 upload, exact transfer conversion, and focused Julia tests |
 | Terrain geometry | green | Rust-owned world heightfield lowered to deterministic GPU mesh |
-| Authored mesh UV0 | green | Closed v5 packet channel; Rust cardinality/finite validation and typed Lava upload |
+| Authored mesh UV0 | green | Closed v6 packet channel; Rust cardinality/finite validation and typed Lava upload |
 | Semantic objective landmark | green | Rust-lowered octagonal beacon with distinct albedo/emissive roles and landmark telemetry |
 | Close-range perspective inspection | green | Typed objective-close packet, real Lava capture, Rust promotion, and deterministic digest check |
-| Opaque mesh materials | partial | Bounded albedo, metallic, roughness, Cook–Torrance-style response, and role-sampled surface maps; richer graph semantics remain |
+| Opaque mesh materials | partial | Bounded albedo, metallic, roughness, clearcoat, Cook–Torrance-style response, and role-sampled surface maps; richer graph semantics remain |
 | Normal/roughness/occlusion/emissive material roles | green | Rust/Julia role-typed IDs, color-space validation, digest-bound procedural maps, and Lava descriptor bindings |
 | Independent material profiles | green | Riverwatch lowers distinct terrain, stone, and foliage albedo identities; each mesh batch resolves its own typed descriptor set |
 | Directional lighting | green | Typed light intent and Lava shader lowering |

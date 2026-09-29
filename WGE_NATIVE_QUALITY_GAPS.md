@@ -17,9 +17,9 @@ for an Elden Ring-level presentation.
    perspective rendering, but it is still a bounded authored probe rather than
    imported hero-asset richness or production environment breadth.
 2. The canonical material contract now has digest-bound albedo, normal,
-   roughness, occlusion, and emissive roles plus scalar controls. Alpha,
-   clearcoat, transmission, texture transforms, mip policy, and material-graph
-   identity are not yet represented.
+   roughness, occlusion, and emissive roles plus scalar metallic/roughness and
+   clearcoat controls. Alpha, transmission, texture transforms, mip policy, and
+   material-graph identity are not yet represented.
 3. Lighting uses one directional shadow map with fixed resolution and PCF.
    Cascades, contact shadows, richer soft-shadow filtering, many-light clustering,
    prefiltered image-based lighting, reflection probes, and robust atmospheric

@@ -63,7 +63,7 @@ set.
 
 ## Typed packet boundary
 
-The current Rust contract is `wge.graphics-scene-packet/v5`. It is a closed,
+The current Rust contract is `wge.graphics-scene-packet/v6`. It is a closed,
 `deny_unknown_fields` structure with a canonical body digest. Its shape is:
 
 ```text
@@ -354,7 +354,8 @@ typed culling margin and is independently balanced in the promoted telemetry.
 The payload is dimension-checked and digest-checked in
 both Rust and Julia before Lava creates sampler bindings. Point lights and
 blend/mask materials are typed and validated at the boundary but rejected by
-the adapter until their semantics are implemented. Metallic/roughness response,
+the adapter until their semantics are implemented. Metallic/roughness and
+bounded clearcoat response,
 role-sampled normal/roughness/
 occlusion/emissive maps, and orientation-aware analytic
 sky/ground environment lighting are supported by the bounded material path,

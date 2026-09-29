@@ -18,7 +18,7 @@ export AdapterError,
     render_texture_probe,
     render_scene
 
-const ADAPTER_REVISION = "wge.lava-adapter/v4"
+const ADAPTER_REVISION = "wge.lava-adapter/v5"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 const VULKAN_REVISION = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"
 const VULKAN_CORE_REVISION = "1d02829e8fa92da430d879db4dd7bf564a872035"
@@ -56,6 +56,7 @@ struct MeshBatchResources
     scales::Lava.LavaArray{Vec4f,1}
     colors::Lava.LavaArray{Vec4f,1}
     material_parameters::Lava.LavaArray{Vec4f,1}
+    surface_parameters::Lava.LavaArray{Vec4f,1}
     emissive_parameters::Lava.LavaArray{Vec4f,1}
     vertex_count::Int
     instance_count::Int
@@ -373,6 +374,8 @@ function _material_response(
     environment_ground::Vec4f,
     metallic::Float32,
     roughness::Float32,
+    clearcoat::Float32,
+    clearcoat_roughness::Float32,
     shadow_visibility::Float32,
     view_direction::Vec4f,
     roughness_sample::Float32,
@@ -427,6 +430,28 @@ function _material_response(
     fresnel_blue = f0_blue + (1.0f0 - f0_blue) * fresnel_power
     specular_denominator = 4.0f0 * normal_view * normal_light + 0.0001f0
     specular_scale = distribution * geometry / specular_denominator
+    coat = clamp(clearcoat, 0.0f0, 1.0f0)
+    coat_roughness = clamp(clearcoat_roughness, 0.045f0, 1.0f0)
+    coat_alpha = coat_roughness * coat_roughness
+    coat_alpha_squared = coat_alpha * coat_alpha
+    coat_distribution_denominator = normal_half_squared *
+        (coat_alpha_squared - 1.0f0) + 1.0f0
+    coat_distribution = coat_alpha_squared /
+        (3.1415927f0 * coat_distribution_denominator * coat_distribution_denominator + 0.0001f0)
+    coat_roughness_plus_one = coat_roughness + 1.0f0
+    coat_geometry_k = coat_roughness_plus_one * coat_roughness_plus_one * 0.125f0
+    coat_geometry_view = normal_view /
+        (normal_view * (1.0f0 - coat_geometry_k) + coat_geometry_k)
+    coat_geometry_light = normal_light /
+        (normal_light * (1.0f0 - coat_geometry_k) + coat_geometry_k)
+    coat_geometry = coat_geometry_view * coat_geometry_light
+    coat_fresnel_power = 1.0f0 - view_half
+    coat_fresnel_power *= coat_fresnel_power
+    coat_fresnel_power *= coat_fresnel_power
+    coat_fresnel_power *= 1.0f0 - view_half
+    coat_fresnel = 0.04f0 + (1.0f0 - 0.04f0) * coat_fresnel_power
+    coat_specular_scale = coat * coat_fresnel * coat_distribution * coat_geometry /
+        specular_denominator
     diffuse_scale = (1.0f0 - metalness) * 0.31830987f0
     direct_scale = light_intensity * normal_light * shadow_visibility
     environment_diffuse = _environment_color(
@@ -448,6 +473,8 @@ function _material_response(
     occlusion = 1.0f0 -
         clamp(occlusion_strength, 0.0f0, 1.0f0) *
         (1.0f0 - clamp(occlusion_sample, 0.0f0, 1.0f0))
+    coat_environment_scale = coat * coat_fresnel *
+        (0.10f0 + 0.16f0 * (1.0f0 - coat_roughness)) * occlusion
     ambient_diffuse_scale = (1.0f0 - metalness) * 0.52f0 * occlusion
     ambient_specular_scale = (0.08f0 + 0.16f0 * (1.0f0 - surface_roughness)) * occlusion
     emissive_red = emissive_factor[1] * emissive_sample[1]
@@ -456,22 +483,28 @@ function _material_response(
     red = (
         (base_color[1] * diffuse_scale + fresnel_red * specular_scale) *
                 light_color[1] * direct_scale +
+            coat_specular_scale * light_color[1] * direct_scale +
             base_color[1] * ambient_diffuse_scale * environment_diffuse[1] +
             fresnel_red * ambient_specular_scale * environment_specular[1] +
+            coat_environment_scale * environment_specular[1] +
             emissive_red
     )
     green = (
         (base_color[2] * diffuse_scale + fresnel_green * specular_scale) *
                 light_color[2] * direct_scale +
+            coat_specular_scale * light_color[2] * direct_scale +
             base_color[2] * ambient_diffuse_scale * environment_diffuse[2] +
             fresnel_green * ambient_specular_scale * environment_specular[2] +
+            coat_environment_scale * environment_specular[2] +
             emissive_green
     )
     blue = (
         (base_color[3] * diffuse_scale + fresnel_blue * specular_scale) *
                 light_color[3] * direct_scale +
+            coat_specular_scale * light_color[3] * direct_scale +
             base_color[3] * ambient_diffuse_scale * environment_diffuse[3] +
             fresnel_blue * ambient_specular_scale * environment_specular[3] +
+            coat_environment_scale * environment_specular[3] +
             emissive_blue
     )
     return Vec4f(max(red, 0.0f0), max(green, 0.0f0), max(blue, 0.0f0), base_color[4])
@@ -618,6 +651,8 @@ function _terrain_vertex(
     base_color::Vec4f,
     metallic::Float32,
     roughness::Float32,
+    clearcoat::Float32,
+    clearcoat_roughness::Float32,
     normal_scale::Float32,
     occlusion_strength::Float32,
     light_direction::Vec4f,
@@ -698,6 +733,7 @@ function _terrain_vertex(
         ),
     )
     Lava.gfx_output(14, emissive_factor)
+    Lava.gfx_output(15, Vec4f(clearcoat, clearcoat_roughness, 0.0f0, 0.0f0))
     return nothing
 end
 
@@ -710,6 +746,7 @@ function _mesh_vertex(
     scales::Lava.LavaDeviceArray{Vec4f,1},
     colors::Lava.LavaDeviceArray{Vec4f,1},
     material_parameters::Lava.LavaDeviceArray{Vec4f,1},
+    surface_parameters::Lava.LavaDeviceArray{Vec4f,1},
     emissive_parameters::Lava.LavaDeviceArray{Vec4f,1},
     camera_position::Vec4f,
     camera_right::Vec4f,
@@ -795,6 +832,7 @@ function _mesh_vertex(
         ),
     )
     Lava.gfx_output(14, emissive_parameters[instance_id])
+    Lava.gfx_output(15, surface_parameters[instance_id])
     return nothing
 end
 
@@ -973,6 +1011,7 @@ function _terrain_fragment()
     camera_position = Lava.gfx_input(Vec4f, 12)
     light_space = Lava.gfx_input(Vec4f, 13)
     material_emissive = Lava.gfx_input(Vec4f, 14)
+    surface_parameters = Lava.gfx_input(Vec4f, 15)
     light_intensity = lighting_parameters[1]
     fog_density = lighting_parameters[2]
     exposure = lighting_parameters[3]
@@ -997,6 +1036,8 @@ function _terrain_fragment()
         environment_ground,
         material[1],
         material[2],
+        surface_parameters[1],
+        surface_parameters[2],
         _shadow_visibility(light_space),
         view_direction,
         roughness_sample,
@@ -2232,6 +2273,9 @@ function _mesh_resources!(
         material_parameters = Vec4f[
             Vec4f(material.metallic, material.roughness, material.normal_scale, material.occlusion_strength) for _ in batch_instances
         ]
+        surface_parameters = Vec4f[
+            Vec4f(material.clearcoat, material.clearcoat_roughness, 0.0f0, 0.0f0) for _ in batch_instances
+        ]
         emissive_parameters = Vec4f[
             Vec4f(material.emissive_factor_rgb..., 1.0f0) for _ in batch_instances
         ]
@@ -2243,12 +2287,14 @@ function _mesh_resources!(
         gpu_scales = Lava.LavaArray{Vec4f,1}(scales; bq=state.queue)
         gpu_colors = Lava.LavaArray{Vec4f,1}(colors; bq=state.queue)
         gpu_material_parameters = Lava.LavaArray{Vec4f,1}(material_parameters; bq=state.queue)
+        gpu_surface_parameters = Lava.LavaArray{Vec4f,1}(surface_parameters; bq=state.queue)
         gpu_emissive_parameters = Lava.LavaArray{Vec4f,1}(emissive_parameters; bq=state.queue)
         state.upload_bytes += UInt64(
             sizeof(Vec4f) *
                 (length(positions) + length(normals) + length(translations) +
                 length(rotations) + length(scales) + length(colors) +
-                length(material_parameters) + length(emissive_parameters)),
+                length(material_parameters) + length(surface_parameters) +
+                length(emissive_parameters)),
         )
         state.upload_bytes += UInt64(sizeof(Vec2f) * length(uvs))
         push!(
@@ -2263,6 +2309,7 @@ function _mesh_resources!(
                 gpu_scales,
                 gpu_colors,
                 gpu_material_parameters,
+                gpu_surface_parameters,
                 gpu_emissive_parameters,
                 length(positions),
                 length(batch_instances),
@@ -2553,6 +2600,8 @@ function _render_scene(
             Vec4f(material.base_color_rgba...),
             material.metallic,
             material.roughness,
+            material.clearcoat,
+            material.clearcoat_roughness,
             material.normal_scale,
             material.occlusion_strength,
             lighting.direction,
@@ -2600,6 +2649,7 @@ function _render_scene(
                     batch.scales,
                     batch.colors,
                     batch.material_parameters,
+                    batch.surface_parameters,
                     batch.emissive_parameters,
                     camera_frame.position,
                     camera_frame.right,

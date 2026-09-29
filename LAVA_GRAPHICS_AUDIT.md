@@ -77,7 +77,7 @@ our own reproducible probes and Rust-owned receipts.
 | Offscreen rendering | `LavaFramebuffer`, color/depth attachments, readback, blit, deterministic-sized target support | EXISTS UPSTREAM | Use offscreen targets for WGE captures; window presentation remains optional tooling. |
 | Textures, samplers, descriptors | `LavaTexture2D`, `LavaSampler`, texture bindings and descriptor setup | EXISTS UPSTREAM | Low-level binding exists; WGE still needs canonical texture/material asset contracts, color space, mip, streaming, and provenance policy. |
 | Raster state | depth, blending, culling, topology, attachments, viewport/scissor-related state | EXISTS UPSTREAM | Sufficient primitives for a first forward/deferred experiment; WGE render intent is missing. |
-| PBR/material graph | WGE now has a narrow typed opaque material intent with bounded metallic/roughness response, role-specific content-addressed albedo/normal/roughness/occlusion/emissive maps, and a Cook–Torrance-style Lava lowering; it is not a complete production graph | PARTIAL | Keep the bounded material contract canonical while adding richer graph semantics and production asset policy behind separate evidence. Do not make Hikari’s scene representation canonical. |
+| PBR/material graph | WGE now has a narrow typed opaque material intent with bounded metallic/roughness and clearcoat response, role-specific content-addressed albedo/normal/roughness/occlusion/emissive maps, and a Cook–Torrance-style Lava lowering; it is not a complete production graph | PARTIAL | Keep the bounded material contract canonical while adding richer graph semantics and production asset policy behind separate evidence. Do not make Hikari’s scene representation canonical. |
 | Lights, shadows, IBL, HDR, AA, fog | typed directional-light/environment intent, orientation-aware analytic sky/horizon/ground lighting, one deterministic directional shadow map, a linear-HDR scene target with 2× spatial resolve, and tone-mapped fog now exist in the native adapter | PARTIAL | Keep the fixed shadow/resolve profile behind the authority boundary; cascades/contact shadows, prefiltered image-based lighting, HDR history, temporal AA, and richer atmosphere remain quality-gap work. |
 | Terrain, foliage, decals, particles, water, post-processing | certified terrain now renders with deterministic opaque background foliage cross-mesh instances and Rust-checked instancing; decals, particles, water, and broad post-processing remain absent | PARTIAL | Keep the bounded foliage proof behind typed semantic importance and telemetry; add density/alpha/LOD/ecology systems only with their own evidence. |
 | GPU scene, culling, LOD, meshlets, streaming | Lava-backed instanced batches now consume closed WGE importance hints (`background`, `landmark`, `gameplay_critical`), use typed culling margins, and report per-class visibility/culling totals; LOD/meshlets/residency/streaming remain absent | PARTIAL | Keep semantic visibility and capture priorities Rust-owned; add LOD/residency only through the same typed packet and independently balanced telemetry. |
@@ -280,7 +280,7 @@ the vertex path. The adapter rejects material features it does not yet
 implement (multiple texture sets and non-opaque alpha modes) instead of
 silently discarding those intents. The current supported render profile is
 therefore explicit: one opaque material family with bounded
-metallic/roughness response, role-specific content-addressed inline RGBA8
+metallic/roughness and clearcoat response, role-specific content-addressed inline RGBA8
 albedo/normal/roughness/occlusion/emissive payloads, independent per-material
 descriptor sets, one directional light, typed sky/horizon/ground/fog/exposure intent,
 orientation-aware analytic environment lighting, camera-aware
@@ -324,7 +324,7 @@ new frame can be promoted. The adversarial timeout/recovery test uses a worker
 that emits a valid ready message and then stops responding, proving that a
 blocked graphics process cannot silently become an unbounded Rust call. These
 contract and shader-basis corrections are recorded as adapter revision
-`wge.lava-adapter/v4`; v3 benchmark receipts remain historical evidence, not
+`wge.lava-adapter/v5`; v4 benchmark receipts remain historical evidence, not
 current renderer identity.
 
 The native visual gate is authority-owned rather than appearance-shaped: Rust

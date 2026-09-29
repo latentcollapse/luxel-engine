@@ -31,7 +31,7 @@ end
         handle(
             JSON3.write((
                 op="validate_packet",
-                packet=(body=(schema_version="wge.graphics-scene-packet/v5",), packet_sha256="pass"),
+                packet=(body=(schema_version="wge.graphics-scene-packet/v6",), packet_sha256="pass"),
             )),
         ),
     )
