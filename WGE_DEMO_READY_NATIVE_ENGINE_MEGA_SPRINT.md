@@ -489,6 +489,25 @@ NativeGameSession
 
 #### C3.1 — Native session contract
 
+Status: **presented-session slice implemented and green** (2026-10-02,
+commit `3933c24`). Rust owns a typed `PresentedGraphicsSession`
+(`native_graphics_contract/src/session.rs`): validated session request,
+world-artifact binding fail-closed on divergence, a Rust-owned camera that
+walks deterministic waypoints with typed normalization, and per-batch frame
+reports with percentile helpers. The supervisor accepts camera-variant
+re-sealings as authorized projections, so moving the camera never invalidates
+GPU resource caches keyed on packet content. The presented loop never carries
+evidence: Tier-A capture re-seals the current camera once and promotes through
+the existing offscreen authority path (`capture_and_promote`). The Julia side
+presents the exact certified composite — scene passes, shared resolve+overlay
+(`_composite_capture!`), readback, GPU upload, `Lava.blit!` into the swapchain
+— so the window cannot diverge from promoted evidence by construction. Worker
+gains `open_window` / `render_window` / `close_window` ops; commit
+`3933c24`; handoff is
+[`WGE_C3_PRESENTED_SESSION_HANDOFF.md`](WGE_C3_PRESENTED_SESSION_HANDOFF.md).
+Still open in C3.1: input sampling, fixed-step simulation tick,
+checkpoint/restore, and the full `NativeGameSession` surface (C3.2+).
+
 Define input, fixed-step time, simulation/render separation, checkpoint/restore, restart, session identity, and telemetry. Reuse the existing grounded kinematic seam; do not widen to full rigid-body physics for this demo.
 
 #### C3.2 — Input and third-person camera
@@ -496,6 +515,16 @@ Define input, fixed-step time, simulation/render separation, checkpoint/restore,
 Add keyboard/mouse/gamepad abstraction, player movement, collision-aware third-person camera, camera intent, and deterministic input trace capture.
 
 #### C3.3 — Continuous present and frame pacing
+
+Status: **present loop implemented and green** (2026-10-02, commit
+`3933c24`, see C3.1 above). The window/swapchain path is promoted into the
+session: persistent `RenderWindow` on the shared device context, GLFW event
+pumping, acquire → certified composite → present per frame, honest
+`window_closed` handling, and steady-state frame-time telemetry
+(`frame_times_us`, `window_presented_frames`). No second renderer exists — the
+presented path records the same scene passes and the same shared
+resolve+overlay composite as the offscreen authority path. Still open: frame
+pacing policy and live capability reporting.
 
 Promote the existing window/swapchain path into the native session. Add frame pacing and live capability reporting. Do not create a second renderer.
 

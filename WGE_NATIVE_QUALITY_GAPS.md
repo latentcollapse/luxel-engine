@@ -130,9 +130,12 @@ open.
    Rust reference runtime completes the 78-step traversal and wins gameplay.
    The bounded offscreen live-session supervisor now binds exact packet and
    capability identities and records Tier B attestations; a one-frame
-   RenderWindow/swapchain/present capability probe is also green. Lava is not
-   yet the renderer attached to a persistent live window/present plus native
-   input/update loop.
+   RenderWindow/swapchain/present capability probe is also green. The C3
+   presented-session slice (2026-10-02, commit `3933c24`) now keeps a
+   persistent window presenting the certified composite continuously, with a
+   Rust-owned camera and Tier-A evidence sampled through the offscreen
+   authority path; input, simulation tick, and frame pacing are still open, so
+   Lava is attached to a present loop but not yet to a native input/update loop.
 10. Bevy produced a provenance-valid native inspection PNG, but its current
     capture is flat/coarse for this packet. It is retained as a regression and
     inspection oracle; it is not presented as visual parity evidence for Lava.
@@ -181,8 +184,9 @@ current WGE scope.
 5. Attach the renderer to a reference gameplay update/input loop and integrate
    the live-evidence session contract. The traversal stepping seam, incremental
    gameplay session, bounded offscreen supervisor, and grounded kinematic contact
-   seam are now deterministic and snapshot-restorable; persistent window/present
-   integration, full dynamics, and richer ability/NPC state are still open.
+   seam are now deterministic and snapshot-restorable; the persistent window
+   present loop is now green (C3 presented-session slice), while input, full
+   dynamics, frame pacing, and richer ability/NPC state are still open.
 6. Add LOD/residency/streaming and effects systems only when their semantic
    ownership and receipt contracts are clear.
 

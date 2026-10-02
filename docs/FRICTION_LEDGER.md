@@ -101,6 +101,133 @@ The split preserves the expensive tests; it does not weaken or relabel them.
 The next performance campaign must reduce the cold path rather than making the
 GPU evidence optional in a final certification run.
 
+### FR-0009 — Lava window-loop predicate is a throwing assertion
+
+```yaml
+friction_id: FR-0009
+status: reproduced
+first_seen: 2026-10-02
+last_seen: 2026-10-02
+campaign: C3
+operation: continuous presented-frame loop
+symptom: "`Lava.checkopen(win) || break` exits the loop on every iteration because `checkopen` returns nothing and throws only on a destroyed handle — it is an assertion, not a predicate"
+repeated_behavior: an agent writing the natural loop guard silently presents zero frames; the error mode is an empty result, not an exception
+responsible_layer: provider
+workaround: loop on `Base.isopen(win)` (handle alive and no close request); adapter now encodes this in `render_window_frames!` with a comment at the call site
+proposed_improvement: Lava could name the predicate (`isopen`) and the assertion differently so autocomplete and reading the signature disambiguate them; WGE-side, the presented-session handoff documents the distinction for the pinned Lava revision
+expected_leverage: diagnosis
+authority_impact: none
+before_metrics:
+  frames_presented: 0
+after_metrics:
+  frames_presented: 3
+  probe: /tmp/c3_window_probe.jl (checkopen→isopen; window session open→present→close)
+tests:
+  - graphics_lab/test/lava_adapter.jl
+  - world_core native_graphics_contract::presented_session (both tests)
+decision: keep
+```
+
+### FR-0010 — offscreen/window `draw!` kwarg asymmetry fails as MethodError
+
+```yaml
+friction_id: FR-0010
+status: reproduced
+first_seen: 2026-10-02
+last_seen: 2026-10-02
+campaign: C3
+operation: drawing to a presented window target
+symptom: "`draw!` to a `WindowTarget` rejects `descriptor_set_layout`/`descriptor_set`/`depth_clear`/`depth` kwargs with a MethodError that names neither the offscreen/window asymmetry nor the next legal action (window targets have no depth attachment and no descriptor sets)"
+repeated_behavior: an agent reusing the working offscreen resolve draw against the window hits a MethodError and must read Lava's `graphics/api.jl` signatures to learn the boundary
+responsible_layer: provider
+workaround: the presented path composites into the capture framebuffer (full descriptor/depth machinery) and reaches the swapchain through `Lava.blit!` of a window-sized buffer — the window never needs a descriptor-bearing draw
+proposed_improvement: Lava could give the window-target method a clear "no descriptors/depth on window targets" error; the C3 handoff records the asymmetry for the pinned revision
+expected_leverage: diagnosis
+authority_impact: none
+before_metrics:
+  failure_mode: MethodError drawing resolve directly to WindowTarget
+after_metrics:
+  presented_frames: "composite→readback→upload→blit→present path presents frames and the composite is byte-identical to the certified capture source"
+tests:
+  - world_core native_graphics_contract::presented_session_presents_frames_and_samples_tier_a_evidence
+decision: keep
+```
+
+### FR-0011 — mid-batch readback silently invalidates the pending present
+
+```yaml
+friction_id: FR-0011
+status: reproduced
+first_seen: 2026-10-02
+last_seen: 2026-10-02
+campaign: C3
+operation: sampling presented-frame evidence without breaking the frame
+symptom: "a readback recorded mid-frame flushes the active batch (`flush!` sets `bq.active_batch = nothing`), so the subsequent `present_frame!` throws `called without an active recording batch`; the error names the symptom but not the ordering rule"
+repeated_behavior: an agent naturally tries to read back the presented image for evidence and breaks the batch the present needs
+responsible_layer: provider
+workaround: presented frames carry no capture; Tier-A evidence is sampled through the independent offscreen promotion path (`capture_and_promote`), and the window loop reads back only the offscreen capture framebuffer before opening the present batch — `present_frame!` is the submit that adds the acquire-semaphore wait, so that ordering is safe
+proposed_improvement: Lava could document the readback/flush/present ordering invariant next to `readback_window`'s warning; the C3 handoff records the safe order for the pinned revision
+expected_leverage: reliability
+authority_impact: none
+before_metrics:
+  failure_mode: present_frame! without an active recording batch
+after_metrics:
+  evidence_model: "live frames never carry un-promoted evidence; Tier-A stays Rust-owned through the offscreen authority path"
+tests:
+  - world_core native_graphics_contract::presented_session_presents_frames_and_samples_tier_a_evidence
+decision: keep
+```
+
+### FR-0012 — `cargo test` accepts one positional filter for long GPU suites
+
+```yaml
+friction_id: FR-0012
+status: reproduced
+first_seen: 2026-10-02
+last_seen: 2026-10-02
+campaign: cross-cutting
+operation: running the native graphics certification ladder
+symptom: "`cargo test -p wge-native-graphics-contract <filter> <second-filter>` is rejected (one positional filter); the serial `native_graphics` suite exceeds 10 minutes, so an unfiltered run times out and leaves no per-test evidence"
+repeated_behavior: every graphics verification session rediscovers the one-filter limit and the per-test serial invocation pattern
+responsible_layer: orchestration
+workaround: one positional filter plus repeated `--skip`, or `--exact` per test with `--test-threads=1`; package is `wge-native-graphics-contract` (crate path `native_graphics_contract`)
+proposed_improvement: encode the full ladder (session, presented_session, native_graphics per-test, lib, fmt, clippy) as one gate script so fresh agents run one command
+expected_leverage: latency | context
+authority_impact: none
+before_metrics:
+  native_graphics_serial: ">600s (timed out, no result line)"
+after_metrics:
+  per_test: "lower 6.5s–275s each, all 7 green; lib 19/19; session 5/5; presented_session 2/2"
+tests:
+  - cargo test -p wge-native-graphics-contract --test native_graphics -- <test> --exact
+decision: keep
+```
+
+### FR-0013 — parallel Rust tests race shared temp-fixture writes
+
+```yaml
+friction_id: FR-0013
+status: verified
+first_seen: 2026-10-02
+last_seen: 2026-10-02
+campaign: C3
+operation: session contract tests sharing a world fixture
+symptom: "tests copying the same layout file into a per-process temp dir raced (`std::fs::copy` truncates while another thread's Julia reads), surfacing `EOF while parsing a value` on a *different* test each run"
+repeated_behavior: flaky failures with a misleading parse error pointing at the layout, not the race
+responsible_layer: contract
+workaround: build the world once per process behind a `OnceLock` and hand each test a clone (WorldArtifact is Clone)
+proposed_improvement: prefer process-shared immutable fixtures for any test whose fixture crosses a subprocess boundary
+expected_leverage: reliability
+authority_impact: none
+before_metrics:
+  flaky_runs: "2/5 then 3/5 passing, different tests each time"
+after_metrics:
+  session_tests: "5/5 stable across repeated runs"
+tests:
+  - cargo test -p wge-native-graphics-contract --test session
+decision: keep
+```
+
 ## Evidence rules
 
 1. A candidate is not a defect until a run reproduces it or the design review establishes a contract violation.
