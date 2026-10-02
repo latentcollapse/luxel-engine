@@ -1,8 +1,10 @@
 # WGE Native Convergence Report
 
-Status: **green for the engine-neutral native convergence checkpoint**.
+Status: **green for the native authority/backend convergence checkpoint and
+Campaign 2’s registered authored-frame slice; broader production visual quality
+and deferred rigging remain open**.
 
-Date: 2026-09-28.
+Date: 2026-09-29.
 
 This checkpoint turns the Rust/Julia certification spine into the canonical
 engine-neutral transaction path and exposes it through a bounded model-facing
@@ -26,8 +28,6 @@ These remain deferred and are not represented as passes:
 
 - production character rigging, skinning, retargeting, and arbitrary
   mesh-to-character generation;
-- Unity editor import, build, and playthrough;
-- Unity-versus-WGE benchmarking;
 - multiplayer/netcode and universal backend parity.
 
 The supplied bad GLB remains a permanent negative/rejection control:
@@ -76,9 +76,9 @@ profile
 ```
 
 The engine-neutral registry binds required gates for semantic, world,
-gameplay, asset, visual, and repair evidence. Rigging and Unity import/build/
-playthrough are registered deferred gates and only accept indeterminate
-evidence in this profile. Every candidate identity includes the complete
+gameplay, asset, visual, and repair evidence. Rigging is the only registered
+deferred gate and only accepts indeterminate evidence in this profile. Every
+candidate identity includes the complete
 non-repair artifact set and authorized repair IDs. Every promoted receipt is
 bound to a registered validator, schema, gate, candidate, and exact evidence
 bytes; the authority re-runs the validator before promotion.
@@ -87,6 +87,12 @@ The store writes candidates and snapshots through staging/atomic replacement,
 publishes the pointer only after certification, rejects stale parents, checks
 pointer/history agreement on reopen, and fails closed on corruption, symlink
 escape, forged registry digest, stale artifacts, or mismatched reports.
+
+The certified reference runtime now emits `gameplay_kit.json` as a typed,
+content-addressed `ResolvedKit`. The gameplay receipt binds that artifact and
+Rust re-resolves the registered `wge.reference.vertical-slice` kit before
+promotion; the design document is therefore connected to the runtime path for
+the current slice rather than remaining an unconsumed architecture sketch.
 
 ## One model-facing authoring story
 
@@ -200,7 +206,7 @@ notification path.
 | Authoring/intake | Executable/unknown JSON rejection, duplicate keys, malformed spans/digests, stale source binding, retained conflicts, source provenance, and scaffold-first controls. |
 | Work/repair | Exact capabilities, outputs, scopes, parent, proposals, symlink escape, stale result, forged proposal, unauthorized artifact, and byte-budget controls. |
 | Store | Fail-closed open, registry/spec/pointer/history identity checks, path/id bounds, atomic candidate publication, and native MVP regression protection. |
-| Deferred gates | Rigging and Unity are explicitly indeterminate; the bad GLB rejection control remains in the regression corpus. |
+| Deferred gates | Rigging is explicitly indeterminate; the bad GLB rejection control remains in the regression corpus. |
 
 ## Verification record
 
@@ -217,9 +223,9 @@ python3 -m py_compile pipeline/wge_authoring.py pipeline/wge_agent_surface.py pi
 ```
 
 The full Python suite's expected legacy-MVP diagnostic output still identifies
-deferred/negative controls such as Unity import, runtime asset readiness, and
-visual quality in its candidate fixture. The suite itself passes; those
-fixture statuses are not being relabeled as engine-neutral certification.
+legacy runtime and asset readiness controls in its candidate fixture. The suite
+itself passes; those fixture statuses are not being relabeled as engine-neutral
+certification.
 
 Recorded fresh non-fixture transaction smoke:
 
@@ -265,6 +271,28 @@ python3 -m pipeline.wge_neura_mcp --project-root PROJECT_ROOT --control-plane wo
 The MCP adapter is intentionally a transport surface; native CLI/API calls
 remain available for NIRA-Prime integration without MCP.
 
+## Campaign 2 authored-frame convergence
+
+Campaign 2 is now integrated into the converged native path. Rust derives and
+seals three fixed inspection packets from the certified Riverwatch world;
+Julia/Lava renders them behind the existing coarse packet boundary; Rust
+independently remeasures, validates, and promotes every receipt and vector
+evidence artifact. No backend representation is promoted as WGE semantic state.
+
+The final clean replay proved byte identity for the world artifact, all three
+scene packets, deterministic frame receipts, renderer attestations, raw RGBA
+captures, PPM captures, and registered visual-quality evidence. Runtime-bound
+timing evidence remains explicitly non-deterministic and is kept separate from
+certification identity.
+
+The authored slice contains conditioned terrain, a smooth procedural hero
+landmark, clustered foliage, a reflective wet surface, directional shadows,
+environment/fog intent, fixed cameras, and a multidimensional quality vector.
+The vector measures what the current machinery can prove and leaves contact,
+lighting-consistency, and atmospheric-depth judgments indeterminate rather than
+inventing certainty. The exact hashes, measurements, and remaining frontier are
+in [`WGE_GRAPHICS_CAMPAIGN_2_REPORT.md`](WGE_GRAPHICS_CAMPAIGN_2_REPORT.md).
+
 ## Final checkpoint
 
 This checkpoint satisfies the engine-neutral convergence definition:
@@ -287,10 +315,10 @@ This checkpoint satisfies the engine-neutral convergence definition:
 11. the native-MVP regression corpus and supplied bad-GLB rejection control
     remain green;
 12. the second world and second gameplay scenario use the same native model;
-13. rigging and Unity remain explicitly deferred;
+13. rigging remains explicitly deferred;
 14. touched Python is transport/provider glue rather than promotion authority;
 15. architecture, ownership, legacy boundaries, adversarial evidence, and
     reproducibility are recorded here.
 
-Stop at this converged WGE plus agent-surface checkpoint. Do not begin Unity,
+Stop at this converged WGE plus agent-surface checkpoint. Do not begin
 production rigging, multiplayer, or post-checkpoint breadth in this goal.

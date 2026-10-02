@@ -176,6 +176,13 @@ pub fn build_from_layout_path(
     let world = build_world(layout, layout_sha256, fields, provenance)?;
     let traversal = run_playthrough(&world)?;
     let (capture_bytes, visual) = render_reference_capture(&world)?;
+    let gameplay_kit =
+        wge_gameplay_contract::reference_vertical_slice_kit().map_err(|diagnostics| {
+            ReferenceRuntimeError::contract(format!(
+                "reference gameplay kit resolution failed: {diagnostics:?}"
+            ))
+        })?;
+    crate::validate_gameplay_kit(&gameplay_kit)?;
     let gameplay =
         crate::build_gameplay_world_binding(&world, &traversal, &capture_bytes, &visual)?;
     crate::validate_gameplay_world_binding(&world, &traversal, &capture_bytes, &visual, &gameplay)?;
@@ -185,6 +192,7 @@ pub fn build_from_layout_path(
         capture_bytes,
         visual,
         gameplay,
+        gameplay_kit,
     })
 }
 

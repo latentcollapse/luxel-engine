@@ -11,6 +11,7 @@ description = "Deterministic GLB facts and typed asset acceptance for WGE"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
 
 [[bin]]
 name = "wge-asset-contract"

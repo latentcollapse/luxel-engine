@@ -1,8 +1,98 @@
+using Base64
 using JSON3
 using Test
 using WGEGraphics
 
 include(joinpath(@__DIR__, "..", "bin", "wge_graphics_worker.jl"))
+
+function minimal_scene_packet_json()
+    heights = fill(0.0f0, 9)
+    slopes = fill(0.0f0, 9)
+    regions = fill(UInt8(0), 9)
+    buffer(id, encoding, values, stride) = (
+        buffer_id=id,
+        source_artifact_id=nothing,
+        byte_length=length(values) * stride,
+        count=length(values),
+        stride_bytes=stride,
+        sha256=WGEGraphics._payload_sha256(values),
+        payload=(encoding=encoding, values=values),
+    )
+    body = (
+        schema_version="wge.graphics-scene-packet/v6",
+        packet_id="packet-1",
+        world_artifact_id="world-1",
+        world_artifact_sha256="sha256:" * repeat("0", 64),
+        spatial_fields_sha256="sha256:" * repeat("1", 64),
+        frame_seed=UInt64(7),
+        coordinate_system=(up_axis="y", handedness="right", units_per_meter=1.0),
+        camera=(
+            camera_id="camera-1",
+            projection=(kind="orthographic", span_m=20.0),
+            position_xyz_m=(0.0, 10.0, 0.0),
+            forward_xyz=(0.0, -1.0, 0.0),
+            up_xyz=(0.0, 0.0, -1.0),
+            near_plane_m=0.1,
+            far_plane_m=100.0,
+            width_px=32,
+            height_px=32,
+        ),
+        terrain=(
+            terrain_id="terrain-1",
+            width_m=20.0,
+            length_m=20.0,
+            resolution=3,
+            material_id="ground",
+            heights_m=buffer("height-buffer", "f32", heights, 4),
+            slope_grade=buffer("slope-buffer", "f32", slopes, 4),
+            region_codes=buffer("region-buffer", "u8", regions, 1),
+        ),
+        materials=[(
+            material_id="ground",
+            base_color_rgba=(0.3, 0.4, 0.2, 1.0),
+            metallic=0.0,
+            roughness=0.8,
+            clearcoat=0.0,
+            clearcoat_roughness=0.5,
+            alpha_mode="opaque",
+            texture_ids=String[],
+            normal_texture_id=nothing,
+            normal_scale=1.0,
+            occlusion_strength=1.0,
+            emissive_factor_rgb=(0.0, 0.0, 0.0),
+        )],
+        textures=Any[],
+        meshes=Any[],
+        instances=Any[],
+        lights=[(
+            light_id="sun",
+            kind=(kind="directional", direction_xyz=(0.2, -1.0, 0.1)),
+            color_rgb=(1.0, 0.98, 0.9),
+            intensity=1.0,
+        )],
+        environment=(
+            sky_top_rgb=(0.1, 0.2, 0.4),
+            sky_horizon_rgb=(0.5, 0.6, 0.7),
+            ground_rgb=(0.2, 0.2, 0.2),
+            fog_color_rgb=(0.5, 0.6, 0.7),
+            fog_density=0.0,
+            exposure=1.0,
+        ),
+        overlays=Any[],
+        capture=(
+            capture_id="capture-1",
+            camera_id="camera-1",
+            width_px=32,
+            height_px=32,
+            format="rgba8_srgb",
+            include_depth=false,
+            deterministic=true,
+        ),
+    )
+    packet = JSON3.read(JSON3.write((body=body, packet_sha256="sha256:" * repeat("0", 64))))
+    digest = WGEGraphics._packet_content_sha256(packet)
+    return JSON3.write((body=body, packet_sha256=digest))
+end
 
 @testset "graphics worker protocol boundary" begin
     ready = JSON3.read(
@@ -39,6 +129,118 @@ end
     @test fake["code"] in ("malformed_packet", "unsupported_schema")
 end
 
+@testset "typed packet parser rejects duplicate fields and honors nullable Rust options" begin
+    payload = minimal_scene_packet_json()
+    packet = validate_scene_packet(payload)
+    @test packet.world_artifact_id == "world-1"
+    @test packet.terrain.heights_m == fill(0.0f0, 9)
+
+    bound_scene = replace(
+        payload,
+        "\"packet_id\":\"packet-1\"," =>
+            "\"packet_id\":\"packet-1\",\"scene_artifact_id\":\"scene-v1\",\"scene_artifact_sha256\":\"sha256:" * repeat("3", 64) * "\",",
+    )
+    @test validate_scene_packet(bound_scene).packet_id == "packet-1"
+    incomplete_scene = replace(
+        payload,
+        "\"packet_id\":\"packet-1\"," =>
+            "\"packet_id\":\"packet-1\",\"scene_artifact_id\":\"scene-v1\",",
+    )
+    @test_throws ProtocolError validate_scene_packet(incomplete_scene)
+
+    duplicate_capture = replace(
+        payload,
+        "\"capture_id\":\"capture-1\"" => "\"capture_id\":\"capture-1\",\"capture_id\":\"capture-1\"",
+    )
+    @test_throws ProtocolError validate_scene_packet(duplicate_capture)
+
+    duplicate_material = replace(
+        payload,
+        "\"materials\":[{\"material_id\":\"ground\"" =>
+            "\"materials\":[{\"material_id\":\"ground\",\"material_id\":\"ground\"",
+    )
+    @test_throws ProtocolError validate_scene_packet(duplicate_material)
+
+    duplicate_buffer = replace(
+        payload,
+        "\"buffer_id\":\"height-buffer\"" =>
+            "\"buffer_id\":\"height-buffer\",\"buffer_id\":\"height-buffer\"",
+    )
+    @test_throws ProtocolError validate_scene_packet(duplicate_buffer)
+
+    texture = JSON3.read(JSON3.write((
+        texture_id="texture-1",
+        source_artifact_id="source-1",
+        sha256="sha256:" * repeat("2", 64),
+        width_px=1,
+        height_px=1,
+        mip_levels=1,
+        color_space="srgb",
+        payload=nothing,
+    )))
+    parsed_texture = only(WGEGraphics._parse_textures(JSON3.read(JSON3.write([texture]))))
+    @test parsed_texture.payload === nothing
+    @test isempty(parsed_texture.mip_chain)
+
+    base_level = UInt8[255, 0, 0, 255, 0, 255, 0, 255]
+    final_level = UInt8[128, 128, 0, 255]
+    mip_texture = JSON3.read(JSON3.write((
+        texture_id="mip-texture",
+        source_artifact_id="source-1",
+        sha256=WGEGraphics._sha256(vcat(base_level, final_level)),
+        width_px=2,
+        height_px=1,
+        mip_levels=2,
+        color_space="srgb",
+        payload=(
+            encoding="rgba8_mip_chain",
+            base64=(levels=[
+                (width_px=2, height_px=1, base64=Base64.base64encode(base_level)),
+                (width_px=1, height_px=1, base64=Base64.base64encode(final_level)),
+            ],),
+        ),
+    )))
+    parsed_mip_texture = only(WGEGraphics._parse_textures(JSON3.read(JSON3.write([mip_texture]))))
+    @test parsed_mip_texture.payload == base_level
+    @test length(parsed_mip_texture.mip_chain) == 1
+    @test parsed_mip_texture.mip_chain[1].bytes == final_level
+
+    malformed_mip_texture = JSON3.read(JSON3.write((
+        texture_id="mip-texture",
+        source_artifact_id="source-1",
+        sha256=WGEGraphics._sha256(vcat(base_level, final_level)),
+        width_px=2,
+        height_px=1,
+        mip_levels=2,
+        color_space="srgb",
+        payload=(
+            encoding="rgba8_mip_chain",
+            base64=(levels=[
+                (width_px=2, height_px=1, base64=Base64.base64encode(base_level)),
+                (width_px=2, height_px=1, base64=Base64.base64encode(final_level)),
+            ],),
+        ),
+    )))
+    @test_throws ProtocolError WGEGraphics._parse_textures(JSON3.read(JSON3.write([malformed_mip_texture])))
+end
+
+@testset "typed numeric and identifier bounds match the Rust contract" begin
+    @test WGEGraphics._integer(3, "integer") == 3
+    @test_throws ProtocolError WGEGraphics._integer(3.0, "integer")
+    @test_throws ProtocolError WGEGraphics._integer(true, "integer")
+    @test WGEGraphics._uint64(7, "seed") == 7
+    @test_throws ProtocolError WGEGraphics._uint64(7.0, "seed")
+    @test_throws ProtocolError WGEGraphics._uint64(true, "seed")
+    @test WGEGraphics._finite_float32(1, "float") == 1.0f0
+    @test_throws ProtocolError WGEGraphics._finite_float32(true, "float")
+
+    @test WGEGraphics._valid_id(repeat("é", 128), "id") === nothing
+    @test_throws ProtocolError WGEGraphics._valid_id(repeat("é", 129), "id")
+
+    boolean_projection = JSON3.read("""{"kind":"orthographic","span_m":true}""")
+    @test_throws ProtocolError WGEGraphics._parse_projection(boolean_projection)
+end
+
 @testset "protocol parser rejects degenerate graphics bases" begin
     camera = JSON3.read(
         """
@@ -57,6 +259,24 @@ end
     )
     @test_throws ProtocolError WGEGraphics._parse_camera(camera)
 
+    huge_projection = JSON3.read("{\"kind\":\"orthographic\",\"span_m\":1000001.0}")
+    @test_throws ProtocolError WGEGraphics._parse_projection(huge_projection)
+
+    huge_texture = JSON3.read(
+        """
+        [{
+          "texture_id": "huge-texture",
+          "source_artifact_id": "source",
+          "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "width_px": 9000,
+          "height_px": 1,
+          "mip_levels": 1,
+          "color_space": "srgb"
+        }]
+        """,
+    )
+    @test_throws ProtocolError WGEGraphics._parse_textures(huge_texture)
+
     light = JSON3.read("{\"kind\":\"directional\",\"direction_xyz\":[0.0,0.0,0.0]}")
     @test_throws ProtocolError WGEGraphics._parse_light_kind(light)
 
@@ -73,4 +293,40 @@ end
         """,
     )
     @test_throws ProtocolError WGEGraphics._parse_meshes(mesh, Set(["terrain"]))
+end
+
+@testset "small non-degenerate vectors match the Rust packet contract" begin
+    small_camera = JSON3.read(
+        """
+        {
+          "camera_id": "small-camera",
+          "projection": {"kind": "orthographic", "span_m": 20.0},
+          "position_xyz_m": [0.0, 10.0, 0.0],
+          "forward_xyz": [0.0002, 0.0, 0.0],
+          "up_xyz": [0.0, 0.0, 0.0002],
+          "near_plane_m": 0.1,
+          "far_plane_m": 100.0,
+          "width_px": 32,
+          "height_px": 32
+        }
+        """,
+    )
+    @test WGEGraphics._parse_camera(small_camera) isa WGEGraphics.CameraPacket
+
+    small_light = JSON3.read("""{"kind":"directional","direction_xyz":[0.0002,0.0,0.0]}""")
+    @test WGEGraphics._parse_light_kind(small_light) isa WGEGraphics.DirectionalLightPacket
+
+    small_normal_mesh = JSON3.read(
+        """
+        [{
+          "mesh_id": "small-normal-mesh",
+          "positions_m": [[0.0,0.0,0.0],[1.0,0.0,0.0],[0.0,0.0,1.0]],
+          "normals": [[0.0002,0.0,0.0],[0.0002,0.0,0.0],[0.0002,0.0,0.0]],
+          "uv0": [[0.0,0.0],[1.0,0.0],[0.0,1.0]],
+          "indices": [0,1,2],
+          "material_id": "terrain"
+        }]
+        """,
+    )
+    @test length(WGEGraphics._parse_meshes(small_normal_mesh, Set(["terrain"]))) == 1
 end

@@ -1,9 +1,11 @@
 # WGE Native Graphics Architecture
 
-Status: supervised native Lava checkpoint green; bounded high-quality renderer
-breadth is proven and remaining production gaps are explicit.
+Status: supervised native Lava backend checkpoint green; adapter-v6 audit,
+Campaign 2 authored-frame slice, C2.5 imported-asset inspection, and C2.7
+authority-side mip-chain conditioning closed, with the registered
+visual-quality floor green and broader production gaps still explicit.
 
-Date: 2026-09-28
+Date: 2026-09-30
 
 Upstream substrate: Lava.jl
 `11c7e31bdf62408d22bf379e9e59510f69d2103e`, with matching Vulkan.jl
@@ -57,7 +59,8 @@ Rust supervisor has an explicit restart path and the integration gate proves
 that a clean restart reproduces the exact capture bytes.
 
 The first implementation is offscreen and headless. A window/swapchain path is
-diagnostic tooling only. The first certified frame is a fixed-size capture from
+diagnostic tooling only; the bounded capability probe proves one native present
+but is not a persistent scene loop. The first certified frame is a fixed-size capture from
 a fixed camera, fixed seed, fixed world packet, and fixed backend capability
 set.
 
@@ -92,8 +95,12 @@ domain before promotion; the Lava adapter uploads it as a typed `Vec2f`
 buffer. Texture lookup therefore depends on explicit asset geometry rather than
 an implicit world-position projection.
 
-The packet is a lowering of a validated `WorldArtifact`, never a replacement
-for it. Its validator must check:
+The packet is a lowering of a validated `WorldArtifact` and, when present, a
+validated `SceneArtifact` plus conditioned render-asset projections; it is
+never a replacement for those canonical artifacts. `compose_bound_scene`
+performs the current Rust-owned composition step, namespaces imported mesh,
+material, and texture identities, and records the scene artifact identity in
+the packet. Its validator must check:
 
 - exact schema and canonical digest;
 - finite numeric values and bounded dimensions/counts;
@@ -107,6 +114,34 @@ for it. Its validator must check:
 - material ranges, texture color-space declarations, and alpha policy;
 - marker positions against the certified world;
 - no unknown fields or producer-supplied “passed” fields.
+
+The worker boundary has a separate bound-scene promotion operation. It accepts
+the authorized base packet, canonical scene artifact, runtime/render receipts,
+and graphics projections; Rust independently validates the receipts,
+recomposes the packet, and rejects any packet drift before Julia/Lava sees it.
+The Julia execution parser accepts the optional scene identity pair as typed
+transport metadata and rejects a half-present or malformed pair; it does not
+promote that identity.
+
+The current imported-asset bridge preserves conditioned tangent streams in the
+canonical v6 `MeshPacket`. Rust validates the optional stream, Julia validates
+its transport shape and finite/handedness constraints, and Lava consumes it for
+imported normal-basis construction. Procedural packets use an explicit
+deterministic fallback. C2.7 now also carries a validated, versioned RGBA8
+mip-chain through the neutral projection: each level has explicit dimensions,
+bytes, and a digest over the concatenated decoded levels. The current Lava
+adapter rejects multi-level residency with a typed unsupported-capability
+result until the GPU uploader and sampler LOD seam is implemented; it never
+silently drops the lower levels. This closes authority-side mip conditioning
+without implying GPU residency, full material-graph semantics, or production
+asset quality.
+
+The render-asset conditioner also lowers the supported glTF
+`KHR_texture_transform` subset into canonical UV0 before tangent generation.
+The graphics packet therefore remains backend-neutral: the renderer receives
+the already-conditioned UV space, while Rust retains the source transform in
+the validated render package. Alternate UV sets and conflicting per-role
+transforms are rejected at the asset boundary.
 
 The packet does not contain an arbitrary shader string, arbitrary Vulkan handle,
 or arbitrary code callback. Shader/material lowering is selected by a
@@ -147,9 +182,9 @@ in microseconds. When the selected Vulkan queue exposes valid timestamp bits,
 the adapter brackets the graphics pass and named prepare, scene-raster,
 resolve, and overlay phases with Vulkan timestamp writes. Rust bounds and
 reconciles the resulting telemetry; a queue without that capability reports
-the optional GPU fields as `null`. These pass timestamps deliberately
-synchronize the diagnostic measurement path and are not an uninstrumented
-production frame budget.
+the optional GPU fields as `null`. The required framebuffer readback is the
+synchronization point; timestamp writes themselves do not claim to be an
+uninstrumented production frame budget.
 
 Visual evidence remains a real gate. The reference Rust capture and the Lava
 capture are compared for semantic markers and measured properties first, then
@@ -170,8 +205,9 @@ The first native frame is intentionally bounded:
 5. deterministic opaque background foliage cross-mesh instances using the
    semantic-importance/culling path;
 6. certified route, player/opponent spawn, encounter, and objective markers;
-7. fixed camera, linear-HDR offscreen scene target, deterministic 2× spatial
-   resolve, and final color/depth evidence target;
+7. fixed camera, linear-HDR offscreen scene target, internal depth attachment,
+   deterministic 2× spatial resolve, and final color evidence target (depth
+   evidence remains explicitly deferred);
 8. one directional light plus typed sky/horizon/ground environment intent,
    orientation-aware analytic environment lighting, deterministic directional
    shadow map, and depth-tested opaque raster path;
@@ -196,6 +232,13 @@ for material inspection, while the overview packet remains the gameplay and
 semantic-visibility gate. This is an inspection profile, not a second semantic
 world or a claim of imported hero-asset parity.
 
+The C2.5 imported-asset inspection profile uses the same Rust-owned composition
+seam with a derived `real-asset-close` camera. The supervisor independently
+recomposes that camera-bound packet before promotion. Its restart proof repeats
+the context warm-up before the close frame so structural GPU telemetry remains
+part of the deterministic receipt identity; the evidence bundle is recorded in
+`WGE_C2_5_IMPORTED_ASSET_INSPECTION_HANDOFF.md`.
+
 `render-showcase-layout` is the stronger visual inspection profile. Rust seals
 its extra geometry and material identities, binds them to the source world and
 spatial-field digests, and independently revalidates the resulting capture.
@@ -203,6 +246,58 @@ spatial-field digests, and independently revalidates the resulting capture.
 instances for a wider packet, batching, and culling check. Neither profile is
 claimed as imported hero-asset parity. The frozen evidence and remaining quality limits are recorded in
 [`WGE_NATIVE_SHOWCASE.md`](WGE_NATIVE_SHOWCASE.md).
+
+The strict certification command, `render-quality-layout`, uses that composed
+world-showcase packet so the technical visual floor measures a materially
+structured WGE scene while preserving the authored world and spatial-field
+bindings. This is an internal WGE quality probe, not a comparison against any
+other engine; a failed measurement remains a failed gate.
+
+The quality authority reports terrain and authored geometry separately. The
+latest green capture measured `2,281 bp` terrain coverage and `28,269`
+authored-geometry pixels, then measured content-level color/edge/tile
+structure over their union. This closes the projected-prop contamination
+finding without granting geometry a terrain pass by relabeling it.
+
+## Campaign 2 — The Authored Frame
+
+Campaign 2 is the first coherent authored calibration slice on the native path.
+It is deliberately a Rust-owned projection over the certified Riverwatch world,
+not a second semantic world and not an imported-asset or AAA claim. The command
+is `render-campaign2-layout`; its three closed view roles are `close`, `medium`,
+and `wide`.
+
+`lower_campaign2_packet` validates the source packet, binds the objective anchor
+and source world/spatial-field identities, fences the sparse diagnostic render
+instances out of the composition, and deterministically adds authored calibration
+geometry. The semantic instances remain in the `WorldArtifact` and are covered
+by the world/runtime gates; the derived packet cannot mutate semantic state.
+The calibration packet contains:
+
+- a textured and normally perturbed terrain surface;
+- a high-tessellation bronze/slate/cyan hero landmark with pedestal, halo,
+  inlays, and emissive spire;
+- rounded, clustered foliage with explicit trunks and shadow-casting instances;
+- a distinct raised wet/reflective puddle with concentric glints;
+- fixed perspective cameras, warm directional light, sky/ground environment,
+  fog, linear HDR resolve, and deterministic shadow-map sampling.
+
+The Rust-registered `campaign2-authored-frame` profile is the technical floor
+for these cuts. The separate `wge.campaign2-visual-evidence/v1` vector records
+silhouette/readability, material separation, composition, texture frequency,
+density, artifact rate, frame/GPU cost, upload/readback memory, and instance
+counts. Grounding/contact, lighting consistency, and atmospheric depth are
+explicitly `indeterminate` until the native path has depth/contact classifiers,
+reference-light comparisons, and a deterministic atmospheric evaluator.
+The visual critic can describe or propose a repair, but Rust alone promotes the
+receipt and evidence.
+
+The final current-binary run is preserved under
+`artifacts/campaign2/live-twelfth/`; its clean replay is preserved under
+`artifacts/campaign2/live-eleventh/`; and the viewable captures are under
+`/home/mattc/Pictures/WGE/campaign2-2026-09-29/`. The full measurements,
+hashes, rejected experiments, and next frontier are in
+[`WGE_GRAPHICS_CAMPAIGN_2_REPORT.md`](WGE_GRAPHICS_CAMPAIGN_2_REPORT.md).
 
 ## Capability and fallback policy
 
@@ -219,7 +314,9 @@ and no “GPU unavailable” result represented as a passing fixture.
 The required first profile is:
 
 ```text
-offscreen raster + color/depth + typed buffers + texture/sampler binding
+offscreen raster + internal color/depth attachments + typed buffers +
+texture/sampler binding; promoted evidence is color-only until the versioned
+depth payload contract exists
 ```
 
 Hardware RT is optional. If it is attempted and causes device loss, the
@@ -313,7 +410,6 @@ Each layer must be green before the next depends on it:
 This checkpoint does not authorize:
 
 - rigging, skinning, retargeting, or arbitrary mesh-to-character generation;
-- Unity integration or conventional Unity+MCP comparison;
 - multiplayer or universal engine parity;
 - a new physics/navigation engine;
 - broad text-to-3D generation;
@@ -321,8 +417,8 @@ This checkpoint does not authorize:
 - post-MVP renderer breadth before the native vertical slice is certified.
 
 The supplied bad GLB remains a permanent negative/rejection control in the
-asset and receipt suites. Rigging-dependent and Unity-dependent evidence stays
-explicitly deferred/indeterminate.
+asset and receipt suites. Rigging-dependent evidence stays explicitly
+deferred/indeterminate.
 
 ## Implementation order
 
@@ -394,13 +490,14 @@ uploaded once per deterministic batch and transforms/material parameters are
 indexed per instance on the GPU. The integration fixture duplicates an
 obstacle and verifies that submitted mesh vertices remain at the base-mesh
 count.
-The inspected frame is intentionally still only a coarse diagnostic slice:
+The canonical gameplay/overview frame remains a coarse diagnostic slice:
 terrain shading derives finite-difference normals from the certified height
-field and uses slope/region tinting, overlays are line primitives, and the
-shadow profile is one fixed directional map with four-tap percentage-closer
-sampling followed by a deterministic spatial HDR resolve. Cascades,
-contact/soft shadows, prefiltered IBL, production foliage density/alpha/LOD,
-particles, post-processing,
-and Elden-Ring-level visual quality remain quality-gap work
-behind this native authority boundary, not reasons to weaken the current
-evidence gate.
+field, overlays are line primitives, and the shadow profile is one fixed
+directional map with four-tap percentage-closer sampling followed by a
+deterministic spatial HDR resolve. Campaign 2 adds a separate authored
+calibration projection with smoother hero/foliage geometry, conditioned
+materials, a wet reflective probe, fixed composition cuts, and the same
+authority path. Cascades, contact/soft shadows, prefiltered IBL, production
+foliage density/alpha/LOD, particles, post-processing, and Elden-Ring-level
+visual quality remain quality-gap work behind this boundary, not reasons to
+weaken the evidence gate.

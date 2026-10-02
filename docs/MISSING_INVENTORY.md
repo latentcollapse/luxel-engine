@@ -1,5 +1,12 @@
 # WGE missing inventory
 
+> **Historical inventory.** This snapshot records the pre-convergence
+> Codeweald/target-engine gap and is useful as archaeology only. It does not
+> override the current native-engine doctrine. See
+> [`../ACTIVE_ARCHITECTURE.md`](../ACTIVE_ARCHITECTURE.md) and
+> [`../WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md`](../WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md)
+> for current authority boundaries and campaign scope.
+
 Written 2026-07-31. Things that **do not exist yet**, as distinct from things
 that exist and are wrong ([DEBT_LEDGER.md](DEBT_LEDGER.md)) and things that are
 built and ranked ([TOOLING_UPGRADES.md](TOOLING_UPGRADES.md)).

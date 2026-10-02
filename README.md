@@ -2,14 +2,20 @@
 
 **Concept art in. A playable, faithful 3D map out.**
 
+> **Fresh-agent orientation:** read [ACTIVE_ARCHITECTURE.md](ACTIVE_ARCHITECTURE.md) and
+> [WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md](WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md) first.
+> They define the current native Rust/Julia/Lava path, authority boundaries, provider fence, and
+> campaign order. Older migration/status sections below are retained as historical context and are
+> not current instructions.
+
 WGE is a game engine. You give it concept art and annotations describing a place; it produces a
 certified, deterministic world — terrain, hydrology, traversal, roads, settlements, materials,
-placements — and then hands that world to whichever renderer you want to look at it in.
+placements — and renders and runs that world through its native runtime.
 
 ## An AI-native engine, not a human-native one
 
-Godot, Unity and Unreal are **human-native** engines. Their primary interface is a GUI built for a
-person with a mouse, their primary verification is a human looking at the viewport, and their
+Conventional editor-first engines are **human-native**. Their primary interface is a GUI built for
+a person with a mouse, their primary verification is a human looking at the viewport, and their
 authoring surface assumes an operator who can see.
 
 **WGE is the same category of thing built for a different operator.** Its interface is a typed
@@ -26,19 +32,16 @@ model. Every design difference follows from that one substitution:
 
 What makes something an engine is that it owns the authoritative representation of the world and
 the rules for constructing it — terrain, hydrology, traversal, collision, navigation, placement,
-materials, provenance. WGE owns all of that. Rasterization is one subsystem, and it is the one
-subsystem WGE deliberately does not implement.
+materials, provenance. WGE owns all of that, including its native graphics path.
 
-That delegation is an architectural choice, not a disqualification. Godot, Unreal 5, and Unity are
-**backends**: consumers of WGE output, interchangeable by design and individually droppable. If a
-change to WGE can only be expressed in one of them, that change is in the wrong layer.
+External delivery adapters may remain as compatibility material, but they are not part of the
+current WGE authority or certification path. If a change to WGE requires an external editor/runtime,
+that change is in the wrong layer.
 
-**Bevy is not a backend.** It is WGE's *reference renderer* — the instrument WGE uses to look at its
-own output, plus the surface for lightweight inspection and editing. It ships with WGE and is not
-swappable. Audit captures deliberately route through it so that no target engine's quirks
-contaminate the measurement: a visual gate must measure the world, not the engine. Treating the
-reference renderer as just another backend would mean acceptance thresholds silently move whenever
-you change engines.
+**Inspection instruments are not semantic authority.** The existing Bevy viewer and other bounded
+reference tools may help WGE inspect its own output, but they are not interchangeable runtime
+backends and no external engine is required to ship a WGE game. Audit captures must remain bound to
+the exact packet, renderer path, camera, and authority receipt that produced them.
 
 The distinction matters because the valuable artifact is the *world*, not the render of it. The
 world is a verified data structure with a stable identity hash. Any engine can be pointed at it, and
@@ -94,9 +97,14 @@ best at:
 | Native compiler & transaction authority | Rust | Typed lowering boundary, ProjectSpec, identity, receipts, gates, promotion |
 | Numerical solvers | Julia | Terrain analysis, hydrology, placement solving, spatial fields |
 | Provider and backend glue | Python | Source staging, image/Blender/Gaea/provider IO, process transport, adapters |
-| Reference renderer / delivery backends | Bevy / Godot / UE5 / Unity | Inspection or delivery runtime only; backend gates are explicit |
+| Native runtime / graphics execution | Rust / Julia-Lava-Vulkan | Native delivery and deterministic runtime; Rust-owned gates are explicit |
 
-### The authoring DSL
+### Compatibility/reference authoring DSL
+
+The Python-shaped intent DSL below is retained as a compatibility and regression lane while the
+Rust-owned native construction surface grows. It is not permission to move semantic authority back
+into Python; new demo-critical operations belong behind typed Rust contracts and the native control
+plane.
 
 The language-wide design baseline is [docs/DSL docs/WGE_LANGUAGE_SPEC.md](docs/DSL%20docs/WGE_LANGUAGE_SPEC.md). It defines the planned
 typed IR, safety boundary, geometry/asset and policy domains, backend contracts, conformance suite, and unresolved
@@ -127,7 +135,33 @@ There are no loops, conditionals, or functions. An intent file *describes* a wor
 compute one. Every rejection carries an executable repair, and a complete starting file can be
 generated from any existing world.
 
-## Status
+## Current canonical status
+
+The active product target is the demo-ready native engine slice in
+[WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md](WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md), not
+the older Codeweald target-engine MVP described in the historical sections below.
+
+Green foundation: Rust-owned typed contracts, deterministic intake/project identity, registered
+receipt authority, Julia terrain/spatial seams, native graphics packet execution, live-evidence
+contracts, reference runtime/traversal machinery, bounded repair/rollback, and the native control
+surface. The active gap is production composition: scene/object/asset lowering, live game-loop
+integration, authored-quality materials/lighting/foliage/atmosphere, one native animated character
+path, richer world population, style compilation/critique, and unattended fresh-agent packaging.
+
+The supplied malformed GLB remains a permanent negative control. Blender is optional at build time;
+it is never a runtime or semantic authority dependency. Unity, Unreal, and Godot are compatibility
+or archaeological lanes only and are not demo gates.
+
+Use the focused commands in [ACTIVE_ARCHITECTURE.md](ACTIVE_ARCHITECTURE.md) and the gates named by
+the current campaign. Do not infer present status from the dated snapshot that follows.
+
+The first reproducible native command is:
+
+```sh
+python3 pipeline/wge_native_gate.py
+```
+
+## Historical compatibility snapshot (not current status)
 
 The vertical slice — `codeweald_alpine_arena_v1`, a 256×256m alpine arena — compiles end to end.
 It does **not** currently pass every gate; see the failing gates below.
@@ -182,7 +216,7 @@ godot_adapter`.
 - Material/texture gates that reject bad source art instead of certifying it
 - Four-view Bevy audit captures (overview, both wall faces, player height)
 - Authoring DSL with repair-carrying errors and scaffold generation
-- Unity and Unreal adapters with an honest preflight boundary
+- Legacy external delivery adapters with an honest preflight boundary
 
 ### What is not done
 
@@ -194,7 +228,7 @@ godot_adapter`.
 - **The critic→DSL loop.** Audit metrics are still numbers. Turning `foreground_edge_density: 0.044`
   into a concrete suggested patch is what closes the loop and is the next major piece of work.
 
-## Layout
+## Historical layout snapshot (not current instructions)
 
 The engine and the game are separate git repositories as of 2026-08-02. WGE lives at the **workspace
 root** (`Code Projects/WGE/`), not under `Game Projects/`. It is an engine that games consume, not a
@@ -208,7 +242,7 @@ Engine paths, relative to `Code Projects/WGE/`:
 | Rust WorldSpec core | `world_core/` |
 | Bevy reference renderer | `world_core/apps/world_viewer/` |
 | Julia solvers | `terrain_lab/` |
-| Unity / Unreal adapters | `engine_adapters/` |
+| Legacy delivery adapters | `engine_adapters/` |
 | Specifications and decision records | `docs/` |
 
 Game paths, relative to `Code Projects/Game Projects/Codeweald/`:
@@ -230,7 +264,7 @@ python3 pipeline/build_zone.py <game>/concept_batches/<batch>/annotations.json -
 A batch can live anywhere; the same batch compiled from two locations produces byte-identical
 artifacts.
 
-## Usage
+## Historical compatibility commands (not current native entry points)
 
 Generate a starting intent file for an existing world — never author from a blank page:
 
@@ -292,8 +326,7 @@ python3 pipeline/wge_native_mvp.py \
 That command remains the native-MVP regression oracle. The engine-neutral
 convergence path uses the same typed intake/world artifacts through
 `wge-control-plane` and deliberately leaves production rigging, skinning,
-retargeting, arbitrary mesh-to-character generation, Unity
-import/build/playthrough, and Unity-versus-WGE benchmarking deferred. The
+retargeting, and arbitrary mesh-to-character generation deferred. The
 supplied bad GLB remains a permanent negative control. This checkpoint is
 judged by WGE's own semantic, mechanical, traversal, visual, repair,
 determinism, provenance, and archive-revalidation gates.

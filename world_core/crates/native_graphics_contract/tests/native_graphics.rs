@@ -1,13 +1,15 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use wge_native_graphics_contract::{
-    ADAPTER_REVISION, GraphicsReady, GraphicsWorkerSupervisor, LAVA_REVISION,
-    lower_dense_benchmark_packet, lower_objective_close_packet, lower_reference_world,
-    lower_showcase_packet, lower_world_showcase_packet, seal_scene_packet, validate_frame_receipt,
+    ADAPTER_REVISION, Campaign2View, GraphicsReady, GraphicsWorkerSupervisor, LAVA_REVISION,
+    lower_campaign2_packet, lower_dense_benchmark_packet, lower_objective_close_packet,
+    lower_reference_world, lower_showcase_packet, lower_world_showcase_packet, seal_scene_packet,
     validate_ready, validate_scene_packet,
 };
 use wge_reference_runtime::build_from_layout_path;
@@ -90,6 +92,36 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
         .texture_ids
         .first()
         .expect("terrain albedo exists");
+    let terrain_texture = packet
+        .body
+        .textures
+        .iter()
+        .find(|texture| texture.texture_id == terrain_albedo.as_str())
+        .expect("terrain material texture exists");
+    assert_eq!(
+        terrain_texture.source_artifact_id,
+        "procedural-riverwatch-terrain-albedo-v4"
+    );
+    assert_eq!(
+        (terrain_texture.width_px, terrain_texture.height_px),
+        (128, 128)
+    );
+    let wge_native_graphics_contract::TexturePayload::Rgba8(encoded) = terrain_texture
+        .payload
+        .as_ref()
+        .expect("inline terrain albedo")
+    else {
+        panic!("procedural terrain must remain a single-level RGBA8 payload");
+    };
+    let terrain_pixels = STANDARD.decode(encoded).expect("terrain albedo decodes");
+    let terrain_colors = terrain_pixels
+        .chunks_exact(4)
+        .map(|pixel| [pixel[0], pixel[1], pixel[2]])
+        .collect::<BTreeSet<_>>();
+    assert!(
+        terrain_colors.len() >= 128,
+        "terrain albedo has macro and micro color variation"
+    );
     let obstacle_albedo = packet
         .body
         .materials
@@ -104,9 +136,17 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
     validate_scene_packet(&packet).expect("lowered packet validates");
     assert_eq!(packet.body.terrain.resolution, 49);
     assert_eq!(packet.body.capture.width_px, 320);
+    let fog_weight_at_authored_camera = f64::from(packet.body.environment.fog_density)
+        * build.world.body.authored_layout.reference_camera.distance_m;
+    assert!(
+        (fog_weight_at_authored_camera - 0.16).abs() < 1.0e-6,
+        "reference fog preserves a light atmospheric contribution at the authored camera distance"
+    );
     assert!(packet.body.overlays.len() >= 4);
     assert_eq!(packet.body.terrain.heights_m.count, 49 * 49);
     assert_eq!(packet.body.terrain.region_codes.count, 49 * 49);
+    let repeated = lower_reference_world(&build.world).expect("world lowers deterministically");
+    assert_eq!(repeated.packet_sha256, packet.packet_sha256);
 
     let showcase = lower_showcase_packet(&packet).expect("showcase packet seals");
     validate_scene_packet(&showcase).expect("showcase packet validates");
@@ -143,7 +183,7 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
             .iter()
             .filter(|instance| instance.instance_id.starts_with("showcase-"))
             .count(),
-        8
+        11
     );
 
     let world_showcase = lower_world_showcase_packet(&packet).expect("world showcase packet seals");
@@ -170,6 +210,62 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
             .iter()
             .any(|instance| instance.instance_id == "showcase-halo")
     );
+
+    let campaign2_views = [
+        (Campaign2View::Close, "campaign2-close", 768, 512),
+        (Campaign2View::Medium, "campaign2-medium", 960, 640),
+        (Campaign2View::Wide, "campaign2-wide", 960, 640),
+    ];
+    for (view, camera_id, width_px, height_px) in campaign2_views {
+        let campaign2 = lower_campaign2_packet(&packet, view).expect("Campaign 2 packet seals");
+        validate_scene_packet(&campaign2).expect("Campaign 2 packet validates");
+        assert_eq!(campaign2.body.camera.camera_id, camera_id);
+        assert_eq!(campaign2.body.camera.width_px, width_px);
+        assert_eq!(campaign2.body.camera.height_px, height_px);
+        assert!(campaign2.body.overlays.is_empty());
+        assert!(
+            campaign2
+                .body
+                .instances
+                .iter()
+                .any(|instance| instance.instance_id == "campaign2-hero-core")
+        );
+        assert!(
+            campaign2
+                .body
+                .instances
+                .iter()
+                .any(|instance| instance.instance_id == "campaign2-wet-pool")
+        );
+        assert!(
+            campaign2
+                .body
+                .instances
+                .iter()
+                .any(|instance| instance.instance_id == "campaign2-crown-00")
+        );
+        assert!(!campaign2.body.instances.is_empty());
+        assert!(campaign2.body.instances.iter().all(|instance| {
+            !instance.instance_id.starts_with("foliage-")
+                && instance.instance_id != "fallen_spire"
+                && instance.instance_id != "objective-beacon"
+        }));
+        assert!(
+            campaign2
+                .body
+                .instances
+                .iter()
+                .any(|instance| instance.instance_id == "campaign2-wet-ripple-outer")
+        );
+        assert_eq!(
+            campaign2.body.world_artifact_id,
+            packet.body.world_artifact_id
+        );
+        assert_eq!(
+            campaign2.body.spatial_fields_sha256,
+            packet.body.spatial_fields_sha256
+        );
+    }
 
     let dense = lower_dense_benchmark_packet(&packet, 128).expect("dense benchmark packet seals");
     assert_eq!(
@@ -228,7 +324,7 @@ using JSON3
 include(ENV["WGE_GRAPHICS_WORKER"])
 packet = JSON3.read(read(ENV["WGE_PACKET_PATH"], String))
 response = JSON3.read(handle(JSON3.write((op="validate_packet", packet=packet))))
-response["kind"] == "packet_validated" || error(JSON3.write(response))
+response["kind"] == "packet_shape_checked" || error(JSON3.write(response))
 println(response["packet_sha256"])
 "#;
     let output = Command::new(julia_executable())
@@ -336,6 +432,14 @@ sleep(120.0)
         .restart()
         .expect("supervisor can revive the stalled worker");
     assert!(supervisor.ready().is_none());
+    let oversized_request = "x".repeat(8 * 1024 * 1024);
+    let write_error = supervisor
+        .request(serde_json::json!({
+            "op": "probe_capabilities",
+            "padding": oversized_request,
+        }))
+        .expect_err("a non-reading worker must also hit the write deadline");
+    assert_eq!(write_error.code, "worker_timeout");
     drop(supervisor);
     fs::remove_dir_all(output_dir).expect("test output directory is removed");
 }
@@ -399,10 +503,18 @@ fn rust_packet_renders_through_the_pinned_lava_worker() {
 using JSON3
 include(ENV["WGE_GRAPHICS_WORKER"])
 packet = JSON3.read(read(ENV["WGE_PACKET_PATH"], String))
-response = JSON3.read(handle(JSON3.write((op="render_packet", packet=packet))))
+response = JSON3.read(handle(JSON3.write((
+    op="render_packet",
+    packet=packet,
+    expected_packet_sha256=packet["packet_sha256"],
+))))
 response["kind"] == "frame_rendered" || error(JSON3.write(response))
 perspective_packet = JSON3.read(read(ENV["WGE_PERSPECTIVE_PACKET_PATH"], String))
-perspective_response = JSON3.read(handle(JSON3.write((op="render_packet", packet=perspective_packet))))
+perspective_response = JSON3.read(handle(JSON3.write((
+    op="render_packet",
+    packet=perspective_packet,
+    expected_packet_sha256=perspective_packet["packet_sha256"],
+))))
 perspective_response["kind"] == "frame_rendered" || error(JSON3.write(perspective_response))
 println(JSON3.write((orthographic=response["frame"], perspective=perspective_response["frame"])))
 "#;
@@ -642,11 +754,18 @@ fn rust_supervisor_promotes_a_bound_lava_frame() {
     assert!(ready.features.readback);
     let gpu_timestamps = ready.features.gpu_timestamps;
 
+    let mut detached_body = packet.body.clone();
+    detached_body.overlays.clear();
+    let detached_packet = seal_scene_packet(detached_body)
+        .expect("semantically malformed-but-well-shaped detached packet seals");
+    let detached_error = supervisor
+        .render_and_promote(&detached_packet, &build.world)
+        .expect_err("world-unbound packet cannot reach native promotion");
+    assert_eq!(detached_error.code, "provenance");
+
     let promoted = supervisor
-        .render_and_promote(&packet)
+        .render_and_promote(&packet, &build.world)
         .expect("Rust supervisor promotes the Lava frame");
-    validate_frame_receipt(&promoted.receipt, &promoted.capture_bytes)
-        .expect("promoted receipt independently validates");
     assert_eq!(promoted.frame.packet_sha256, packet.packet_sha256);
     assert_eq!(promoted.receipt.body.packet_sha256, packet.packet_sha256);
     assert_eq!(
@@ -699,7 +818,7 @@ fn rust_supervisor_promotes_a_bound_lava_frame() {
         .capabilities()
         .expect("restarted process revalidates capabilities");
     let replayed = supervisor
-        .render_and_promote(&packet)
+        .render_and_promote(&packet, &build.world)
         .expect("restarted process promotes the same frame");
     assert_eq!(replayed.capture_bytes, first_capture);
     assert_eq!(replayed.receipt.body.measurements, first_measurements);

@@ -111,7 +111,7 @@ class ControlPlaneCliTest(unittest.TestCase):
             profile = self.run_native([str(CONTROL_PLANE), "profile", "engine-neutral"])
             profile_value = json.loads(profile.stdout)
             self.assertEqual(profile_value["profile_id"], "engine-neutral")
-            self.assertEqual(len(profile_value["gates"]), 10)
+            self.assertEqual(len(profile_value["gates"]), 8)
 
             store = self.create_store(root)
             opened = json.loads(self.run_native([str(CONTROL_PLANE), "open", str(store)]).stdout)

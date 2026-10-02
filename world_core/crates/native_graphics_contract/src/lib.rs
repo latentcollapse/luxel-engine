@@ -5,36 +5,78 @@
 //! It lowers an already validated reference world into one coarse packet that
 //! a supervised graphics worker can consume and independently revalidate.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
 
 pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v6";
 pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
 pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
-pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v5";
+pub const RENDERER_ATTESTATION_SCHEMA: &str = "wge.graphics-renderer-attestation/v1";
+pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v6";
 pub const LAVA_BACKEND_ID: &str = "lava-vulkan";
 pub const LAVA_REVISION: &str = "11c7e31bdf62408d22bf379e9e59510f69d2103e";
 pub const MAX_PACKET_ELEMENTS: usize = 16 * 1024 * 1024;
 pub const MAX_CAPTURE_DIMENSION: u32 = 8192;
 pub const MAX_CAPTURE_BYTES: usize = 32 * 1024 * 1024;
 pub const MAX_DENSE_BENCHMARK_INSTANCES: usize = 4096;
+const MAX_TEXTURE_MIP_LEVELS: u32 = 32;
+/// The native reference path deliberately has a bounded physical envelope.
+/// This keeps all derived camera/light calculations finite in f32 and makes
+/// malformed or hostile packets fail before they reach Julia/Vulkan.
+pub const MAX_NATIVE_COORDINATE_M: f32 = 1_000_000.0;
 const MAX_TELEMETRY_COUNTER: usize = 1 << 40;
 const MAX_FRAME_TIME_US: u64 = 60_000_000;
+const MIN_NATIVE_DISTANCE_M: f32 = 1.0e-4;
+const MIN_NATIVE_SCALE: f32 = 1.0e-4;
 const MIN_NATIVE_LUMINANCE_STDDEV: f64 = 0.01;
 const MIN_NATIVE_DISTINCT_COLORS: usize = 3;
+const MIN_NATIVE_NON_DOMINANT_PIXELS: usize = 16;
 const MIN_VECTOR_LENGTH_SQUARED: f32 = 1.0e-8;
 const UNIT_QUATERNION_TOLERANCE: f32 = 1.0e-3;
 const MAX_BASIS_COSINE: f32 = 0.999;
+const REFERENCE_FOG_WEIGHT_AT_CAMERA: f64 = 0.16;
+const MAX_REFERENCE_FOG_DENSITY: f64 = 0.006;
 
+pub mod asset_projection;
+pub mod live;
+pub mod scene_composition;
 pub mod supervisor;
+pub mod visual_quality;
+pub mod window;
+
+pub use asset_projection::{
+    GRAPHICS_ASSET_PROJECTION_SCHEMA, GraphicsAssetMesh, GraphicsAssetProjection,
+    GraphicsAssetTexture, project_render_asset, validate_graphics_asset_projection,
+};
+pub use scene_composition::{compose_bound_scene, compose_bound_scene_with_camera};
+
+pub use live::{
+    GraphicsSessionMode, LiveCaptureOutput, LiveGraphicsError, LiveGraphicsSession,
+    LivePresentOutcome,
+};
 
 pub use supervisor::{
-    GraphicsFrameOutput, GraphicsWorkerError, GraphicsWorkerSupervisor, PromotedFrame,
-    WORKER_SCHEMA,
+    BoundSceneRenderAuthorization, GraphicsFrameOutput, GraphicsWorkerError,
+    GraphicsWorkerSupervisor, PromotedFrame, WORKER_SCHEMA,
+};
+pub use visual_quality::{
+    CAMPAIGN2_VISUAL_EVIDENCE_SCHEMA, Campaign2VisualEvidence, Campaign2VisualEvidenceBody,
+    Campaign2VisualMeasurements, QualityOutcome, QualityReason, QualityReasonCode, QualityRegion,
+    VISUAL_QUALITY_EVIDENCE_SCHEMA, VISUAL_QUALITY_PROFILE_SCHEMA, VisualObservation,
+    VisualObservationStatus, VisualQualityEvidence, VisualQualityEvidenceBody,
+    VisualQualityMeasurements, VisualQualityProfile, assess_campaign2_visual_evidence,
+    assess_visual_quality, validate_campaign2_visual_evidence,
+    validate_registered_visual_quality_profile, validate_visual_quality_evidence,
+};
+pub use window::{
+    CapabilityState, WINDOW_PROBE_RECEIPT_SCHEMA, WINDOW_TARGET_REQUEST_SCHEMA,
+    WindowBackendEvidence, WindowCapabilities, WindowContractError, WindowProbeReceipt,
+    WindowProbeStage, WindowProbeStatus, WindowTargetRequest, probe_lava_window,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,6 +128,10 @@ pub struct GraphicsScenePacket {
 pub struct GraphicsScenePacketBody {
     pub schema_version: String,
     pub packet_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_artifact_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene_artifact_sha256: Option<String>,
     pub world_artifact_id: String,
     pub world_artifact_sha256: String,
     pub spatial_fields_sha256: String,
@@ -290,6 +336,15 @@ pub struct TextureReference {
 #[serde(tag = "encoding", content = "base64", rename_all = "snake_case")]
 pub enum TexturePayload {
     Rgba8(String),
+    Rgba8MipChain { levels: Vec<TextureMipLevel> },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct TextureMipLevel {
+    pub width_px: u32,
+    pub height_px: u32,
+    pub base64: String,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -310,6 +365,12 @@ pub struct MeshPacket {
     pub uv0: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
     pub material_id: String,
+    /// Optional conditioned tangents. Empty means the backend may derive a
+    /// deterministic fallback from positions, normals, UVs, and triangle
+    /// order. Imported assets retain their Rust-conditioned stream here so a
+    /// backend does not silently replace authored tangent provenance.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tangents: Vec<[f32; 4]>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -449,6 +510,144 @@ pub struct GraphicsFeatures {
     pub gpu_timestamps: bool,
 }
 
+/// Source and capability identity captured by the Rust supervisor after it has
+/// validated the launched worker and renderer sources. The authority plane
+/// revalidates this typed bundle against the promoted frame receipt.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsRendererAttestationBody {
+    pub schema_version: String,
+    pub backend_id: String,
+    pub adapter_revision: String,
+    pub lava_revision: String,
+    pub worker_ready_message: Value,
+    pub ready: GraphicsReady,
+    pub source_digests: BTreeMap<String, String>,
+    pub source_identity_sha256: String,
+    pub renderer_identity_sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct GraphicsRendererAttestation {
+    pub body: GraphicsRendererAttestationBody,
+    pub attestation_sha256: String,
+}
+
+pub fn seal_renderer_attestation(
+    body: GraphicsRendererAttestationBody,
+) -> Result<GraphicsRendererAttestation, GraphicsContractError> {
+    validate_renderer_attestation_body(&body)?;
+    let attestation_sha256 = sha256_prefixed(&canonical_json(&body)?);
+    Ok(GraphicsRendererAttestation {
+        body,
+        attestation_sha256,
+    })
+}
+
+pub fn validate_renderer_attestation(
+    attestation: &GraphicsRendererAttestation,
+    frame: &GraphicsFrameReceipt,
+) -> Result<(), GraphicsContractError> {
+    let expected = sha256_prefixed(&canonical_json(&attestation.body)?);
+    if attestation.attestation_sha256 != expected {
+        return Err(GraphicsContractError::provenance(
+            "renderer attestation digest does not match its canonical body",
+        ));
+    }
+    validate_renderer_attestation_body(&attestation.body)?;
+    let body = &attestation.body;
+    let frame_body = &frame.body;
+    if frame_body.backend_id != body.backend_id
+        || frame_body.adapter_revision != body.adapter_revision
+        || frame_body.lava_revision != body.lava_revision
+        || frame_body.device_uuid != body.ready.device_uuid
+        || frame_body.worker_script_sha256
+            != body
+                .source_digests
+                .get("worker_script")
+                .map(String::as_str)
+                .unwrap_or_default()
+        || frame_body.renderer_identity_sha256 != body.renderer_identity_sha256
+    {
+        return Err(GraphicsContractError::provenance(
+            "promoted frame receipt is detached from renderer attestation",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_renderer_attestation_body(
+    body: &GraphicsRendererAttestationBody,
+) -> Result<(), GraphicsContractError> {
+    if body.schema_version != RENDERER_ATTESTATION_SCHEMA
+        || body.backend_id != LAVA_BACKEND_ID
+        || body.adapter_revision != ADAPTER_REVISION
+        || body.lava_revision != LAVA_REVISION
+    {
+        return Err(GraphicsContractError::provenance(
+            "renderer attestation is not bound to the audited Lava contract",
+        ));
+    }
+    validate_ready(&body.ready)?;
+    let required_sources = [
+        "graphics_contract",
+        "lava_adapter",
+        "manifest",
+        "project",
+        "worker_script",
+    ];
+    if body.source_digests.len() != required_sources.len()
+        || required_sources
+            .iter()
+            .any(|source| !body.source_digests.contains_key(*source))
+    {
+        return Err(GraphicsContractError::provenance(
+            "renderer attestation source manifest is incomplete",
+        ));
+    }
+    for (source, digest) in &body.source_digests {
+        valid_sha(digest, source)?;
+    }
+    let worker_script = body
+        .worker_ready_message
+        .get("script_sha256")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            GraphicsContractError::provenance(
+                "renderer attestation worker-ready message has no script identity",
+            )
+        })?;
+    if worker_script != body.source_digests["worker_script"]
+        || body
+            .worker_ready_message
+            .get("kind")
+            .and_then(Value::as_str)
+            != Some("ready")
+    {
+        return Err(GraphicsContractError::provenance(
+            "renderer attestation worker identity is inconsistent",
+        ));
+    }
+    let source_identity = sha256_prefixed(&canonical_json(&body.source_digests)?);
+    if body.source_identity_sha256 != source_identity {
+        return Err(GraphicsContractError::provenance(
+            "renderer attestation source identity does not match its manifest",
+        ));
+    }
+    let renderer_identity = sha256_prefixed(&canonical_json(&json!({
+        "capabilities": &body.ready,
+        "worker_ready": &body.worker_ready_message,
+        "sources": &body.source_digests,
+    }))?);
+    if body.renderer_identity_sha256 != renderer_identity {
+        return Err(GraphicsContractError::provenance(
+            "renderer attestation identity does not match its capabilities or sources",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct GraphicsFrameReceipt {
@@ -501,6 +700,21 @@ pub struct GraphicsFrameMeasurements {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
+pub struct GraphicsTextureResidencyTelemetry {
+    /// Number of distinct packet texture identities whose payloads were
+    /// materialized for this frame. This intentionally excludes adapter-owned
+    /// default textures.
+    pub texture_count: usize,
+    /// Sum of resident mip levels across those distinct packet textures.
+    pub mip_levels: usize,
+    /// Sum of decoded RGBA8 bytes across those resident levels.
+    pub payload_bytes: usize,
+    /// Highest sampler LOD made resident for any packet texture.
+    pub max_sampler_lod: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct GraphicsTelemetry {
     pub upload_bytes: usize,
     pub readback_bytes: usize,
@@ -518,6 +732,10 @@ pub struct GraphicsTelemetry {
     pub gameplay_critical_culled_instance_count: usize,
     pub terrain_vertex_count: usize,
     pub mesh_vertex_count: usize,
+    /// Optional for backward-compatible single-level receipts. A frame that
+    /// carries a multi-level packet texture must provide this evidence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texture_residency: Option<GraphicsTextureResidencyTelemetry>,
     pub frame_time_us: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu_frame_time_us: Option<u64>,
@@ -584,6 +802,21 @@ pub fn validate_scene_packet(packet: &GraphicsScenePacket) -> Result<(), Graphic
         )));
     }
     valid_id(&packet.body.packet_id, "packet_id")?;
+    match (
+        &packet.body.scene_artifact_id,
+        &packet.body.scene_artifact_sha256,
+    ) {
+        (Some(scene_id), Some(scene_sha256)) => {
+            valid_id(scene_id, "scene_artifact_id")?;
+            valid_sha(scene_sha256, "scene_artifact_sha256")?;
+        }
+        (None, None) => {}
+        _ => {
+            return Err(GraphicsContractError::provenance(
+                "scene artifact identity must include both id and digest",
+            ));
+        }
+    }
     valid_id(&packet.body.world_artifact_id, "world_artifact_id")?;
     valid_sha(&packet.body.world_artifact_sha256, "world_artifact_sha256")?;
     valid_sha(&packet.body.spatial_fields_sha256, "spatial_fields_sha256")?;
@@ -710,7 +943,7 @@ pub fn validate_scene_packet(packet: &GraphicsScenePacket) -> Result<(), Graphic
     Ok(())
 }
 
-pub fn seal_frame_receipt(
+fn seal_frame_receipt(
     body: GraphicsFrameReceiptBody,
 ) -> Result<GraphicsFrameReceipt, GraphicsContractError> {
     let receipt_sha256 = sha256_prefixed(&canonical_json(&body)?);
@@ -722,20 +955,68 @@ pub fn seal_frame_receipt(
     Ok(receipt)
 }
 
-pub fn seal_frame_receipt_with_capture(
+fn seal_frame_receipt_with_capture(
+    packet: &GraphicsScenePacket,
     body: GraphicsFrameReceiptBody,
     capture_bytes: &[u8],
 ) -> Result<GraphicsFrameReceipt, GraphicsContractError> {
     let receipt = seal_frame_receipt(body)?;
-    validate_frame_receipt(&receipt, capture_bytes)?;
+    validate_frame_receipt(&receipt, packet, capture_bytes)?;
     Ok(receipt)
 }
 
-pub fn validate_frame_receipt(
+/// Produce the deterministic receipt projection used by certification
+/// snapshots. Runtime timing telemetry is inherently host- and load-dependent;
+/// benchmark commands retain it in their ordinary receipts, while the
+/// certification artifact keeps structural telemetry and explicitly zeros the
+/// timing fields so identical scene/capture bytes produce identical evidence.
+pub fn deterministic_certification_frame_receipt(
+    packet: &GraphicsScenePacket,
     receipt: &GraphicsFrameReceipt,
     capture_bytes: &[u8],
+) -> Result<GraphicsFrameReceipt, GraphicsContractError> {
+    let mut body = receipt.body.clone();
+    body.telemetry.frame_time_us = 0;
+    body.telemetry.gpu_frame_time_us = None;
+    body.telemetry.pass_timings = GraphicsPassTimings {
+        prepare_us: 0,
+        scene_raster_us: 0,
+        resolve_us: 0,
+        overlay_us: 0,
+        flush_readback_us: 0,
+        gpu_prepare_us: None,
+        gpu_scene_raster_us: None,
+        gpu_resolve_us: None,
+        gpu_overlay_us: None,
+    };
+    body.detail =
+        "Rust-promoted Lava frame; timing telemetry omitted from deterministic certification identity"
+            .into();
+    seal_frame_receipt_with_capture(packet, body, capture_bytes)
+}
+
+pub(crate) fn validate_frame_receipt(
+    receipt: &GraphicsFrameReceipt,
+    packet: &GraphicsScenePacket,
+    capture_bytes: &[u8],
 ) -> Result<(), GraphicsContractError> {
+    validate_scene_packet(packet)?;
     validate_frame_receipt_shape(receipt)?;
+    validate_texture_residency_telemetry(packet, &receipt.body.telemetry)?;
+    if receipt.body.packet_sha256 != packet.packet_sha256 {
+        return Err(GraphicsContractError::provenance(
+            "frame receipt is bound to a different scene packet",
+        ));
+    }
+    if receipt.body.capture_id != packet.body.capture.capture_id
+        || receipt.body.width_px != packet.body.capture.width_px
+        || receipt.body.height_px != packet.body.capture.height_px
+        || receipt.body.format != packet.body.capture.format
+    {
+        return Err(GraphicsContractError::provenance(
+            "frame receipt is detached from the packet capture request",
+        ));
+    }
     match receipt.body.status {
         FrameStatus::Passed => {
             if capture_bytes.is_empty() {
@@ -751,6 +1032,13 @@ pub fn validate_frame_receipt(
                     "capture bytes do not match frame receipt digest",
                 ));
             }
+            let authoritative_measurements = measure_frame_capture(packet, capture_bytes)?;
+            if receipt.body.measurements != authoritative_measurements {
+                return Err(GraphicsContractError::provenance(
+                    "frame receipt measurements do not match independently measured capture bytes",
+                ));
+            }
+            validate_native_visual_gate(packet, &authoritative_measurements, capture_bytes)?;
         }
         FrameStatus::Failed | FrameStatus::Unsupported => {
             if !capture_bytes.is_empty() {
@@ -787,17 +1075,21 @@ pub fn measure_frame_capture(
 
     let mut distinct_colors = BTreeSet::new();
     let mut role_colors: [BTreeSet<[u8; 4]>; 5] = std::array::from_fn(|_| BTreeSet::new());
+    let mut role_samples: [Vec<ScreenSample>; 5] = std::array::from_fn(|_| Vec::new());
     for overlay in &packet.body.overlays {
         let index = marker_role_index(overlay_role(overlay));
         role_colors[index].insert(rgba8(overlay_color(overlay))?);
+        role_samples[index].extend(overlay_samples(&packet.body.camera, overlay));
     }
 
     let mut role_pixels = [0usize; 5];
     let mut mean = 0.0f64;
     let mut sum_squared_delta = 0.0f64;
     let mut sample_count = 0.0f64;
-    for pixel in capture_bytes.chunks_exact(4) {
+    for (pixel_index, pixel) in capture_bytes.chunks_exact(4).enumerate() {
         let rgba = [pixel[0], pixel[1], pixel[2], pixel[3]];
+        let x = pixel_index % width;
+        let y = pixel_index / width;
         distinct_colors.insert((rgba[0], rgba[1], rgba[2]));
         let luminance = 0.2126 * f64::from(rgba[0]) / 255.0
             + 0.7152 * f64::from(rgba[1]) / 255.0
@@ -807,7 +1099,12 @@ pub fn measure_frame_capture(
         mean += delta / sample_count;
         sum_squared_delta += delta * (luminance - mean);
         for (index, colors) in role_colors.iter().enumerate() {
-            if colors.contains(&rgba) {
+            if colors.contains(&rgba)
+                && role_samples[index]
+                    .iter()
+                    .copied()
+                    .any(|sample| sample_contains(sample, x, y))
+            {
                 role_pixels[index] += 1;
             }
         }
@@ -830,6 +1127,7 @@ pub fn measure_frame_capture(
 pub fn validate_native_visual_gate(
     packet: &GraphicsScenePacket,
     measurements: &GraphicsFrameMeasurements,
+    capture_bytes: &[u8],
 ) -> Result<(), GraphicsContractError> {
     validate_scene_packet(packet)?;
     validate_measurements(measurements)?;
@@ -852,6 +1150,17 @@ pub fn validate_native_visual_gate(
     if measurements.distinct_terrain_colors < MIN_NATIVE_DISTINCT_COLORS {
         return Err(GraphicsContractError::provenance(
             "native visual gate failed: terrain capture lacks useful color diversity",
+        ));
+    }
+    if capture_bytes.len() != pixel_count * 4 {
+        return Err(GraphicsContractError::provenance(
+            "native visual gate cannot inspect a capture with detached dimensions",
+        ));
+    }
+    let non_dominant_pixels = non_dominant_pixel_count(capture_bytes);
+    if non_dominant_pixels < MIN_NATIVE_NON_DOMINANT_PIXELS {
+        return Err(GraphicsContractError::provenance(
+            "native visual gate failed: capture has no spatially supported terrain variation",
         ));
     }
     for role in [
@@ -942,6 +1251,211 @@ fn rgba8(color: &[f32; 4]) -> Result<[u8; 4], GraphicsContractError> {
         .map_err(|_| GraphicsContractError::malformed("visual measurement color has wrong arity"))
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ScreenSample {
+    x: f32,
+    y: f32,
+    radius_px: f32,
+}
+
+fn normalize3(vector: [f32; 3]) -> [f32; 3] {
+    let length = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+    [vector[0] / length, vector[1] / length, vector[2] / length]
+}
+
+fn dot3(first: [f32; 3], second: [f32; 3]) -> f32 {
+    first[0] * second[0] + first[1] * second[1] + first[2] * second[2]
+}
+
+fn cross3(first: [f32; 3], second: [f32; 3]) -> [f32; 3] {
+    [
+        first[1] * second[2] - first[2] * second[1],
+        first[2] * second[0] - first[0] * second[2],
+        first[0] * second[1] - first[1] * second[0],
+    ]
+}
+
+fn camera_basis(camera: &GraphicsCamera) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    let forward = normalize3(camera.forward_xyz);
+    let right = normalize3(cross3(forward, normalize3(camera.up_xyz)));
+    let up = normalize3(cross3(right, forward));
+    (forward, right, up)
+}
+
+fn project_screen_point(camera: &GraphicsCamera, position: [f32; 3]) -> Option<(f32, f32, f32)> {
+    let (forward, right, up) = camera_basis(camera);
+    let relative = [
+        position[0] - camera.position_xyz_m[0],
+        position[1] - camera.position_xyz_m[1],
+        position[2] - camera.position_xyz_m[2],
+    ];
+    let depth = dot3(forward, relative);
+    if depth < camera.near_plane_m || depth > camera.far_plane_m {
+        return None;
+    }
+    let horizontal = dot3(right, relative);
+    let vertical = dot3(up, relative);
+    let aspect = camera.width_px as f32 / camera.height_px as f32;
+    let (ndc_x, ndc_y, pixels_per_meter) = match camera.projection {
+        CameraProjection::Orthographic { span_m } => {
+            let half_height = span_m * 0.5;
+            let half_width = half_height * aspect;
+            (
+                horizontal / half_width,
+                vertical / half_height,
+                camera.height_px as f32 / span_m,
+            )
+        }
+        CameraProjection::Perspective { fov_y_degrees } => {
+            let half_fov = (fov_y_degrees.to_radians() * 0.5).tan();
+            let half_height = depth * half_fov;
+            let half_width = half_height * aspect;
+            (
+                horizontal / half_width,
+                vertical / half_height,
+                camera.height_px as f32 / (2.0 * half_height),
+            )
+        }
+    };
+    if !ndc_x.is_finite() || !ndc_y.is_finite() || !pixels_per_meter.is_finite() {
+        return None;
+    }
+    Some((
+        (ndc_x * 0.5 + 0.5) * camera.width_px as f32,
+        // The packet's camera basis is semantic. The Lava/Vulkan lowering
+        // uses a positive-height viewport, whose positive NDC Y lands in the
+        // lower framebuffer rows; keep Rust-owned masks and overlay sampling
+        // in the same top-to-bottom screen convention as the capture bytes.
+        (-ndc_y * 0.5 + 0.5) * camera.height_px as f32,
+        pixels_per_meter,
+    ))
+}
+
+fn clip_overlay_segment(
+    camera: &GraphicsCamera,
+    first: [f32; 3],
+    last: [f32; 3],
+) -> Option<([f32; 3], [f32; 3])> {
+    let (forward, _, _) = camera_basis(camera);
+    let first_relative = [
+        first[0] - camera.position_xyz_m[0],
+        first[1] - camera.position_xyz_m[1],
+        first[2] - camera.position_xyz_m[2],
+    ];
+    let last_relative = [
+        last[0] - camera.position_xyz_m[0],
+        last[1] - camera.position_xyz_m[1],
+        last[2] - camera.position_xyz_m[2],
+    ];
+    let first_depth = dot3(forward, first_relative);
+    let last_depth = dot3(forward, last_relative);
+    let depth_delta = last_depth - first_depth;
+    if depth_delta == 0.0 {
+        return (camera.near_plane_m..=camera.far_plane_m)
+            .contains(&first_depth)
+            .then_some((first, last));
+    }
+    let mut lower = (camera.near_plane_m - first_depth) / depth_delta;
+    let mut upper = (camera.far_plane_m - first_depth) / depth_delta;
+    if lower > upper {
+        std::mem::swap(&mut lower, &mut upper);
+    }
+    let start = lower.max(0.0);
+    let end = upper.min(1.0);
+    (start <= end).then(|| {
+        let interpolate = |amount: f32| {
+            [
+                first[0] + (last[0] - first[0]) * amount,
+                first[1] + (last[1] - first[1]) * amount,
+                first[2] + (last[2] - first[2]) * amount,
+            ]
+        };
+        (interpolate(start), interpolate(end))
+    })
+}
+
+fn overlay_samples(camera: &GraphicsCamera, overlay: &SemanticOverlay) -> Vec<ScreenSample> {
+    let mut samples = Vec::new();
+    match overlay {
+        SemanticOverlay::Point {
+            position_xyz_m,
+            radius_m,
+            ..
+        } => {
+            if let Some((x, y, pixels_per_meter)) = project_screen_point(camera, *position_xyz_m) {
+                samples.push(ScreenSample {
+                    x,
+                    y,
+                    radius_px: (*radius_m * pixels_per_meter + 3.0).max(4.0),
+                });
+            }
+        }
+        SemanticOverlay::Circle {
+            center_xyz_m,
+            radius_m,
+            ..
+        } => {
+            for step in 0..16 {
+                let angle = std::f32::consts::TAU * step as f32 / 16.0;
+                let position = [
+                    center_xyz_m[0] + *radius_m * angle.cos(),
+                    center_xyz_m[1],
+                    center_xyz_m[2] + *radius_m * angle.sin(),
+                ];
+                if let Some((x, y, pixels_per_meter)) = project_screen_point(camera, position) {
+                    samples.push(ScreenSample {
+                        x,
+                        y,
+                        radius_px: (4.0 + pixels_per_meter * 0.08).max(4.0),
+                    });
+                }
+            }
+        }
+        SemanticOverlay::Polyline {
+            points_xyz_m,
+            thickness_m,
+            ..
+        } => {
+            for pair in points_xyz_m.windows(2) {
+                let Some((first, last)) = clip_overlay_segment(camera, pair[0], pair[1]) else {
+                    continue;
+                };
+                for step in 0..=8 {
+                    let amount = step as f32 / 8.0;
+                    let position = [
+                        first[0] + (last[0] - first[0]) * amount,
+                        first[1] + (last[1] - first[1]) * amount,
+                        first[2] + (last[2] - first[2]) * amount,
+                    ];
+                    if let Some((x, y, pixels_per_meter)) = project_screen_point(camera, position) {
+                        samples.push(ScreenSample {
+                            x,
+                            y,
+                            radius_px: (*thickness_m * pixels_per_meter + 3.0).max(4.0),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    samples
+}
+
+fn sample_contains(sample: ScreenSample, x: usize, y: usize) -> bool {
+    let dx = x as f32 + 0.5 - sample.x;
+    let dy = y as f32 + 0.5 - sample.y;
+    dx * dx + dy * dy <= sample.radius_px * sample.radius_px
+}
+
+fn non_dominant_pixel_count(capture_bytes: &[u8]) -> usize {
+    let mut colors = BTreeMap::<[u8; 3], usize>::new();
+    for pixel in capture_bytes.chunks_exact(4) {
+        *colors.entry([pixel[0], pixel[1], pixel[2]]).or_default() += 1;
+    }
+    let dominant = colors.values().copied().max().unwrap_or(0);
+    capture_bytes.len() / 4 - dominant
+}
+
 fn validate_frame_receipt_shape(
     receipt: &GraphicsFrameReceipt,
 ) -> Result<(), GraphicsContractError> {
@@ -960,12 +1474,31 @@ fn validate_frame_receipt_shape(
     }
     valid_sha(&body.packet_sha256, "packet_sha256")?;
     valid_id(&body.capture_id, "capture_id")?;
-    valid_id(&body.backend_id, "backend_id")?;
+    if body.backend_id != LAVA_BACKEND_ID {
+        return Err(GraphicsContractError::provenance(
+            "frame receipt backend is not the audited Lava backend",
+        ));
+    }
+    if body.adapter_revision != ADAPTER_REVISION {
+        return Err(GraphicsContractError::provenance(
+            "frame receipt adapter revision is not the audited native adapter",
+        ));
+    }
+    if body.lava_revision != LAVA_REVISION {
+        return Err(GraphicsContractError::provenance(
+            "frame receipt Lava revision is not the audited revision",
+        ));
+    }
     valid_id(&body.adapter_revision, "adapter_revision")?;
     valid_id(&body.lava_revision, "lava_revision")?;
     valid_id(&body.device_uuid, "device_uuid")?;
     valid_sha(&body.worker_script_sha256, "worker_script_sha256")?;
     valid_sha(&body.renderer_identity_sha256, "renderer_identity_sha256")?;
+    if body.format != CaptureFormat::Rgba8Srgb {
+        return Err(GraphicsContractError::unsupported(
+            "native frame receipts require RGBA8 sRGB captures",
+        ));
+    }
     validate_dimensions(body.width_px, body.height_px, "frame receipt")?;
     validate_measurements(&body.measurements)?;
     let pixel_count = usize::try_from(body.width_px)
@@ -1125,6 +1658,7 @@ fn obstacle_mesh() -> MeshPacket {
         uv0,
         indices,
         material_id: "obstacle-default".into(),
+        tangents: Vec::new(),
     }
 }
 
@@ -1173,6 +1707,7 @@ fn foliage_mesh() -> MeshPacket {
         uv0,
         indices,
         material_id: "foliage-default".into(),
+        tangents: Vec::new(),
     }
 }
 
@@ -1269,7 +1804,196 @@ fn torus_mesh(
         uv0,
         indices,
         material_id: material_id.into(),
+        tangents: Vec::new(),
     }
+}
+
+fn disc_mesh(mesh_id: &str, material_id: &str, segments: usize) -> MeshPacket {
+    let mut positions = Vec::with_capacity(segments * 3);
+    let mut normals = Vec::with_capacity(segments * 3);
+    let mut uv0 = Vec::with_capacity(segments * 3);
+    let mut indices = Vec::with_capacity(segments * 3);
+    let segments_f = segments as f32;
+    for segment in 0..segments {
+        let first_angle = std::f32::consts::TAU * segment as f32 / segments_f;
+        let second_angle = std::f32::consts::TAU * (segment + 1) as f32 / segments_f;
+        let first = [first_angle.cos(), 0.0, first_angle.sin()];
+        let second = [second_angle.cos(), 0.0, second_angle.sin()];
+        let first_index = positions.len() as u32;
+        positions.extend([[0.0, 0.0, 0.0], first, second]);
+        normals.extend([[0.0, 1.0, 0.0]; 3]);
+        uv0.extend([
+            [0.5, 0.5],
+            [0.5 + first[0] * 0.5, 0.5 + first[2] * 0.5],
+            [0.5 + second[0] * 0.5, 0.5 + second[2] * 0.5],
+        ]);
+        indices.extend([first_index, first_index + 1, first_index + 2]);
+    }
+    MeshPacket {
+        mesh_id: mesh_id.into(),
+        positions_m: positions,
+        normals,
+        uv0,
+        indices,
+        material_id: material_id.into(),
+        tangents: Vec::new(),
+    }
+}
+
+fn ring_mesh(
+    mesh_id: &str,
+    material_id: &str,
+    inner_radius: f32,
+    outer_radius: f32,
+    segments: usize,
+) -> MeshPacket {
+    let mut positions = Vec::with_capacity(segments * 4);
+    let mut normals = Vec::with_capacity(segments * 4);
+    let mut uv0 = Vec::with_capacity(segments * 4);
+    let mut indices = Vec::with_capacity(segments * 6);
+    let segments_f = segments as f32;
+    for segment in 0..segments {
+        let first_angle = std::f32::consts::TAU * segment as f32 / segments_f;
+        let second_angle = std::f32::consts::TAU * (segment + 1) as f32 / segments_f;
+        let vertices = [
+            [
+                outer_radius * first_angle.cos(),
+                0.0,
+                outer_radius * first_angle.sin(),
+            ],
+            [
+                inner_radius * first_angle.cos(),
+                0.0,
+                inner_radius * first_angle.sin(),
+            ],
+            [
+                inner_radius * second_angle.cos(),
+                0.0,
+                inner_radius * second_angle.sin(),
+            ],
+            [
+                outer_radius * second_angle.cos(),
+                0.0,
+                outer_radius * second_angle.sin(),
+            ],
+        ];
+        let first_index = positions.len() as u32;
+        positions.extend(vertices);
+        normals.extend([[0.0, 1.0, 0.0]; 4]);
+        uv0.extend([[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]]);
+        indices.extend([
+            first_index,
+            first_index + 2,
+            first_index + 1,
+            first_index,
+            first_index + 3,
+            first_index + 2,
+        ]);
+    }
+    MeshPacket {
+        mesh_id: mesh_id.into(),
+        positions_m: positions,
+        normals,
+        uv0,
+        indices,
+        material_id: material_id.into(),
+        tangents: Vec::new(),
+    }
+}
+
+fn ellipsoid_mesh(
+    mesh_id: &str,
+    material_id: &str,
+    radii: [f32; 3],
+    longitude_segments: usize,
+    latitude_segments: usize,
+) -> MeshPacket {
+    let mut positions = Vec::with_capacity((longitude_segments + 1) * (latitude_segments + 1));
+    let mut normals = Vec::with_capacity((longitude_segments + 1) * (latitude_segments + 1));
+    let mut uv0 = Vec::with_capacity((longitude_segments + 1) * (latitude_segments + 1));
+    let mut indices = Vec::with_capacity(longitude_segments * latitude_segments * 6);
+    for latitude in 0..=latitude_segments {
+        let v = latitude as f32 / latitude_segments as f32;
+        let polar = std::f32::consts::PI * v;
+        let sin_polar = polar.sin();
+        let cos_polar = polar.cos();
+        for longitude in 0..=longitude_segments {
+            let u = longitude as f32 / longitude_segments as f32;
+            let azimuth = std::f32::consts::TAU * u;
+            let sin_azimuth = azimuth.sin();
+            let cos_azimuth = azimuth.cos();
+            let unit = [sin_polar * cos_azimuth, cos_polar, sin_polar * sin_azimuth];
+            positions.push([radii[0] * unit[0], radii[1] * unit[1], radii[2] * unit[2]]);
+            let unnormalized_normal = [
+                unit[0] / radii[0].max(0.0001),
+                unit[1] / radii[1].max(0.0001),
+                unit[2] / radii[2].max(0.0001),
+            ];
+            let normal_length = unnormalized_normal
+                .iter()
+                .map(|value| value * value)
+                .sum::<f32>()
+                .sqrt()
+                .max(0.0001);
+            normals.push([
+                unnormalized_normal[0] / normal_length,
+                unnormalized_normal[1] / normal_length,
+                unnormalized_normal[2] / normal_length,
+            ]);
+            uv0.push([u, v]);
+        }
+    }
+    for latitude in 0..latitude_segments {
+        for longitude in 0..longitude_segments {
+            let row = latitude * (longitude_segments + 1);
+            let next_row = (latitude + 1) * (longitude_segments + 1);
+            let first = (row + longitude) as u32;
+            let second = (row + longitude + 1) as u32;
+            let third = (next_row + longitude + 1) as u32;
+            let fourth = (next_row + longitude) as u32;
+            indices.extend([first, second, third, first, third, fourth]);
+        }
+    }
+    MeshPacket {
+        mesh_id: mesh_id.into(),
+        positions_m: positions,
+        normals,
+        uv0,
+        indices,
+        material_id: material_id.into(),
+        tangents: Vec::new(),
+    }
+}
+
+fn campaign2_terrain_height(packet: &GraphicsScenePacket, x: f64, z: f64) -> f32 {
+    let cell = nearest_cell(
+        f64::from(packet.body.terrain.width_m),
+        f64::from(packet.body.terrain.length_m),
+        packet.body.terrain.resolution,
+        [x, z],
+    );
+    match &packet.body.terrain.heights_m.payload {
+        BufferPayload::F32(values) => values.get(cell).copied().unwrap_or(0.0),
+        BufferPayload::U8(_) | BufferPayload::U32(_) => 0.0,
+    }
+}
+
+fn campaign2_view_name(view: Campaign2View) -> &'static str {
+    match view {
+        Campaign2View::Close => "close",
+        Campaign2View::Medium => "medium",
+        Campaign2View::Wide => "wide",
+    }
+}
+
+/// The three fixed inspection cuts used by Campaign 2.  They are intentionally
+/// a small closed set rather than a free-form camera API: the resulting
+/// evidence remains reproducible and each cut has a known perceptual job.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Campaign2View {
+    Close,
+    Medium,
+    Wide,
 }
 
 fn deterministic_foliage_instances(
@@ -1375,6 +2099,7 @@ impl BeaconMeshBuffers {
             uv0: self.uv0,
             indices: self.indices,
             material_id: material_id.into(),
+            tangents: Vec::new(),
         }
     }
 
@@ -1385,8 +2110,26 @@ impl BeaconMeshBuffers {
             let second_angle = std::f32::consts::TAU * (segment + 1) as f32 / segments_f;
             let first_u = segment as f32 / segments_f;
             let second_u = (segment + 1) as f32 / segments_f;
-            let normal_angle = (first_angle + second_angle) * 0.5;
-            let normal = [normal_angle.cos(), 0.0, normal_angle.sin()];
+            let radial_delta = upper_radius - lower_radius;
+            let vertical_delta = upper_y - lower_y;
+            let smooth_normal = |angle: f32| {
+                let candidate = [
+                    vertical_delta * angle.cos(),
+                    -radial_delta,
+                    vertical_delta * angle.sin(),
+                ];
+                let length = candidate
+                    .iter()
+                    .map(|value| value * value)
+                    .sum::<f32>()
+                    .sqrt()
+                    .max(0.0001);
+                [
+                    candidate[0] / length,
+                    candidate[1] / length,
+                    candidate[2] / length,
+                ]
+            };
             let face = [
                 [
                     lower_radius * first_angle.cos(),
@@ -1411,7 +2154,12 @@ impl BeaconMeshBuffers {
             ];
             let first = self.positions.len() as u32;
             self.positions.extend(face);
-            self.normals.extend([normal; 4]);
+            self.normals.extend([
+                smooth_normal(first_angle),
+                smooth_normal(second_angle),
+                smooth_normal(second_angle),
+                smooth_normal(first_angle),
+            ]);
             self.uv0.extend([
                 [first_u, 0.0],
                 [second_u, 0.0],
@@ -1530,12 +2278,80 @@ fn procedural_material_albedo_texture(
 }
 
 fn procedural_terrain_albedo_texture() -> TextureReference {
-    procedural_material_albedo_texture(
-        "riverwatch-terrain-albedo",
-        "procedural-riverwatch-terrain-albedo-v1",
-        [142, 126, 94],
-        [112, 100, 76],
+    const WIDTH: usize = 128;
+    const HEIGHT: usize = 128;
+
+    let mut bytes = Vec::with_capacity(WIDTH * HEIGHT * 4);
+    for row in 0..HEIGHT {
+        for column in 0..WIDTH {
+            let u = column as f32 / WIDTH as f32;
+            let v = row as f32 / HEIGHT as f32;
+            let broad = terrain_value_noise(u, v, 4);
+            let medium = terrain_value_noise(u, v, 13);
+            let fine = terrain_value_noise(u, v, 37);
+            let grain = terrain_hash(column as u32, row as u32);
+            let mineral_cell = terrain_hash((column / 2) as u32, (row / 2) as u32);
+            let mineral_fleck = if mineral_cell > 0.82 {
+                -0.30
+            } else if mineral_cell < 0.04 {
+                0.19
+            } else {
+                0.0
+            };
+            let tone = (0.5
+                + (broad - 0.5) * 0.72
+                + (medium - 0.5) * 0.44
+                + (fine - 0.5) * 0.58
+                + (grain - 0.5) * 0.30
+                + mineral_fleck)
+                .clamp(0.0, 1.0);
+
+            // A restrained earth-and-moss albedo gives the existing neutral
+            // terrain surface visible macro, micro, and sparse mineral-fleck
+            // structure. It encodes no biome, region, or gameplay meaning;
+            // those remain in the independently bound world fields.
+            let channels = [
+                (78.0 + tone * 90.0).round() as u8,
+                (88.0 + tone * 76.0).round() as u8,
+                (58.0 + tone * 54.0).round() as u8,
+            ];
+            bytes.extend([channels[0], channels[1], channels[2], 255]);
+        }
+    }
+
+    procedural_texture(
+        "riverwatch-terrain-albedo-v4",
+        "procedural-riverwatch-terrain-albedo-v4",
+        TextureColorSpace::Srgb,
+        WIDTH as u32,
+        HEIGHT as u32,
+        bytes,
     )
+}
+
+fn terrain_hash(x: u32, y: u32) -> f32 {
+    let mut value = x.wrapping_mul(0x9e37_79b9) ^ y.wrapping_mul(0x85eb_ca6b) ^ 0xc2b2_ae35;
+    value ^= value >> 16;
+    value = value.wrapping_mul(0x7feb_352d);
+    value ^= value >> 15;
+    value = value.wrapping_mul(0x846c_a68b);
+    value ^= value >> 16;
+    value as f32 / u32::MAX as f32
+}
+
+fn terrain_value_noise(u: f32, v: f32, cells: u32) -> f32 {
+    let x = u * cells as f32;
+    let y = v * cells as f32;
+    let x0 = x.floor() as u32;
+    let y0 = y.floor() as u32;
+    let tx = x - x.floor();
+    let ty = y - y.floor();
+    let tx = tx * tx * (3.0 - 2.0 * tx);
+    let ty = ty * ty * (3.0 - 2.0 * ty);
+    let sample = |sample_x: u32, sample_y: u32| terrain_hash(sample_x % cells, sample_y % cells);
+    let top = sample(x0, y0) * (1.0 - tx) + sample(x0 + 1, y0) * tx;
+    let bottom = sample(x0, y0 + 1) * (1.0 - tx) + sample(x0 + 1, y0 + 1) * tx;
+    top * (1.0 - ty) + bottom * ty
 }
 
 fn procedural_stone_albedo_texture() -> TextureReference {
@@ -1613,6 +2429,168 @@ fn procedural_showcase_emissive_texture() -> TextureReference {
         TextureColorSpace::Srgb,
         width as u32,
         height as u32,
+        bytes,
+    )
+}
+
+fn procedural_campaign2_terrain_albedo_texture() -> TextureReference {
+    const WIDTH: usize = 160;
+    const HEIGHT: usize = 160;
+    let mut bytes = Vec::with_capacity(WIDTH * HEIGHT * 4);
+    for row in 0..HEIGHT {
+        for column in 0..WIDTH {
+            let u = column as f32 / WIDTH as f32;
+            let v = row as f32 / HEIGHT as f32;
+            let broad = terrain_value_noise(u, v, 5);
+            let medium = terrain_value_noise(u, v, 17);
+            let fine = terrain_value_noise(u, v, 61);
+            let ridge = (medium - 0.5).abs() * 2.0;
+            let dry = ((u * 7.0 + v * 5.0 + broad * 2.2).sin() * 0.5 + 0.5).clamp(0.0, 1.0);
+            let moss = (0.62 + (broad - 0.5) * 0.58 + (fine - 0.5) * 0.22).clamp(0.0, 1.0);
+            let rock = (ridge * 0.54 + dry * 0.14).clamp(0.0, 1.0);
+            let base = [58.0, 86.0, 46.0];
+            let soil = [100.0, 74.0, 46.0];
+            let stone = [112.0, 115.0, 108.0];
+            let grass_weight = moss * (1.0 - rock * 0.72);
+            let soil_weight = ((1.0 - grass_weight) * (1.0 - rock) * 0.82).clamp(0.0, 1.0);
+            let stone_weight = 1.0 - grass_weight - soil_weight;
+            let grain = (terrain_hash(column as u32, row as u32) - 0.5) * 10.0;
+            let pebble_hash = terrain_hash((column / 3) as u32, (row / 3) as u32);
+            let pebble = if pebble_hash > 0.965 {
+                24.0
+            } else if pebble_hash < 0.035 {
+                -18.0
+            } else {
+                0.0
+            };
+            let red = (base[0] * grass_weight
+                + soil[0] * soil_weight
+                + stone[0] * stone_weight
+                + grain
+                + pebble)
+                .clamp(0.0, 255.0) as u8;
+            let green = (base[1] * grass_weight
+                + soil[1] * soil_weight
+                + stone[1] * stone_weight
+                + grain * 0.72)
+                .clamp(0.0, 255.0) as u8;
+            let blue = (base[2] * grass_weight
+                + soil[2] * soil_weight
+                + stone[2] * stone_weight
+                + grain * 0.45)
+                .clamp(0.0, 255.0) as u8;
+            bytes.extend([red, green, blue, 255]);
+        }
+    }
+    procedural_texture(
+        "wge-campaign2-terrain-albedo",
+        "procedural-wge-campaign2-terrain-albedo-v1",
+        TextureColorSpace::Srgb,
+        WIDTH as u32,
+        HEIGHT as u32,
+        bytes,
+    )
+}
+
+fn procedural_campaign2_wet_albedo_texture() -> TextureReference {
+    const WIDTH: usize = 32;
+    const HEIGHT: usize = 32;
+    let mut bytes = Vec::with_capacity(WIDTH * HEIGHT * 4);
+    for row in 0..HEIGHT {
+        for column in 0..WIDTH {
+            let u = column as f32 / WIDTH as f32;
+            let v = row as f32 / HEIGHT as f32;
+            let ripple = ((u * 18.0 + (v * 7.0).sin() * 1.8).sin() * 0.5 + 0.5).powf(7.0);
+            let glint = if (column * 13 + row * 7) % 29 == 0 {
+                0.42
+            } else {
+                0.0
+            };
+            let value = (0.34 + ripple * 0.34 + glint).clamp(0.0, 1.0);
+            bytes.extend([
+                (value * 110.0) as u8,
+                (value * 164.0) as u8,
+                (value * 214.0) as u8,
+                255,
+            ]);
+        }
+    }
+    procedural_texture(
+        "wge-campaign2-wet-albedo",
+        "procedural-wge-campaign2-wet-albedo-v1",
+        TextureColorSpace::Srgb,
+        WIDTH as u32,
+        HEIGHT as u32,
+        bytes,
+    )
+}
+
+fn procedural_campaign2_foliage_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "wge-campaign2-foliage-albedo",
+        "procedural-wge-campaign2-foliage-albedo-v1",
+        [52, 96, 30],
+        [132, 174, 58],
+    )
+}
+
+fn procedural_campaign2_bark_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "wge-campaign2-bark-albedo",
+        "procedural-wge-campaign2-bark-albedo-v1",
+        [76, 48, 28],
+        [154, 96, 52],
+    )
+}
+
+fn procedural_campaign2_hero_stone_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "wge-campaign2-hero-stone-albedo",
+        "procedural-wge-campaign2-hero-stone-albedo-v1",
+        [122, 134, 144],
+        [208, 216, 220],
+    )
+}
+
+fn procedural_campaign2_hero_metal_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "wge-campaign2-hero-metal-albedo",
+        "procedural-wge-campaign2-hero-metal-albedo-v1",
+        [194, 94, 28],
+        [252, 196, 86],
+    )
+}
+
+fn procedural_campaign2_hero_glow_albedo_texture() -> TextureReference {
+    procedural_material_albedo_texture(
+        "wge-campaign2-hero-glow-albedo",
+        "procedural-wge-campaign2-hero-glow-albedo-v1",
+        [18, 84, 116],
+        [84, 220, 232],
+    )
+}
+
+fn procedural_campaign2_emissive_texture() -> TextureReference {
+    const WIDTH: usize = 32;
+    const HEIGHT: usize = 32;
+    let mut bytes = Vec::with_capacity(WIDTH * HEIGHT * 4);
+    for row in 0..HEIGHT {
+        for column in 0..WIDTH {
+            let band = (13..=18).contains(&row) || column % 16 == 0;
+            let pulse = ((row * 5 + column * 11) % 31) == 0;
+            bytes.extend(if band || pulse {
+                [42, 190, 232, 255]
+            } else {
+                [0, 0, 0, 255]
+            });
+        }
+    }
+    procedural_texture(
+        "wge-campaign2-emissive",
+        "procedural-wge-campaign2-emissive-v1",
+        TextureColorSpace::Srgb,
+        WIDTH as u32,
+        HEIGHT as u32,
         bytes,
     )
 }
@@ -1756,7 +2734,9 @@ pub fn lower_reference_world(
         width_px: camera.width_px,
         height_px: camera.height_px,
         format: CaptureFormat::Rgba8Srgb,
-        include_depth: true,
+        // Depth attachments are used internally for occlusion, but depth
+        // evidence is not part of the promoted color-only receipt yet.
+        include_depth: false,
         deterministic: true,
     };
 
@@ -1776,6 +2756,15 @@ pub fn lower_reference_world(
     let emissive_texture_id = Some(emissive_texture.texture_id.clone());
     let beacon_emissive_texture_id = Some(beacon_emissive_texture.texture_id.clone());
     let [objective_x, objective_z] = layout.traversal.objective_position_xz_m;
+    // The native adapter applies fog as a linear distance weight. A fixed
+    // density of 0.006 makes the authored 160 m reference camera render at
+    // almost the maximum 92% fog contribution, erasing terrain and material
+    // contrast. Keep a small, bounded haze at the camera's authored distance.
+    let fog_density = finite_f32(
+        (REFERENCE_FOG_WEIGHT_AT_CAMERA / layout.reference_camera.distance_m)
+            .min(MAX_REFERENCE_FOG_DENSITY),
+        "reference fog density",
+    )?;
     let objective_cell = nearest_cell(
         layout.width_m,
         layout.length_m,
@@ -1795,7 +2784,7 @@ pub fn lower_reference_world(
         roughness_texture_id: roughness_texture_id.clone(),
         occlusion_texture_id: occlusion_texture_id.clone(),
         emissive_texture_id: emissive_texture_id.clone(),
-        normal_scale: 0.35,
+        normal_scale: 0.5,
         occlusion_strength: 0.65,
         emissive_factor_rgb: [0.0, 0.0, 0.0],
     }];
@@ -1984,6 +2973,8 @@ pub fn lower_reference_world(
             "graphics-packet-{}",
             world.artifact_id.trim_start_matches("world-")
         ),
+        scene_artifact_id: None,
+        scene_artifact_sha256: None,
         world_artifact_id: world.artifact_id.clone(),
         world_artifact_sha256: world.artifact_sha256.clone(),
         spatial_fields_sha256: world.body.fields.spatial_sha256.clone(),
@@ -2034,7 +3025,7 @@ pub fn lower_reference_world(
             sky_horizon_rgb: [0.48, 0.56, 0.62],
             ground_rgb: [0.16, 0.20, 0.16],
             fog_color_rgb: [0.46, 0.53, 0.58],
-            fog_density: 0.006,
+            fog_density,
             exposure: 1.0,
         },
         overlays,
@@ -2285,6 +3276,18 @@ pub fn lower_showcase_packet(
             Some(1.48),
             Some(1.38),
         ),
+        radial_mesh(
+            "showcase-rock",
+            "showcase-stone",
+            8,
+            &[
+                (0.0, 0.18, 1.25, 1.35),
+                (0.18, 0.82, 1.35, 0.92),
+                (0.82, 1.12, 0.92, 0.28),
+            ],
+            Some(1.25),
+            Some(0.28),
+        ),
     ]);
 
     let identity = [0.0, 0.0, 0.0, 1.0];
@@ -2378,6 +3381,42 @@ pub fn lower_showcase_packet(
                 scale_xyz: [0.12, 1.25, 0.035],
             },
         },
+        // A few explicitly named dressing stones give the inspection profile
+        // real foreground/midground structure without changing gameplay
+        // obstacles, navigation, or the authored world artifact.
+        InstancePacket {
+            instance_id: "showcase-rock-left".into(),
+            mesh_id: "showcase-rock".into(),
+            material_id: "showcase-stone".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x - 6.0, beacon_y, beacon_z - 1.5],
+                rotation_xyzw: [0.0, 0.18, 0.0, 0.984],
+                scale_xyz: [1.35, 0.92, 1.10],
+            },
+        },
+        InstancePacket {
+            instance_id: "showcase-rock-right".into(),
+            mesh_id: "showcase-rock".into(),
+            material_id: "showcase-stone".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x + 5.2, beacon_y, beacon_z + 1.0],
+                rotation_xyzw: [0.0, -0.22, 0.0, 0.976],
+                scale_xyz: [0.84, 0.68, 0.92],
+            },
+        },
+        InstancePacket {
+            instance_id: "showcase-rock-back".into(),
+            mesh_id: "showcase-rock".into(),
+            material_id: "showcase-stone".into(),
+            importance: landmark,
+            transform: Transform3d {
+                translation_xyz_m: [beacon_x - 7.0, beacon_y, beacon_z + 4.5],
+                rotation_xyzw: [0.0, 0.36, 0.0, 0.933],
+                scale_xyz: [1.55, 1.05, 1.25],
+            },
+        },
     ]);
     if let Some(beacon_material) = body
         .materials
@@ -2430,7 +3469,10 @@ pub fn lower_world_showcase_packet(
         })?;
     let [beacon_x, beacon_y, beacon_z] = beacon.transform.translation_xyz_m;
     let target = [beacon_x - 2.0, beacon_y + 3.0, beacon_z - 4.0];
-    let position = [beacon_x + 16.0, beacon_y + 10.0, beacon_z + 22.0];
+    // Keep the inspection composition close enough that the authored terrain
+    // remains a substantial, measurable part of the frame after projected
+    // authored meshes are conservatively excluded from the quality mask.
+    let position = [beacon_x + 13.0, beacon_y + 8.0, beacon_z + 18.0];
     let forward = normalize_vector3(
         [
             target[0] - position[0],
@@ -2471,6 +3513,684 @@ pub fn lower_world_showcase_packet(
     composed.body.capture.height_px = composed.body.camera.height_px;
     composed.body.overlays.clear();
     seal_scene_packet(composed.body)
+}
+
+/// Lower the first Campaign 2 authored-frame slice.  This is deliberately a
+/// visual composition over the validated world packet: semantic identity,
+/// terrain fields, and gameplay-critical instance identity remain inherited
+/// from the source packet, while all calibration geometry is explicit,
+/// deterministic, and content-addressed in the derived packet.
+pub fn lower_campaign2_packet(
+    packet: &GraphicsScenePacket,
+    view: Campaign2View,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    validate_scene_packet(packet)?;
+    let objective = packet
+        .body
+        .instances
+        .iter()
+        .find(|instance| instance.instance_id == "objective-beacon")
+        .ok_or_else(|| {
+            GraphicsContractError::provenance(
+                "Campaign 2 requires the lowered objective beacon anchor",
+            )
+        })?;
+    let [objective_x, _objective_y, objective_z] = objective.transform.translation_xyz_m;
+    // Keep the semantic objective instance intact and place the authored
+    // calibration asset a short, deterministic distance beside it.  This
+    // makes the hero asset independently inspectable without changing the
+    // gameplay anchor or its source-world projection.
+    let hero_x = objective_x - 5.5;
+    let hero_z = objective_z - 2.0;
+    let hero_y = campaign2_terrain_height(packet, f64::from(hero_x), f64::from(hero_z));
+    let pool_x = hero_x - 3.8;
+    let pool_z = hero_z + 2.2;
+    let pool_y = campaign2_terrain_height(packet, f64::from(pool_x), f64::from(pool_z)) + 0.055;
+    let view_name = campaign2_view_name(view);
+    let mut body = packet.body.clone();
+    body.packet_id = format!("{}-campaign2-{view_name}", packet.body.packet_id);
+    body.overlays.clear();
+    // Campaign 2 is an authored-frame calibration projection, not the
+    // gameplay diagnostic view.  Keep the world/spatial identities bound but
+    // fence the sparse source render instances (marker foliage, cube obstacle,
+    // and legacy beacon) out of the calibration composition.  The semantic
+    // instances remain authoritative in `WorldArtifact` and are exercised by
+    // the separate world/runtime gates.
+    body.instances.clear();
+
+    let terrain_texture = procedural_campaign2_terrain_albedo_texture();
+    let wet_texture = procedural_campaign2_wet_albedo_texture();
+    let foliage_texture = procedural_campaign2_foliage_albedo_texture();
+    let bark_texture = procedural_campaign2_bark_albedo_texture();
+    let hero_stone_texture = procedural_campaign2_hero_stone_albedo_texture();
+    let hero_metal_texture = procedural_campaign2_hero_metal_albedo_texture();
+    let hero_glow_texture = procedural_campaign2_hero_glow_albedo_texture();
+    let hero_emissive_texture = procedural_campaign2_emissive_texture();
+    body.textures.extend([
+        terrain_texture.clone(),
+        wet_texture.clone(),
+        foliage_texture.clone(),
+        bark_texture.clone(),
+        hero_stone_texture.clone(),
+        hero_metal_texture.clone(),
+        hero_glow_texture.clone(),
+        hero_emissive_texture.clone(),
+    ]);
+
+    let normal_texture = Some("riverwatch-normal".to_owned());
+    let roughness_texture = Some("riverwatch-roughness".to_owned());
+    let occlusion_texture = Some("riverwatch-occlusion".to_owned());
+    if !body
+        .textures
+        .iter()
+        .any(|texture| texture.texture_id == "riverwatch-normal")
+        || !body
+            .textures
+            .iter()
+            .any(|texture| texture.texture_id == "riverwatch-roughness")
+        || !body
+            .textures
+            .iter()
+            .any(|texture| texture.texture_id == "riverwatch-occlusion")
+    {
+        return Err(GraphicsContractError::provenance(
+            "Campaign 2 requires the canonical normal, roughness, and occlusion textures",
+        ));
+    }
+
+    let terrain_material_id = body.terrain.material_id.clone();
+    if let Some(terrain) = body
+        .materials
+        .iter_mut()
+        .find(|material| material.material_id == terrain_material_id)
+    {
+        // The Campaign 2 texture is a complete albedo, so the packet tint is
+        // deliberately near-white.  A dark tint here would multiply the
+        // sRGB-decoded texture a second time and erase authored surface detail.
+        terrain.base_color_rgba = [0.96, 0.98, 0.92, 1.0];
+        terrain.roughness = 0.88;
+        terrain.normal_scale = 0.72;
+        terrain.occlusion_strength = 0.58;
+        terrain.texture_ids = vec![terrain_texture.texture_id.clone()];
+        terrain.normal_texture_id = normal_texture.clone();
+        terrain.roughness_texture_id = roughness_texture.clone();
+        terrain.occlusion_texture_id = occlusion_texture.clone();
+        terrain.emissive_factor_rgb = [0.0, 0.0, 0.0];
+    }
+    if let Some(obstacle) = body
+        .materials
+        .iter_mut()
+        .find(|material| material.material_id == "obstacle-default")
+    {
+        obstacle.base_color_rgba = [0.30, 0.31, 0.29, 1.0];
+        obstacle.metallic = 0.08;
+        obstacle.roughness = 0.82;
+        obstacle.clearcoat = 0.08;
+        obstacle.texture_ids = vec![hero_stone_texture.texture_id.clone()];
+        obstacle.normal_texture_id = normal_texture.clone();
+        obstacle.roughness_texture_id = roughness_texture.clone();
+        obstacle.occlusion_texture_id = occlusion_texture.clone();
+    }
+    if let Some(objective_material) = body
+        .materials
+        .iter_mut()
+        .find(|material| material.material_id == "objective-beacon")
+    {
+        // The gameplay beacon remains the same source instance, but its
+        // campaign presentation uses the calibrated hero family so an
+        // untouched diagnostic-orange fallback cannot dominate the composed
+        // frame.
+        objective_material.base_color_rgba = [0.34, 0.40, 0.45, 1.0];
+        objective_material.metallic = 0.42;
+        objective_material.roughness = 0.30;
+        objective_material.clearcoat = 0.34;
+        objective_material.clearcoat_roughness = 0.12;
+        objective_material.texture_ids = vec![hero_stone_texture.texture_id.clone()];
+        objective_material.normal_texture_id = normal_texture.clone();
+        objective_material.roughness_texture_id = roughness_texture.clone();
+        objective_material.occlusion_texture_id = occlusion_texture.clone();
+        objective_material.emissive_texture_id = Some(hero_emissive_texture.texture_id.clone());
+        objective_material.emissive_factor_rgb = [0.015, 0.12, 0.18];
+    }
+    if let Some(foliage_material) = body
+        .materials
+        .iter_mut()
+        .find(|material| material.material_id == "foliage-default")
+    {
+        // The source semantic foliage markers remain in the packet for
+        // projection identity, but the authored composition gives them a
+        // restrained forest-floor palette so they do not compete with the
+        // calibrated 3D foliage cluster.
+        foliage_material.base_color_rgba = [0.12, 0.27, 0.055, 1.0];
+        foliage_material.roughness = 0.86;
+        foliage_material.texture_ids = vec![foliage_texture.texture_id.clone()];
+        foliage_material.normal_texture_id = normal_texture.clone();
+        foliage_material.roughness_texture_id = roughness_texture.clone();
+        foliage_material.occlusion_texture_id = occlusion_texture.clone();
+        foliage_material.emissive_factor_rgb = [0.0, 0.003, 0.0];
+    }
+    body.materials.extend([
+        MaterialIntent {
+            material_id: "campaign2-wet".into(),
+            base_color_rgba: [0.92, 0.96, 1.0, 1.0],
+            metallic: 0.34,
+            roughness: 0.06,
+            clearcoat: 0.86,
+            clearcoat_roughness: 0.045,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![wet_texture.texture_id.clone()],
+            normal_texture_id: normal_texture.clone(),
+            roughness_texture_id: roughness_texture.clone(),
+            occlusion_texture_id: occlusion_texture.clone(),
+            emissive_texture_id: None,
+            normal_scale: 0.28,
+            occlusion_strength: 0.35,
+            emissive_factor_rgb: [0.0, 0.0, 0.0],
+        },
+        MaterialIntent {
+            material_id: "campaign2-foliage".into(),
+            base_color_rgba: [0.94, 0.98, 0.90, 1.0],
+            metallic: 0.0,
+            roughness: 0.76,
+            clearcoat: 0.06,
+            clearcoat_roughness: 0.30,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![foliage_texture.texture_id.clone()],
+            normal_texture_id: normal_texture.clone(),
+            roughness_texture_id: roughness_texture.clone(),
+            occlusion_texture_id: occlusion_texture.clone(),
+            emissive_texture_id: None,
+            normal_scale: 0.34,
+            occlusion_strength: 0.62,
+            emissive_factor_rgb: [0.004, 0.012, 0.001],
+        },
+        MaterialIntent {
+            material_id: "campaign2-bark".into(),
+            base_color_rgba: [0.92, 0.86, 0.76, 1.0],
+            metallic: 0.0,
+            roughness: 0.84,
+            clearcoat: 0.04,
+            clearcoat_roughness: 0.35,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![bark_texture.texture_id.clone()],
+            normal_texture_id: normal_texture.clone(),
+            roughness_texture_id: roughness_texture.clone(),
+            occlusion_texture_id: occlusion_texture.clone(),
+            emissive_texture_id: None,
+            normal_scale: 0.45,
+            occlusion_strength: 0.72,
+            emissive_factor_rgb: [0.0, 0.0, 0.0],
+        },
+        MaterialIntent {
+            material_id: "campaign2-hero-stone".into(),
+            base_color_rgba: [0.70, 0.75, 0.80, 1.0],
+            metallic: 0.06,
+            roughness: 0.46,
+            clearcoat: 0.24,
+            clearcoat_roughness: 0.18,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![hero_stone_texture.texture_id.clone()],
+            normal_texture_id: normal_texture.clone(),
+            roughness_texture_id: roughness_texture.clone(),
+            occlusion_texture_id: occlusion_texture.clone(),
+            emissive_texture_id: None,
+            normal_scale: 0.82,
+            occlusion_strength: 0.80,
+            emissive_factor_rgb: [0.0, 0.0, 0.0],
+        },
+        MaterialIntent {
+            material_id: "campaign2-hero-metal".into(),
+            base_color_rgba: [0.98, 0.88, 0.72, 1.0],
+            metallic: 0.78,
+            roughness: 0.22,
+            clearcoat: 0.46,
+            clearcoat_roughness: 0.08,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![hero_metal_texture.texture_id.clone()],
+            normal_texture_id: normal_texture.clone(),
+            roughness_texture_id: roughness_texture.clone(),
+            occlusion_texture_id: occlusion_texture.clone(),
+            emissive_texture_id: None,
+            normal_scale: 0.36,
+            occlusion_strength: 0.70,
+            emissive_factor_rgb: [0.0, 0.0, 0.0],
+        },
+        MaterialIntent {
+            material_id: "campaign2-hero-glow".into(),
+            base_color_rgba: [0.80, 0.94, 1.0, 1.0],
+            metallic: 0.24,
+            roughness: 0.22,
+            clearcoat: 0.16,
+            clearcoat_roughness: 0.12,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![hero_glow_texture.texture_id.clone()],
+            normal_texture_id: normal_texture.clone(),
+            roughness_texture_id: roughness_texture.clone(),
+            occlusion_texture_id: occlusion_texture.clone(),
+            emissive_texture_id: Some(hero_emissive_texture.texture_id.clone()),
+            normal_scale: 0.42,
+            occlusion_strength: 0.48,
+            emissive_factor_rgb: [0.05, 0.38, 0.62],
+        },
+        MaterialIntent {
+            material_id: "campaign2-rock".into(),
+            base_color_rgba: [0.92, 0.94, 0.90, 1.0],
+            metallic: 0.03,
+            roughness: 0.86,
+            clearcoat: 0.08,
+            clearcoat_roughness: 0.28,
+            alpha_mode: AlphaMode::Opaque,
+            texture_ids: vec![hero_stone_texture.texture_id.clone()],
+            normal_texture_id: normal_texture.clone(),
+            roughness_texture_id: roughness_texture,
+            occlusion_texture_id: occlusion_texture,
+            emissive_texture_id: None,
+            normal_scale: 0.74,
+            occlusion_strength: 0.82,
+            emissive_factor_rgb: [0.0, 0.0, 0.0],
+        },
+    ]);
+    body.meshes.extend([
+        disc_mesh("campaign2-wet-pool", "campaign2-wet", 48),
+        ring_mesh("campaign2-wet-ripple", "campaign2-hero-glow", 0.94, 1.0, 48),
+        radial_mesh(
+            "campaign2-hero-pedestal",
+            "campaign2-hero-stone",
+            64,
+            &[
+                (0.0, 0.16, 3.9, 3.9),
+                (0.16, 0.30, 3.9, 3.55),
+                (0.30, 0.46, 3.55, 3.45),
+                (0.46, 0.62, 3.45, 2.95),
+                (0.62, 0.78, 2.95, 2.75),
+            ],
+            Some(3.9),
+            Some(2.75),
+        ),
+        radial_mesh(
+            "campaign2-hero-core",
+            "campaign2-hero-metal",
+            64,
+            &[
+                (0.0, 0.18, 1.72, 1.72),
+                (0.18, 0.38, 1.72, 1.48),
+                (0.38, 0.66, 1.48, 1.28),
+                (0.66, 2.95, 1.28, 1.04),
+                (2.95, 3.20, 1.04, 1.34),
+                (3.20, 3.42, 1.34, 1.18),
+                (3.42, 4.72, 1.18, 0.72),
+            ],
+            Some(1.72),
+            Some(0.72),
+        ),
+        radial_mesh(
+            "campaign2-hero-spire",
+            "campaign2-hero-glow",
+            32,
+            &[
+                (0.0, 0.18, 0.72, 0.72),
+                (0.18, 0.42, 0.72, 0.48),
+                (0.42, 1.75, 0.48, 0.26),
+                (1.75, 2.22, 0.26, 0.12),
+            ],
+            Some(0.72),
+            Some(0.12),
+        ),
+        torus_mesh(
+            "campaign2-hero-halo",
+            "campaign2-hero-metal",
+            2.28,
+            0.16,
+            64,
+            16,
+        ),
+        torus_mesh(
+            "campaign2-hero-rune-ring",
+            "campaign2-hero-glow",
+            1.62,
+            0.075,
+            64,
+            12,
+        ),
+        block_mesh("campaign2-hero-fin", "campaign2-hero-stone"),
+        block_mesh("campaign2-hero-inlay", "campaign2-hero-glow"),
+        radial_mesh(
+            "campaign2-foliage-trunk",
+            "campaign2-bark",
+            24,
+            &[(0.0, 0.12, 0.34, 0.34), (0.12, 1.65, 0.34, 0.22)],
+            Some(0.34),
+            Some(0.22),
+        ),
+        ellipsoid_mesh(
+            "campaign2-foliage-crown",
+            "campaign2-foliage",
+            [1.00, 1.15, 1.00],
+            32,
+            16,
+        ),
+        ellipsoid_mesh(
+            "campaign2-foliage-lobe",
+            "campaign2-foliage",
+            [0.72, 0.76, 0.64],
+            24,
+            12,
+        ),
+        radial_mesh(
+            "campaign2-rock",
+            "campaign2-rock",
+            24,
+            &[
+                (0.0, 0.18, 1.25, 1.42),
+                (0.18, 0.72, 1.42, 1.06),
+                (0.72, 1.18, 1.06, 0.42),
+            ],
+            Some(1.25),
+            Some(0.42),
+        ),
+    ]);
+
+    let identity = [0.0, 0.0, 0.0, 1.0];
+    body.instances.extend([
+        InstancePacket {
+            instance_id: "campaign2-hero-core".into(),
+            mesh_id: "campaign2-hero-core".into(),
+            material_id: "campaign2-hero-metal".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x, hero_y + 0.76, hero_z],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-hero-pedestal".into(),
+            mesh_id: "campaign2-hero-pedestal".into(),
+            material_id: "campaign2-hero-stone".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x, hero_y, hero_z],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-hero-spire".into(),
+            mesh_id: "campaign2-hero-spire".into(),
+            material_id: "campaign2-hero-glow".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x, hero_y + 4.94, hero_z],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-hero-halo".into(),
+            mesh_id: "campaign2-hero-halo".into(),
+            material_id: "campaign2-hero-metal".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x, hero_y + 4.15, hero_z - 0.08],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-hero-rune-ring".into(),
+            mesh_id: "campaign2-hero-rune-ring".into(),
+            material_id: "campaign2-hero-glow".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x, hero_y + 1.12, hero_z + 0.02],
+                rotation_xyzw: identity,
+                scale_xyz: [1.0, 1.0, 1.0],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-hero-fin-left".into(),
+            mesh_id: "campaign2-hero-fin".into(),
+            material_id: "campaign2-hero-stone".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x - 1.85, hero_y + 2.10, hero_z],
+                rotation_xyzw: [0.0, 0.20, 0.0, 0.98],
+                scale_xyz: [0.30, 1.75, 0.62],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-hero-fin-right".into(),
+            mesh_id: "campaign2-hero-fin".into(),
+            material_id: "campaign2-hero-stone".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x + 1.85, hero_y + 2.10, hero_z],
+                rotation_xyzw: [0.0, -0.20, 0.0, 0.98],
+                scale_xyz: [0.30, 1.75, 0.62],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-hero-inlay-left".into(),
+            mesh_id: "campaign2-hero-inlay".into(),
+            material_id: "campaign2-hero-glow".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x - 0.56, hero_y + 2.12, hero_z + 1.18],
+                rotation_xyzw: identity,
+                scale_xyz: [0.10, 0.92, 0.035],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-hero-inlay-right".into(),
+            mesh_id: "campaign2-hero-inlay".into(),
+            material_id: "campaign2-hero-glow".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x + 0.56, hero_y + 2.12, hero_z + 1.18],
+                rotation_xyzw: identity,
+                scale_xyz: [0.10, 0.92, 0.035],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-hero-inlay-center".into(),
+            mesh_id: "campaign2-hero-inlay".into(),
+            material_id: "campaign2-hero-glow".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [hero_x, hero_y + 3.02, hero_z + 1.22],
+                rotation_xyzw: identity,
+                scale_xyz: [0.68, 0.055, 0.035],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-wet-pool".into(),
+            mesh_id: "campaign2-wet-pool".into(),
+            material_id: "campaign2-wet".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [pool_x, pool_y, pool_z],
+                rotation_xyzw: identity,
+                scale_xyz: [3.8, 1.0, 2.7],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-wet-ripple-outer".into(),
+            mesh_id: "campaign2-wet-ripple".into(),
+            material_id: "campaign2-hero-glow".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [pool_x, pool_y + 0.008, pool_z],
+                rotation_xyzw: identity,
+                scale_xyz: [3.8, 1.0, 2.7],
+            },
+        },
+        InstancePacket {
+            instance_id: "campaign2-wet-ripple-inner".into(),
+            mesh_id: "campaign2-wet-ripple".into(),
+            material_id: "campaign2-hero-glow".into(),
+            importance: InstanceImportance::Landmark,
+            transform: Transform3d {
+                translation_xyz_m: [pool_x, pool_y + 0.012, pool_z],
+                rotation_xyzw: identity,
+                scale_xyz: [2.2, 1.0, 1.55],
+            },
+        },
+    ]);
+
+    let foliage_layout = [
+        (-8.0, -5.0, 1.25),
+        (-11.0, 1.0, 0.92),
+        (-8.0, 8.5, 1.12),
+        (6.0, -7.0, 0.88),
+        (10.0, -5.0, 1.30),
+        (-15.0, 11.5, 1.48),
+        (13.0, 8.0, 1.04),
+    ];
+    for (index, (offset_x, offset_z, scale)) in foliage_layout.into_iter().enumerate() {
+        let x = f64::from(hero_x) + offset_x;
+        let z = f64::from(hero_z) + offset_z;
+        let y = campaign2_terrain_height(packet, x, z) + 0.02;
+        let trunk_angle = (index as f32 * 0.37).sin() * 0.12;
+        let crown_angle = (index as f32 * 0.23).sin() * 0.18;
+        body.instances.extend([
+            InstancePacket {
+                instance_id: format!("campaign2-trunk-{index:02}"),
+                mesh_id: "campaign2-foliage-trunk".into(),
+                material_id: "campaign2-bark".into(),
+                importance: InstanceImportance::Background,
+                transform: Transform3d {
+                    translation_xyz_m: [
+                        finite_f32(x, "Campaign 2 trunk x")?,
+                        finite_f32(f64::from(y), "Campaign 2 trunk y")?,
+                        finite_f32(z, "Campaign 2 trunk z")?,
+                    ],
+                    rotation_xyzw: [
+                        0.0,
+                        (trunk_angle * 0.5).sin(),
+                        0.0,
+                        (trunk_angle * 0.5).cos(),
+                    ],
+                    scale_xyz: [scale * 0.72, scale, scale * 0.72],
+                },
+            },
+            InstancePacket {
+                instance_id: format!("campaign2-crown-{index:02}"),
+                mesh_id: "campaign2-foliage-crown".into(),
+                material_id: "campaign2-foliage".into(),
+                importance: InstanceImportance::Background,
+                transform: Transform3d {
+                    translation_xyz_m: [
+                        finite_f32(x, "Campaign 2 crown x")?,
+                        finite_f32(f64::from(y + 1.60 * scale), "Campaign 2 crown y")?,
+                        finite_f32(z, "Campaign 2 crown z")?,
+                    ],
+                    rotation_xyzw: [
+                        0.0,
+                        (crown_angle * 0.5).sin(),
+                        0.0,
+                        (crown_angle * 0.5).cos(),
+                    ],
+                    scale_xyz: [scale, scale, scale],
+                },
+            },
+            InstancePacket {
+                instance_id: format!("campaign2-lobe-{index:02}"),
+                mesh_id: "campaign2-foliage-lobe".into(),
+                material_id: "campaign2-foliage".into(),
+                importance: InstanceImportance::Background,
+                transform: Transform3d {
+                    translation_xyz_m: [
+                        finite_f32(
+                            x + if index % 2 == 0 {
+                                0.48 * f64::from(scale)
+                            } else {
+                                -0.48 * f64::from(scale)
+                            },
+                            "Campaign 2 foliage lobe x",
+                        )?,
+                        finite_f32(f64::from(y + 1.82 * scale), "Campaign 2 foliage lobe y")?,
+                        finite_f32(z + 0.12 * f64::from(scale), "Campaign 2 foliage lobe z")?,
+                    ],
+                    rotation_xyzw: [
+                        0.0,
+                        (crown_angle * 0.35).sin(),
+                        0.0,
+                        (crown_angle * 0.35).cos(),
+                    ],
+                    scale_xyz: [scale, scale, scale],
+                },
+            },
+        ]);
+    }
+
+    let (target, position, fov_y_degrees, width_px, height_px) = match view {
+        Campaign2View::Close => (
+            [hero_x, hero_y + 2.45, hero_z],
+            [hero_x + 8.0, hero_y + 5.2, hero_z + 11.0],
+            46.0,
+            768,
+            512,
+        ),
+        Campaign2View::Medium => (
+            [hero_x - 1.5, hero_y + 2.2, hero_z + 1.0],
+            [hero_x + 14.0, hero_y + 8.0, hero_z + 18.0],
+            50.0,
+            960,
+            640,
+        ),
+        Campaign2View::Wide => (
+            [hero_x - 8.0, hero_y + 1.5, hero_z - 10.0],
+            [hero_x + 19.0, hero_y + 11.0, hero_z + 24.0],
+            50.0,
+            960,
+            640,
+        ),
+    };
+    let forward = normalize_vector3(
+        [
+            target[0] - position[0],
+            target[1] - position[1],
+            target[2] - position[2],
+        ],
+        "Campaign 2 camera forward",
+    )?;
+    let right = normalize_vector3(
+        cross_vector3(forward, [0.0, 1.0, 0.0]),
+        "Campaign 2 camera right",
+    )?;
+    let up = normalize_vector3(cross_vector3(right, forward), "Campaign 2 camera up")?;
+    let camera_id = format!("campaign2-{view_name}");
+    body.camera = GraphicsCamera {
+        camera_id: camera_id.clone(),
+        projection: CameraProjection::Perspective { fov_y_degrees },
+        position_xyz_m: position,
+        forward_xyz: forward,
+        up_xyz: up,
+        near_plane_m: 0.1,
+        far_plane_m: 256.0,
+        width_px,
+        height_px,
+    };
+    body.capture.capture_id = format!("{}-campaign2-{view_name}", packet.body.capture.capture_id);
+    body.capture.camera_id = camera_id;
+    body.capture.width_px = width_px;
+    body.capture.height_px = height_px;
+    if let Some(light) = body.lights.first_mut() {
+        light.intensity = 3.8;
+        light.color_rgb = [1.0, 0.92, 0.80];
+        if let LightKind::Directional { direction_xyz } = &mut light.kind {
+            *direction_xyz = [0.38, -1.0, -0.32];
+        }
+    }
+    body.environment = EnvironmentIntent {
+        sky_top_rgb: [0.006, 0.018, 0.055],
+        sky_horizon_rgb: [0.22, 0.34, 0.46],
+        ground_rgb: [0.035, 0.050, 0.045],
+        fog_color_rgb: [0.10, 0.16, 0.22],
+        fog_density: 0.0018,
+        exposure: 1.08,
+    };
+    seal_scene_packet(body)
 }
 
 /// Derive a deterministic, explicitly synthetic dense-scene packet for
@@ -2566,6 +4286,11 @@ pub fn lower_dense_benchmark_packet(
 fn validate_coordinate_system(
     coordinate_system: &CoordinateSystem,
 ) -> Result<(), GraphicsContractError> {
+    if coordinate_system.up_axis != Axis::Y || coordinate_system.handedness != Handedness::Right {
+        return Err(GraphicsContractError::unsupported(
+            "native graphics requires Y-up, right-handed coordinates",
+        ));
+    }
     if !coordinate_system.units_per_meter.is_finite()
         || coordinate_system.units_per_meter <= 0.0
         || (coordinate_system.units_per_meter - 1.0).abs() > f32::EPSILON
@@ -2586,6 +4311,7 @@ fn validate_camera(camera: &GraphicsCamera) -> Result<(), GraphicsContractError>
     ] {
         finite_values(values, label)?;
     }
+    bounded_values(&camera.position_xyz_m, "camera position")?;
     validate_basis(
         &camera.forward_xyz,
         &camera.up_xyz,
@@ -2593,8 +4319,10 @@ fn validate_camera(camera: &GraphicsCamera) -> Result<(), GraphicsContractError>
     )?;
     if !camera.near_plane_m.is_finite()
         || !camera.far_plane_m.is_finite()
-        || camera.near_plane_m <= 0.0
+        || camera.near_plane_m < MIN_NATIVE_DISTANCE_M
         || camera.far_plane_m <= camera.near_plane_m
+        || camera.near_plane_m > MAX_NATIVE_COORDINATE_M
+        || camera.far_plane_m > MAX_NATIVE_COORDINATE_M
     {
         return Err(GraphicsContractError::malformed(
             "camera planes must be finite, positive, and ordered",
@@ -2610,7 +4338,9 @@ fn validate_camera(camera: &GraphicsCamera) -> Result<(), GraphicsContractError>
             }
         }
         CameraProjection::Orthographic { span_m } => {
-            if !span_m.is_finite() || span_m <= 0.0 {
+            if !span_m.is_finite()
+                || !(MIN_NATIVE_DISTANCE_M..=MAX_NATIVE_COORDINATE_M).contains(&span_m)
+            {
                 return Err(GraphicsContractError::malformed(
                     "orthographic camera span must be finite and positive",
                 ));
@@ -2627,11 +4357,16 @@ fn validate_terrain(
     valid_id(&terrain.terrain_id, "terrain_id")?;
     if !terrain.width_m.is_finite()
         || !terrain.length_m.is_finite()
-        || terrain.width_m <= 0.0
-        || terrain.length_m <= 0.0
+        || terrain.width_m < MIN_NATIVE_DISTANCE_M
+        || terrain.length_m < MIN_NATIVE_DISTANCE_M
     {
         return Err(GraphicsContractError::malformed(
             "terrain dimensions must be finite and positive",
+        ));
+    }
+    if terrain.width_m > MAX_NATIVE_COORDINATE_M || terrain.length_m > MAX_NATIVE_COORDINATE_M {
+        return Err(GraphicsContractError::malformed(
+            "terrain dimensions exceed the bounded native physical envelope",
         ));
     }
     if !(3..=2049).contains(&terrain.resolution)
@@ -2682,6 +4417,15 @@ fn validate_buffer(
     if !buffer.payload.finite() {
         return Err(GraphicsContractError::malformed(format!(
             "{label} contains a non-finite value"
+        )));
+    }
+    if let BufferPayload::F32(values) = &buffer.payload
+        && values
+            .iter()
+            .any(|value| value.abs() > MAX_NATIVE_COORDINATE_M)
+    {
+        return Err(GraphicsContractError::malformed(format!(
+            "{label} exceeds the bounded native physical envelope"
         )));
     }
     valid_sha(&buffer.sha256, &format!("{label} sha256"))?;
@@ -2778,6 +4522,7 @@ fn validate_texture(texture: &TextureReference) -> Result<(), GraphicsContractEr
     if texture.width_px == 0
         || texture.height_px == 0
         || texture.mip_levels == 0
+        || texture.mip_levels > MAX_TEXTURE_MIP_LEVELS
         || texture.width_px > MAX_CAPTURE_DIMENSION
         || texture.height_px > MAX_CAPTURE_DIMENSION
     {
@@ -2786,40 +4531,51 @@ fn validate_texture(texture: &TextureReference) -> Result<(), GraphicsContractEr
         ));
     }
     if let Some(payload) = &texture.payload {
-        if texture.mip_levels != 1 {
-            return Err(GraphicsContractError::unsupported(
-                "inline native texture payloads currently require one mip level",
-            ));
+        let mut payload_bytes = Vec::new();
+        match payload {
+            TexturePayload::Rgba8(encoded) => {
+                if texture.mip_levels != 1 {
+                    return Err(GraphicsContractError::unsupported(
+                        "single-level texture payload cannot claim multiple mip levels",
+                    ));
+                }
+                payload_bytes.extend(validate_texture_level(
+                    &texture.texture_id,
+                    texture.width_px,
+                    texture.height_px,
+                    encoded,
+                    0,
+                )?);
+            }
+            TexturePayload::Rgba8MipChain { levels } => {
+                if levels.len() != usize::try_from(texture.mip_levels).unwrap_or(usize::MAX) {
+                    return Err(GraphicsContractError::provenance(format!(
+                        "texture {} mip payload carries {} levels but declares {}",
+                        texture.texture_id,
+                        levels.len(),
+                        texture.mip_levels
+                    )));
+                }
+                for (level, mip) in levels.iter().enumerate() {
+                    let (width, height) =
+                        mip_dimensions(texture.width_px, texture.height_px, level);
+                    if mip.width_px != width || mip.height_px != height {
+                        return Err(GraphicsContractError::provenance(format!(
+                            "texture {} mip {} dimensions are {}x{}, expected {}x{}",
+                            texture.texture_id, level, mip.width_px, mip.height_px, width, height
+                        )));
+                    }
+                    payload_bytes.extend(validate_texture_level(
+                        &texture.texture_id,
+                        width,
+                        height,
+                        &mip.base64,
+                        level,
+                    )?);
+                }
+            }
         }
-        let bytes = match payload {
-            TexturePayload::Rgba8(encoded) => STANDARD.decode(encoded).map_err(|error| {
-                GraphicsContractError::malformed(format!(
-                    "texture {} payload is not valid base64: {error}",
-                    texture.texture_id
-                ))
-            })?,
-        };
-        let expected_bytes = usize::try_from(texture.width_px)
-            .ok()
-            .and_then(|width| {
-                usize::try_from(texture.height_px)
-                    .ok()
-                    .and_then(|height| width.checked_mul(height)?.checked_mul(4))
-            })
-            .ok_or_else(|| {
-                GraphicsContractError::malformed(format!(
-                    "texture {} dimensions overflow payload length",
-                    texture.texture_id
-                ))
-            })?;
-        if bytes.len() != expected_bytes {
-            return Err(GraphicsContractError::provenance(format!(
-                "texture {} payload has {} bytes, expected {expected_bytes}",
-                texture.texture_id,
-                bytes.len()
-            )));
-        }
-        if texture.sha256 != sha256_prefixed(&bytes) {
+        if texture.sha256 != sha256_prefixed(&payload_bytes) {
             return Err(GraphicsContractError::provenance(format!(
                 "texture {} payload digest does not match its metadata",
                 texture.texture_id
@@ -2827,6 +4583,49 @@ fn validate_texture(texture: &TextureReference) -> Result<(), GraphicsContractEr
         }
     }
     Ok(())
+}
+
+fn validate_texture_level(
+    texture_id: &str,
+    width: u32,
+    height: u32,
+    encoded: &str,
+    level: usize,
+) -> Result<Vec<u8>, GraphicsContractError> {
+    let bytes = STANDARD.decode(encoded).map_err(|error| {
+        GraphicsContractError::malformed(format!(
+            "texture {texture_id} mip {level} payload is not valid base64: {error}"
+        ))
+    })?;
+    let expected_bytes = usize::try_from(width)
+        .ok()
+        .and_then(|width| {
+            usize::try_from(height)
+                .ok()
+                .and_then(|height| width.checked_mul(height)?.checked_mul(4))
+        })
+        .ok_or_else(|| {
+            GraphicsContractError::malformed(format!(
+                "texture {texture_id} mip {level} dimensions overflow payload length"
+            ))
+        })?;
+    if bytes.len() != expected_bytes {
+        return Err(GraphicsContractError::provenance(format!(
+            "texture {texture_id} mip {level} payload has {} bytes, expected {expected_bytes}",
+            bytes.len()
+        )));
+    }
+    Ok(bytes)
+}
+
+fn mip_dimensions(width: u32, height: u32, level: usize) -> (u32, u32) {
+    let mut width = width;
+    let mut height = height;
+    for _ in 0..level {
+        width = (width / 2).max(1);
+        height = (height / 2).max(1);
+    }
+    (width, height)
 }
 
 fn validate_mesh(
@@ -2837,9 +4636,10 @@ fn validate_mesh(
     if mesh.positions_m.is_empty()
         || mesh.positions_m.len() != mesh.normals.len()
         || mesh.positions_m.len() != mesh.uv0.len()
+        || (!mesh.tangents.is_empty() && mesh.positions_m.len() != mesh.tangents.len())
     {
         return Err(GraphicsContractError::malformed(format!(
-            "mesh {} needs matching non-empty position, normal, and uv0 arrays",
+            "mesh {} needs matching non-empty position, normal, uv0, and optional tangent arrays",
             mesh.mesh_id
         )));
     }
@@ -2861,9 +4661,11 @@ fn validate_mesh(
     }
     for position in &mesh.positions_m {
         finite_values(position, "mesh position")?;
+        bounded_values(position, "mesh position")?;
     }
     for normal in &mesh.normals {
         finite_values(normal, "mesh normal")?;
+        bounded_values(normal, "mesh normal")?;
         let normal_norm_squared = squared_norm(normal);
         if !normal_norm_squared.is_finite() || normal_norm_squared <= MIN_VECTOR_LENGTH_SQUARED {
             return Err(GraphicsContractError::malformed(format!(
@@ -2874,6 +4676,24 @@ fn validate_mesh(
     }
     for uv in &mesh.uv0 {
         finite_values(uv, "mesh uv0")?;
+        bounded_values(uv, "mesh uv0")?;
+    }
+    for tangent in &mesh.tangents {
+        finite_values(tangent, "mesh tangent")?;
+        bounded_values(tangent, "mesh tangent")?;
+        let tangent_norm_squared = squared_norm(&[tangent[0], tangent[1], tangent[2]]);
+        if !tangent_norm_squared.is_finite() || tangent_norm_squared <= MIN_VECTOR_LENGTH_SQUARED {
+            return Err(GraphicsContractError::malformed(format!(
+                "mesh {} contains a degenerate tangent",
+                mesh.mesh_id
+            )));
+        }
+        if (tangent[3].abs() - 1.0).abs() > 1.0e-3 {
+            return Err(GraphicsContractError::malformed(format!(
+                "mesh {} tangent handedness must be -1 or 1",
+                mesh.mesh_id
+            )));
+        }
     }
     if !material_ids.contains(mesh.material_id.as_str()) {
         return Err(GraphicsContractError::provenance(format!(
@@ -2886,6 +4706,7 @@ fn validate_mesh(
 
 fn validate_transform(transform: &Transform3d) -> Result<(), GraphicsContractError> {
     finite_values(&transform.translation_xyz_m, "instance translation")?;
+    bounded_values(&transform.translation_xyz_m, "instance translation")?;
     finite_values(&transform.rotation_xyzw, "instance rotation")?;
     finite_values(&transform.scale_xyz, "instance scale")?;
     let rotation_norm_squared = transform
@@ -2903,9 +4724,22 @@ fn validate_transform(transform: &Transform3d) -> Result<(), GraphicsContractErr
             "instance rotation must be a unit quaternion",
         ));
     }
-    if transform.scale_xyz.iter().any(|value| *value <= 0.0) {
+    if transform
+        .scale_xyz
+        .iter()
+        .any(|value| *value < MIN_NATIVE_SCALE)
+    {
         return Err(GraphicsContractError::malformed(
             "instance scale must be positive",
+        ));
+    }
+    if transform
+        .scale_xyz
+        .iter()
+        .any(|value| *value > MAX_NATIVE_COORDINATE_M)
+    {
+        return Err(GraphicsContractError::malformed(
+            "instance scale exceeds the bounded native physical envelope",
         ));
     }
     Ok(())
@@ -2914,9 +4748,13 @@ fn validate_transform(transform: &Transform3d) -> Result<(), GraphicsContractErr
 fn validate_light(light: &LightIntent) -> Result<(), GraphicsContractError> {
     valid_id(&light.light_id, "light_id")?;
     finite_values(&light.color_rgb, "light color")?;
-    if light.color_rgb.iter().any(|value| *value < 0.0)
+    if light
+        .color_rgb
+        .iter()
+        .any(|value| *value < 0.0 || *value > MAX_NATIVE_COORDINATE_M)
         || !light.intensity.is_finite()
         || light.intensity < 0.0
+        || light.intensity > MAX_NATIVE_COORDINATE_M
     {
         return Err(GraphicsContractError::malformed(
             "light color and intensity must be finite and non-negative",
@@ -2939,7 +4777,8 @@ fn validate_light(light: &LightIntent) -> Result<(), GraphicsContractError> {
             range_m,
         } => {
             finite_values(position_xyz_m, "point light position")?;
-            if !range_m.is_finite() || *range_m <= 0.0 {
+            bounded_values(position_xyz_m, "point light position")?;
+            if !range_m.is_finite() || *range_m <= 0.0 || *range_m > MAX_NATIVE_COORDINATE_M {
                 return Err(GraphicsContractError::malformed(
                     "point light range must be finite and positive",
                 ));
@@ -2960,6 +4799,7 @@ fn validate_overlay(overlay: &SemanticOverlay) -> Result<&str, GraphicsContractE
         } => {
             valid_id(marker_id, "marker_id")?;
             finite_values(position_xyz_m, "point marker position")?;
+            bounded_values(position_xyz_m, "point marker position")?;
             validate_marker_style(*radius_m, color_rgba)?;
             Ok(marker_id)
         }
@@ -2972,6 +4812,7 @@ fn validate_overlay(overlay: &SemanticOverlay) -> Result<&str, GraphicsContractE
         } => {
             valid_id(marker_id, "marker_id")?;
             finite_values(center_xyz_m, "circle marker center")?;
+            bounded_values(center_xyz_m, "circle marker center")?;
             validate_marker_style(*radius_m, color_rgba)?;
             Ok(marker_id)
         }
@@ -2990,6 +4831,7 @@ fn validate_overlay(overlay: &SemanticOverlay) -> Result<&str, GraphicsContractE
             }
             for point in points_xyz_m {
                 finite_values(point, "polyline marker point")?;
+                bounded_values(point, "polyline marker point")?;
             }
             validate_marker_style(*thickness_m, color_rgba)?;
             Ok(marker_id)
@@ -3001,7 +4843,9 @@ fn validate_marker_style(
     radius_or_thickness: f32,
     color_rgba: &[f32; 4],
 ) -> Result<(), GraphicsContractError> {
-    if !radius_or_thickness.is_finite() || radius_or_thickness <= 0.0 {
+    if !radius_or_thickness.is_finite()
+        || !(MIN_NATIVE_DISTANCE_M..=MAX_NATIVE_COORDINATE_M).contains(&radius_or_thickness)
+    {
         return Err(GraphicsContractError::malformed(
             "marker radius/thickness must be finite and positive",
         ));
@@ -3032,6 +4876,11 @@ fn validate_capture(
     if !capture.deterministic {
         return Err(GraphicsContractError::unsupported(
             "native certification requires deterministic captures",
+        ));
+    }
+    if capture.include_depth {
+        return Err(GraphicsContractError::unsupported(
+            "native certification currently promotes color-only captures; depth evidence is deferred",
         ));
     }
     let capture_bytes = usize::try_from(capture.width_px)
@@ -3144,6 +4993,43 @@ fn validate_telemetry(telemetry: &GraphicsTelemetry) -> Result<(), GraphicsContr
             )));
         }
     }
+    if let Some(residency) = &telemetry.texture_residency {
+        for (value, label) in [
+            (residency.texture_count, "texture_residency.texture_count"),
+            (residency.mip_levels, "texture_residency.mip_levels"),
+            (residency.payload_bytes, "texture_residency.payload_bytes"),
+        ] {
+            if value > MAX_TELEMETRY_COUNTER {
+                return Err(GraphicsContractError::malformed(format!(
+                    "telemetry {label} exceeds the bounded counter limit"
+                )));
+            }
+        }
+        if residency.max_sampler_lod >= MAX_TEXTURE_MIP_LEVELS {
+            return Err(GraphicsContractError::malformed(
+                "texture residency sampler LOD exceeds the native mip bound",
+            ));
+        }
+        if residency.texture_count == 0
+            && (residency.mip_levels != 0
+                || residency.payload_bytes != 0
+                || residency.max_sampler_lod != 0)
+        {
+            return Err(GraphicsContractError::provenance(
+                "empty texture residency reports non-empty resources",
+            ));
+        }
+        if residency.mip_levels < residency.texture_count {
+            return Err(GraphicsContractError::provenance(
+                "texture residency has fewer mip levels than textures",
+            ));
+        }
+        if residency.max_sampler_lod as usize >= residency.mip_levels && residency.mip_levels != 0 {
+            return Err(GraphicsContractError::provenance(
+                "texture residency sampler LOD exceeds resident levels",
+            ));
+        }
+    }
     if telemetry.frame_time_us > MAX_FRAME_TIME_US {
         return Err(GraphicsContractError::malformed(
             "telemetry frame time exceeds the bounded limit",
@@ -3229,6 +5115,101 @@ fn validate_telemetry(telemetry: &GraphicsTelemetry) -> Result<(), GraphicsContr
     Ok(())
 }
 
+/// Validate the backend's packet-texture residency evidence independently of
+/// producer status or aggregate byte counters. Adapter-owned default textures
+/// are deliberately excluded; this measures distinct source texture identities
+/// referenced by material roles in the packet.
+pub(crate) fn validate_texture_residency_telemetry(
+    packet: &GraphicsScenePacket,
+    telemetry: &GraphicsTelemetry,
+) -> Result<(), GraphicsContractError> {
+    let expected = expected_texture_residency(packet)?;
+    let requires_evidence = expected.mip_levels > expected.texture_count;
+    match (&telemetry.texture_residency, requires_evidence) {
+        (Some(actual), _) if actual == &expected => Ok(()),
+        (Some(_), _) => Err(GraphicsContractError::provenance(
+            "texture residency telemetry does not match the packet payloads",
+        )),
+        (None, true) => Err(GraphicsContractError::provenance(
+            "multi-level packet textures require independent residency telemetry",
+        )),
+        (None, false) => Ok(()),
+    }
+}
+
+fn expected_texture_residency(
+    packet: &GraphicsScenePacket,
+) -> Result<GraphicsTextureResidencyTelemetry, GraphicsContractError> {
+    let mut referenced_ids = BTreeSet::new();
+    for material in &packet.body.materials {
+        referenced_ids.extend(material.texture_ids.iter().map(String::as_str));
+        referenced_ids.extend(
+            [
+                material.normal_texture_id.as_deref(),
+                material.roughness_texture_id.as_deref(),
+                material.occlusion_texture_id.as_deref(),
+                material.emissive_texture_id.as_deref(),
+            ]
+            .into_iter()
+            .flatten(),
+        );
+    }
+
+    let mut expected = GraphicsTextureResidencyTelemetry {
+        texture_count: 0,
+        mip_levels: 0,
+        payload_bytes: 0,
+        max_sampler_lod: 0,
+    };
+    for texture in &packet.body.textures {
+        if !referenced_ids.contains(texture.texture_id.as_str()) {
+            continue;
+        }
+        texture.payload.as_ref().ok_or_else(|| {
+            GraphicsContractError::unsupported(format!(
+                "referenced texture {} has no inline payload for native residency",
+                texture.texture_id
+            ))
+        })?;
+        expected.texture_count = expected
+            .texture_count
+            .checked_add(1)
+            .ok_or_else(|| GraphicsContractError::malformed("texture count overflows"))?;
+        expected.mip_levels = expected
+            .mip_levels
+            .checked_add(texture.mip_levels as usize)
+            .ok_or_else(|| GraphicsContractError::malformed("texture mip count overflows"))?;
+        expected.payload_bytes = expected
+            .payload_bytes
+            .checked_add(texture_payload_byte_length(texture)?)
+            .ok_or_else(|| GraphicsContractError::malformed("texture payload bytes overflow"))?;
+        expected.max_sampler_lod = expected
+            .max_sampler_lod
+            .max(texture.mip_levels.saturating_sub(1));
+    }
+    Ok(expected)
+}
+
+fn texture_payload_byte_length(texture: &TextureReference) -> Result<usize, GraphicsContractError> {
+    let mut width = usize::try_from(texture.width_px)
+        .map_err(|_| GraphicsContractError::malformed("texture width overflows usize"))?;
+    let mut height = usize::try_from(texture.height_px)
+        .map_err(|_| GraphicsContractError::malformed("texture height overflows usize"))?;
+    let mut bytes = 0usize;
+    for _ in 0..texture.mip_levels {
+        let level_bytes = width
+            .checked_mul(height)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| GraphicsContractError::malformed("texture payload size overflows"))?;
+        bytes = bytes
+            .checked_add(level_bytes)
+            .ok_or_else(|| GraphicsContractError::malformed("texture payload bytes overflow"))?;
+        width = (width / 2).max(1);
+        height = (height / 2).max(1);
+    }
+    Ok(bytes)
+}
+
 fn validate_dimensions(
     width_px: u32,
     height_px: u32,
@@ -3279,6 +5260,22 @@ fn finite_values<const N: usize>(
     } else {
         Err(GraphicsContractError::malformed(format!(
             "{label} contains a non-finite value"
+        )))
+    }
+}
+
+fn bounded_values<const N: usize>(
+    values: &[f32; N],
+    label: &str,
+) -> Result<(), GraphicsContractError> {
+    if values
+        .iter()
+        .all(|value| value.abs() <= MAX_NATIVE_COORDINATE_M)
+    {
+        Ok(())
+    } else {
+        Err(GraphicsContractError::malformed(format!(
+            "{label} exceeds the bounded native physical envelope"
         )))
     }
 }
@@ -3390,6 +5387,8 @@ mod tests {
         seal_scene_packet(GraphicsScenePacketBody {
             schema_version: SCENE_PACKET_SCHEMA.into(),
             packet_id: "packet-test".into(),
+            scene_artifact_id: None,
+            scene_artifact_sha256: None,
             world_artifact_id: "world-test".into(),
             world_artifact_sha256: sha256_prefixed(b"world"),
             spatial_fields_sha256: sha256_prefixed(b"fields"),
@@ -3459,7 +5458,7 @@ mod tests {
                 width_px: 32,
                 height_px: 32,
                 format: CaptureFormat::Rgba8Srgb,
-                include_depth: true,
+                include_depth: false,
                 deterministic: true,
             },
         })
@@ -3473,6 +5472,31 @@ mod tests {
         let mut tampered = packet.clone();
         tampered.body.frame_seed += 1;
         assert!(validate_scene_packet(&tampered).is_err());
+    }
+
+    #[test]
+    fn finite_but_unsafe_native_scalars_are_rejected() {
+        let mut body = packet().body;
+        body.lights[0].intensity = f32::MAX;
+        assert!(seal_scene_packet(body).is_err());
+
+        let mut body = packet().body;
+        body.camera.near_plane_m = f32::MIN_POSITIVE;
+        assert!(seal_scene_packet(body).is_err());
+
+        let mut body = packet().body;
+        body.camera.projection = CameraProjection::Orthographic { span_m: f32::MAX };
+        assert!(seal_scene_packet(body).is_err());
+
+        let mut body = packet().body;
+        body.terrain.width_m = f32::MIN_POSITIVE;
+        assert!(seal_scene_packet(body).is_err());
+
+        let mut body = packet().body;
+        if let SemanticOverlay::Polyline { thickness_m, .. } = &mut body.overlays[0] {
+            *thickness_m = f32::MAX;
+        }
+        assert!(seal_scene_packet(body).is_err());
     }
 
     #[test]
@@ -3508,12 +5532,92 @@ mod tests {
         packet = seal_scene_packet(packet.body).expect("texture packet seals");
         validate_scene_packet(&packet).expect("matching texture payload validates");
 
-        let TexturePayload::Rgba8(encoded) = packet.body.textures[0]
-            .payload
-            .as_mut()
-            .expect("texture payload exists");
+        let Some(TexturePayload::Rgba8(encoded)) = packet.body.textures[0].payload.as_mut() else {
+            panic!("texture payload must be the single-level RGBA8 variant");
+        };
         encoded.replace_range(..4, "AAAA");
         assert!(validate_scene_packet(&packet).is_err());
+    }
+
+    #[test]
+    fn multilevel_texture_requires_packet_consistent_residency_evidence() {
+        let base = vec![
+            255, 0, 0, 255, // red
+            0, 255, 0, 255, // green
+            0, 0, 255, 255, // blue
+            255, 255, 255, 255, // white
+        ];
+        let mip = vec![128, 128, 128, 255];
+        let mut packet = packet();
+        packet.body.materials[0].texture_ids = vec!["texture".into()];
+        packet.body.textures = vec![TextureReference {
+            texture_id: "texture".into(),
+            source_artifact_id: "source".into(),
+            sha256: sha256_prefixed(&[base.clone(), mip.clone()].concat()),
+            width_px: 2,
+            height_px: 2,
+            mip_levels: 2,
+            color_space: TextureColorSpace::Srgb,
+            payload: Some(TexturePayload::Rgba8MipChain {
+                levels: vec![
+                    TextureMipLevel {
+                        width_px: 2,
+                        height_px: 2,
+                        base64: STANDARD.encode(&base),
+                    },
+                    TextureMipLevel {
+                        width_px: 1,
+                        height_px: 1,
+                        base64: STANDARD.encode(&mip),
+                    },
+                ],
+            }),
+        }];
+        packet = seal_scene_packet(packet.body).expect("multi-level packet seals");
+
+        let mut telemetry = GraphicsTelemetry {
+            upload_bytes: 0,
+            readback_bytes: 0,
+            draw_calls: 0,
+            dispatch_calls: 0,
+            pipeline_compilations: 0,
+            instance_count: 0,
+            visible_instance_count: 0,
+            culled_instance_count: 0,
+            background_visible_instance_count: 0,
+            background_culled_instance_count: 0,
+            landmark_visible_instance_count: 0,
+            landmark_culled_instance_count: 0,
+            gameplay_critical_visible_instance_count: 0,
+            gameplay_critical_culled_instance_count: 0,
+            terrain_vertex_count: 0,
+            mesh_vertex_count: 0,
+            texture_residency: None,
+            frame_time_us: 0,
+            gpu_frame_time_us: None,
+            pass_timings: GraphicsPassTimings {
+                prepare_us: 0,
+                scene_raster_us: 0,
+                resolve_us: 0,
+                overlay_us: 0,
+                flush_readback_us: 0,
+                gpu_prepare_us: None,
+                gpu_scene_raster_us: None,
+                gpu_resolve_us: None,
+                gpu_overlay_us: None,
+            },
+        };
+        assert!(validate_texture_residency_telemetry(&packet, &telemetry).is_err());
+        telemetry.texture_residency = Some(GraphicsTextureResidencyTelemetry {
+            texture_count: 1,
+            mip_levels: 2,
+            payload_bytes: 20,
+            max_sampler_lod: 1,
+        });
+        validate_texture_residency_telemetry(&packet, &telemetry)
+            .expect("matching residency evidence validates");
+        telemetry.texture_residency.as_mut().unwrap().payload_bytes = 16;
+        assert!(validate_texture_residency_telemetry(&packet, &telemetry).is_err());
     }
 
     #[test]
@@ -3548,6 +5652,7 @@ mod tests {
             uv0: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
             indices: vec![0, 1, 2],
             material_id: "terrain".into(),
+            tangents: Vec::new(),
         }];
         seal_scene_packet(body.clone()).expect("authored UV channel validates");
 
@@ -3562,6 +5667,7 @@ mod tests {
             uv0: vec![[0.0, 0.0], [f32::NAN, 0.0], [0.0, 1.0]],
             indices: vec![0, 1, 2],
             material_id: "terrain".into(),
+            tangents: Vec::new(),
         }];
         assert!(seal_scene_packet(body).is_err());
     }
@@ -3580,6 +5686,16 @@ mod tests {
     }
 
     #[test]
+    fn screen_projection_lowers_semantic_camera_up_above_the_capture_center() {
+        let packet = packet();
+        let center = project_screen_point(&packet.body.camera, [0.0, 0.0, 0.0])
+            .expect("center is inside the camera frustum");
+        let semantic_up = project_screen_point(&packet.body.camera, [0.0, 0.0, -1.0])
+            .expect("semantic camera-up point is inside the camera frustum");
+        assert!(semantic_up.1 < center.1);
+    }
+
+    #[test]
     fn authored_mesh_normals_must_be_non_degenerate() {
         let mut body = packet().body;
         body.meshes = vec![MeshPacket {
@@ -3589,6 +5705,7 @@ mod tests {
             uv0: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
             indices: vec![0, 1, 2],
             material_id: "terrain".into(),
+            tangents: Vec::new(),
         }];
         assert!(seal_scene_packet(body).is_err());
     }
@@ -3603,6 +5720,7 @@ mod tests {
             uv0: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
             indices: vec![0, 1, 2],
             material_id: "terrain".into(),
+            tangents: Vec::new(),
         }];
         body.instances = vec![InstancePacket {
             instance_id: "instance".into(),
@@ -3626,11 +5744,24 @@ mod tests {
 
     #[test]
     fn pass_receipt_requires_capture_bytes() {
+        let packet = packet();
+        let mut capture = vec![0u8; 32 * 32 * 4];
+        for (pixel_index, pixel) in capture.chunks_exact_mut(4).enumerate() {
+            let value = if pixel_index.is_multiple_of(2) {
+                64
+            } else {
+                200
+            };
+            pixel.copy_from_slice(&[value, value, value, 255]);
+        }
+        let center_pixel = (16 * 32 + 16) * 4;
+        capture[center_pixel..center_pixel + 4].copy_from_slice(&[0, 255, 255, 255]);
+        let measurements = measure_frame_capture(&packet, &capture).expect("capture measures");
         let body = GraphicsFrameReceiptBody {
             schema_version: FRAME_RECEIPT_SCHEMA.into(),
-            packet_sha256: sha256_prefixed(b"packet"),
-            capture_id: "capture".into(),
-            backend_id: "wge.lava".into(),
+            packet_sha256: packet.packet_sha256.clone(),
+            capture_id: packet.body.capture.capture_id.clone(),
+            backend_id: LAVA_BACKEND_ID.into(),
             adapter_revision: ADAPTER_REVISION.into(),
             lava_revision: LAVA_REVISION.into(),
             device_uuid: "device".into(),
@@ -3638,18 +5769,10 @@ mod tests {
             renderer_identity_sha256: sha256_prefixed(b"renderer"),
             status: FrameStatus::Passed,
             format: CaptureFormat::Rgba8Srgb,
-            width_px: 2,
-            height_px: 2,
-            capture_sha256: Some(sha256_prefixed(b"frame")),
-            measurements: GraphicsFrameMeasurements {
-                terrain_luminance_stddev: 0.4,
-                distinct_terrain_colors: 3,
-                route_visible_pixels: 2,
-                player_spawn_visible_pixels: 2,
-                opponent_spawn_visible_pixels: 2,
-                encounter_visible_pixels: 2,
-                objective_visible_pixels: 2,
-            },
+            width_px: packet.body.capture.width_px,
+            height_px: packet.body.capture.height_px,
+            capture_sha256: Some(sha256_prefixed(&capture)),
+            measurements,
             telemetry: GraphicsTelemetry {
                 upload_bytes: 1,
                 readback_bytes: 1,
@@ -3665,8 +5788,9 @@ mod tests {
                 landmark_culled_instance_count: 0,
                 gameplay_critical_visible_instance_count: 0,
                 gameplay_critical_culled_instance_count: 0,
-                terrain_vertex_count: 1,
+                terrain_vertex_count: 24,
                 mesh_vertex_count: 0,
+                texture_residency: None,
                 frame_time_us: 1,
                 gpu_frame_time_us: None,
                 pass_timings: GraphicsPassTimings {
@@ -3687,24 +5811,25 @@ mod tests {
             receipt_sha256: sha256_prefixed(&canonical_json(&body).expect("body JSON")),
             body,
         };
-        assert!(validate_frame_receipt(&receipt, &[]).is_err());
-        validate_frame_receipt(&receipt, b"frame").expect("matching capture validates");
+        assert!(validate_frame_receipt(&receipt, &packet, &[]).is_err());
+        validate_frame_receipt(&receipt, &packet, &capture).expect("matching capture validates");
         receipt.body.telemetry.frame_time_us = MAX_FRAME_TIME_US + 1;
         receipt.receipt_sha256 =
             sha256_prefixed(&canonical_json(&receipt.body).expect("tampered body JSON"));
-        assert!(validate_frame_receipt(&receipt, b"frame").is_err());
+        assert!(validate_frame_receipt(&receipt, &packet, &capture).is_err());
         receipt.body.telemetry.frame_time_us = 10;
         receipt.body.telemetry.pass_timings.prepare_us = 11;
         receipt.receipt_sha256 =
             sha256_prefixed(&canonical_json(&receipt.body).expect("tampered pass JSON"));
-        assert!(validate_frame_receipt(&receipt, b"frame").is_err());
+        assert!(validate_frame_receipt(&receipt, &packet, &capture).is_err());
     }
 
     #[test]
     fn rust_visual_measurement_recomputes_semantic_overlay_visibility() {
         let packet = packet();
         let mut capture = vec![0u8; 32 * 32 * 4];
-        capture[..4].copy_from_slice(&[0, 255, 255, 255]);
+        let center_pixel = (16 * 32 + 16) * 4;
+        capture[center_pixel..center_pixel + 4].copy_from_slice(&[0, 255, 255, 255]);
         let measurements = measure_frame_capture(&packet, &capture).expect("capture measures");
         assert_eq!(measurements.route_visible_pixels, 1);
         assert_eq!(measurements.distinct_terrain_colors, 2);
@@ -3715,6 +5840,10 @@ mod tests {
         assert_eq!(
             rgba8(&[0.5, 0.5, 0.5, 0.5]).expect("valid color"),
             [188, 188, 188, 128]
+        );
+        assert_eq!(
+            rgba8(&[0.0, 0.0, 0.0, 1.0 / 510.0]).expect("halfway alpha quantizes"),
+            [0, 0, 0, 1]
         );
     }
 
@@ -3731,14 +5860,22 @@ mod tests {
         let flat = vec![0u8; 32 * 32 * 4];
         let flat_measurements =
             measure_frame_capture(&packet, &flat).expect("flat capture measures");
-        assert!(validate_native_visual_gate(&packet, &flat_measurements).is_err());
+        assert!(validate_native_visual_gate(&packet, &flat_measurements, &flat).is_err());
 
-        let mut useful = [50u8, 60, 70, 255].repeat(32 * 32);
-        useful[..4].copy_from_slice(&[0, 255, 255, 255]);
-        useful[4..8].copy_from_slice(&[200, 200, 200, 255]);
+        let mut useful = vec![0u8; 32 * 32 * 4];
+        for (pixel_index, pixel) in useful.chunks_exact_mut(4).enumerate() {
+            let value = if pixel_index.is_multiple_of(2) {
+                50
+            } else {
+                200
+            };
+            pixel.copy_from_slice(&[value, value, value, 255]);
+        }
+        let center_pixel = (16 * 32 + 16) * 4;
+        useful[center_pixel..center_pixel + 4].copy_from_slice(&[0, 255, 255, 255]);
         let useful_measurements =
             measure_frame_capture(&packet, &useful).expect("useful capture measures");
-        validate_native_visual_gate(&packet, &useful_measurements)
+        validate_native_visual_gate(&packet, &useful_measurements, &useful)
             .expect("useful capture passes the native visual gate");
     }
 

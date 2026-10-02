@@ -3,7 +3,7 @@
 //! A producer name and a `pass` string never grant authority. Each receipt is
 //! checked against a closed native validator registration, the pinned
 //! candidate context, and the exact bytes of its supporting artifacts. The
-//! engine-neutral profile keeps rigging and Unity evidence indeterminate.
+//! engine-neutral profile keeps rigging evidence indeterminate.
 
 pub mod schema;
 mod validators;
@@ -18,6 +18,12 @@ pub use wge_intake_repair_contract as repair_contract;
 pub const REQUEST_SCHEMA: &str = "wge.certification-request/v1";
 pub const ENVELOPE_SCHEMA: &str = "wge.certification-receipt-envelope/v1";
 pub const REPORT_SCHEMA: &str = "wge.certification-report/v1";
+pub const NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA: &str = "wge.visual-quality-receipt/v1";
+pub const NATIVE_GRAPHICS_PACKET_KIND: &str = "native_graphics_scene_packet";
+pub const NATIVE_GRAPHICS_FRAME_RECEIPT_KIND: &str = "native_graphics_frame_receipt";
+pub const NATIVE_GRAPHICS_RENDERER_ATTESTATION_KIND: &str = "native_graphics_renderer_attestation";
+pub const NATIVE_RGBA8_CAPTURE_KIND: &str = "native_rgba8_capture";
+pub const NATIVE_VISUAL_QUALITY_EVIDENCE_KIND: &str = "native_visual_quality_evidence";
 pub const MAX_RECEIPTS: usize = 128;
 pub const MAX_CANDIDATES: usize = 8;
 pub const MAX_ARTIFACTS_PER_CANDIDATE: usize = 256;
@@ -33,19 +39,27 @@ pub const REPAIR_IDENTITY_EXCLUDED_KINDS: [&str; 3] =
 pub const SUPPLIED_BAD_GLB_SHA256: &str =
     "sha256:858fa104880822d081405579fb5b39d533d3b3b341d38aa1490a44b634f5e2b4";
 
-pub const REQUIRED_GATES: [&str; 6] =
-    ["semantic", "world", "gameplay", "asset", "visual", "repair"];
-pub const DEFERRED_GATES: [&str; 4] = [
+pub const REQUIRED_GATES: [&str; 7] = [
+    "semantic",
+    "world",
+    "gameplay",
+    "asset",
+    "visual",
+    "visual_quality",
+    "repair",
+];
+pub const DEFERRED_GATES: [&str; 1] = ["rigging"];
+pub const NATIVE_MVP_REQUIRED_GATES: [&str; 8] = [
+    "semantic",
+    "world",
+    "gameplay",
+    "asset",
     "rigging",
-    "unity_import",
-    "unity_build",
-    "unity_playthrough",
+    "visual",
+    "visual_quality",
+    "repair",
 ];
-pub const NATIVE_MVP_REQUIRED_GATES: [&str; 7] = [
-    "semantic", "world", "gameplay", "asset", "rigging", "visual", "repair",
-];
-pub const NATIVE_MVP_DEFERRED_GATES: [&str; 3] =
-    ["unity_import", "unity_build", "unity_playthrough"];
+pub const NATIVE_MVP_DEFERRED_GATES: [&str; 0] = [];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthorityError {
@@ -253,6 +267,7 @@ enum ValidatorKind {
     Asset,
     Rigging,
     Visual,
+    VisualQuality,
     Repair,
     Deferred,
 }
@@ -312,6 +327,17 @@ impl ValidatorRegistry {
                 vec![ReceiptStatus::Pass, ReceiptStatus::Fail],
             ),
             (
+                "wge.validator.visual-quality/v1",
+                "visual_quality",
+                "wge.visual-quality-receipt/v1",
+                ValidatorKind::VisualQuality,
+                vec![
+                    ReceiptStatus::Pass,
+                    ReceiptStatus::Fail,
+                    ReceiptStatus::Indeterminate,
+                ],
+            ),
+            (
                 "wge.validator.evidence-repair/v1",
                 "repair",
                 "wge.repair-receipt/v1",
@@ -321,27 +347,6 @@ impl ValidatorRegistry {
             (
                 "wge.validator.rigging-deferred/v1",
                 "rigging",
-                "wge.deferred-receipt/v1",
-                ValidatorKind::Deferred,
-                vec![ReceiptStatus::Indeterminate],
-            ),
-            (
-                "wge.validator.unity-import-deferred/v1",
-                "unity_import",
-                "wge.deferred-receipt/v1",
-                ValidatorKind::Deferred,
-                vec![ReceiptStatus::Indeterminate],
-            ),
-            (
-                "wge.validator.unity-build-deferred/v1",
-                "unity_build",
-                "wge.deferred-receipt/v1",
-                ValidatorKind::Deferred,
-                vec![ReceiptStatus::Indeterminate],
-            ),
-            (
-                "wge.validator.unity-playthrough-deferred/v1",
-                "unity_playthrough",
                 "wge.deferred-receipt/v1",
                 ValidatorKind::Deferred,
                 vec![ReceiptStatus::Indeterminate],
@@ -425,7 +430,7 @@ pub fn engine_neutral_gate_profile() -> Vec<GateRequirement> {
 }
 
 /// Strict native MVP profile. The prior engine-neutral profile remains
-/// unchanged and continues to leave rigging and Unity indeterminate.
+/// unchanged and continues to leave rigging indeterminate.
 pub fn native_mvp_gate_profile() -> Vec<GateRequirement> {
     let registry = ValidatorRegistry::wge_native_mvp_v1();
     let mut gates = engine_neutral_gate_profile();
@@ -443,11 +448,35 @@ pub fn native_mvp_gate_profile() -> Vec<GateRequirement> {
 }
 
 fn registry_digest(entries: &BTreeMap<String, RegisteredValidator>) -> String {
-    let descriptors = entries
-        .values()
-        .map(|entry| entry.descriptor.clone())
+    let validators = entries
+        .iter()
+        .map(|(registry_key, entry)| {
+            serde_json::json!({
+                "registry_key": registry_key,
+                "descriptor": entry.descriptor,
+                "implementation_kind": validator_kind_tag(entry.kind),
+            })
+        })
         .collect::<Vec<_>>();
-    sha256_prefixed(canonical_json(&serde_json::to_value(descriptors).unwrap()).as_bytes())
+    let manifest = serde_json::json!({
+        "schema_version": "wge.certification-validator-registry/v2",
+        "validators": validators,
+    });
+    sha256_prefixed(canonical_json(&manifest).as_bytes())
+}
+
+fn validator_kind_tag(kind: ValidatorKind) -> &'static str {
+    match kind {
+        ValidatorKind::Semantic => "semantic",
+        ValidatorKind::World => "world",
+        ValidatorKind::Gameplay => "gameplay",
+        ValidatorKind::Asset => "asset",
+        ValidatorKind::Rigging => "rigging",
+        ValidatorKind::Visual => "visual",
+        ValidatorKind::VisualQuality => "visual_quality",
+        ValidatorKind::Repair => "repair",
+        ValidatorKind::Deferred => "deferred",
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -595,7 +624,7 @@ fn repair_gate_id(gate: &str) -> Option<repair_contract::GateId> {
         "world" => Some(GateId::WorldLayout),
         "gameplay" => Some(GateId::Gameplay),
         "asset" => Some(GateId::AssetPreparation),
-        "visual" => Some(GateId::VisualQuality),
+        "visual" | "visual_quality" => Some(GateId::VisualQuality),
         _ => None,
     }
 }
@@ -615,6 +644,10 @@ pub fn repair_validator_registry()
         ),
         ("wge.validator.asset-preparation/v1", "wge.asset-receipt/v1"),
         ("wge.validator.visual-reference/v1", "wge.visual-receipt/v1"),
+        (
+            "wge.validator.visual-quality/v1",
+            NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA,
+        ),
     ] {
         registry
             .register(validator, schema, validate_repair_bridge)
@@ -799,6 +832,7 @@ pub fn validate_request(
         }
     }
     validate_semantic_world_layout_binding(&current_receipts)?;
+    validate_visual_quality_world_binding(&current_receipts)?;
     let mut current_by_gate = BTreeMap::<&str, Vec<&ReceiptEnvelope>>::new();
     for receipt in &current_receipts {
         current_by_gate
@@ -960,6 +994,48 @@ fn validate_semantic_world_layout_binding(
     Ok(())
 }
 
+fn validate_visual_quality_world_binding(
+    receipts: &[&ReceiptEnvelope],
+) -> Result<(), AuthorityError> {
+    let world = receipts
+        .iter()
+        .find(|receipt| receipt.gate_id == "world")
+        .ok_or_else(|| AuthorityError::new("provenance", "current world receipt is missing"))?;
+    let visual_quality = receipts
+        .iter()
+        .find(|receipt| receipt.gate_id == "visual_quality")
+        .ok_or_else(|| {
+            AuthorityError::new("provenance", "current visual-quality receipt is missing")
+        })?;
+    let world_payload: schema::WorldReceiptPayload = serde_json::from_value(world.payload.clone())
+        .map_err(|error| AuthorityError::new("malformed", format!("world payload: {error}")))?;
+    let visual_payload: schema::NativeVisualQualityReceiptPayload =
+        serde_json::from_value(visual_quality.payload.clone()).map_err(|error| {
+            AuthorityError::new("malformed", format!("visual-quality payload: {error}"))
+        })?;
+    if visual_payload.world_artifact_id != world_payload.world_artifact_id {
+        return Err(AuthorityError::new(
+            "provenance",
+            "strict visual-quality evidence references a different world from the required world gate",
+        ));
+    }
+    let world_binding = world
+        .evidence
+        .iter()
+        .find(|binding| binding.artifact_id == world_payload.world_artifact_id);
+    let quality_binding = visual_quality
+        .evidence
+        .iter()
+        .find(|binding| binding.artifact_id == visual_payload.world_artifact_id);
+    if world_binding.is_none() || world_binding != quality_binding {
+        return Err(AuthorityError::new(
+            "provenance",
+            "world and strict visual-quality receipts do not bind the identical world artifact bytes",
+        ));
+    }
+    Ok(())
+}
+
 fn validate_request_bounds(request: &ValidationRequest) -> Result<(), AuthorityError> {
     if request.receipts.is_empty() || request.receipts.len() > MAX_RECEIPTS {
         return Err(AuthorityError::new(
@@ -1010,7 +1086,11 @@ fn validate_request_bounds(request: &ValidationRequest) -> Result<(), AuthorityE
     if request.gates.len() != REQUIRED_GATES.len() + DEFERRED_GATES.len() {
         return Err(AuthorityError::new(
             "policy",
-            "engine-neutral profile must contain six required and four deferred gates",
+            format!(
+                "engine-neutral profile must contain {} required and {} deferred gates",
+                REQUIRED_GATES.len(),
+                DEFERRED_GATES.len()
+            ),
         ));
     }
     Ok(())
@@ -1043,7 +1123,8 @@ fn validate_gate_profile(
                 ),
             )
         })?;
-        if registered.descriptor.gate_id != gate.gate_id
+        if registered.descriptor.validator_id != gate.validator_id
+            || registered.descriptor.gate_id != gate.gate_id
             || registered.descriptor.receipt_schema != gate.receipt_schema
         {
             return Err(AuthorityError::new(
@@ -1233,7 +1314,8 @@ fn validate_envelope<'a>(
                 format!("validator {} is not registered", envelope.validator_id),
             )
         })?;
-    if registered.descriptor.gate_id != envelope.gate_id
+    if registered.descriptor.validator_id != envelope.validator_id
+        || registered.descriptor.gate_id != envelope.gate_id
         || registered.descriptor.receipt_schema != envelope.receipt_schema
     {
         return Err(AuthorityError::new(
@@ -1387,6 +1469,11 @@ mod identity_tests {
             registry.digest(),
             ValidatorRegistry::wge_engine_neutral_v1().digest()
         );
+        assert_ne!(
+            registry.digest(),
+            ValidatorRegistry::wge_native_mvp_v1().digest(),
+            "the rigging-capable registry must have a distinct identity"
+        );
         let mut envelope = ReceiptEnvelope {
             schema_version: ENVELOPE_SCHEMA.into(),
             receipt_id: String::new(),
@@ -1412,5 +1499,162 @@ mod identity_tests {
         assert_eq!(id, envelope.receipt_id);
         envelope.producer = "different-producer".into();
         assert_ne!(id, receipt_id(&envelope).unwrap());
+    }
+
+    #[test]
+    fn registry_digest_commits_to_the_registered_validator_implementation_kind() {
+        let registry = ValidatorRegistry::wge_engine_neutral_v1();
+        let original = registry_digest(&registry.entries);
+        let mut substituted = registry.entries.clone();
+        substituted
+            .get_mut("wge.validator.world-traversal/v1")
+            .expect("world validator is registered")
+            .kind = ValidatorKind::Visual;
+
+        assert_ne!(
+            original,
+            registry_digest(&substituted),
+            "same validator descriptors with different native implementation routing must not share a registry digest"
+        );
+    }
+
+    #[test]
+    fn registry_digest_commits_to_the_lookup_key() {
+        let registry = ValidatorRegistry::wge_engine_neutral_v1();
+        let original = registry_digest(&registry.entries);
+        let mut rekeyed = registry.entries.clone();
+        let registration = rekeyed
+            .remove("wge.validator.world-traversal/v1")
+            .expect("world validator is registered");
+        rekeyed.insert(
+            "wge.validator.world-traversal-alias/v1".into(),
+            registration,
+        );
+
+        assert_ne!(
+            original,
+            registry_digest(&rekeyed),
+            "registry lookup keys are part of the authority mapping"
+        );
+    }
+
+    #[test]
+    fn validator_lookup_key_must_match_the_registered_descriptor_id() {
+        let mut registry = ValidatorRegistry::wge_engine_neutral_v1();
+        let registration = registry
+            .entries
+            .remove("wge.validator.world-traversal/v1")
+            .expect("world validator is registered");
+        let alias = "wge.validator.world-traversal-alias/v1";
+        registry.entries.insert(alias.into(), registration);
+        registry.digest = registry_digest(&registry.entries);
+
+        let mut candidate = CandidateContext {
+            project_id: "registry-alias-control".into(),
+            snapshot_id: "registry-alias-snapshot".into(),
+            candidate_sha256: String::new(),
+            artifacts: BTreeMap::from([(
+                "manifest".into(),
+                ArtifactBytes {
+                    kind: "project_manifest".into(),
+                    bytes: b"candidate manifest".to_vec(),
+                },
+            )]),
+            authorized_repair_artifact_ids: BTreeSet::new(),
+        };
+        candidate.candidate_sha256 = candidate_identity(&candidate).unwrap();
+        let mut envelope = ReceiptEnvelope {
+            schema_version: ENVELOPE_SCHEMA.into(),
+            receipt_id: String::new(),
+            project_id: candidate.project_id.clone(),
+            snapshot_id: candidate.snapshot_id.clone(),
+            candidate_sha256: candidate.candidate_sha256.clone(),
+            gate_id: "world".into(),
+            validator_id: alias.into(),
+            receipt_schema: "wge.world-receipt/v1".into(),
+            status: ReceiptStatus::Pass,
+            producer: "untrusted".into(),
+            observed_input_sha256: String::new(),
+            evidence: vec![EvidenceBinding {
+                artifact_id: "manifest".into(),
+                kind: "project_manifest".into(),
+                sha256: sha256_prefixed(b"candidate manifest"),
+            }],
+            payload: Value::Null,
+        };
+        envelope.seal().unwrap();
+
+        let error = validate_envelope(&envelope, &candidate, &registry).unwrap_err();
+        assert_eq!(error.class, "unregistered", "{error}");
+    }
+
+    #[test]
+    fn strict_visual_quality_must_bind_the_world_receipt_artifact_exactly() {
+        let world_binding = EvidenceBinding {
+            artifact_id: "world-artifact".into(),
+            kind: "world_artifact".into(),
+            sha256: sha256_prefixed(b"world artifact bytes"),
+        };
+        let world = ReceiptEnvelope {
+            schema_version: ENVELOPE_SCHEMA.into(),
+            receipt_id: "world-receipt".into(),
+            project_id: "project".into(),
+            snapshot_id: "snapshot".into(),
+            candidate_sha256: sha256_prefixed(b"candidate"),
+            gate_id: "world".into(),
+            validator_id: "wge.validator.world-traversal/v1".into(),
+            receipt_schema: "wge.world-receipt/v1".into(),
+            status: ReceiptStatus::Pass,
+            producer: "test".into(),
+            observed_input_sha256: sha256_prefixed(b"input"),
+            evidence: vec![world_binding.clone()],
+            payload: serde_json::to_value(schema::WorldReceiptPayload {
+                world_artifact_id: "world-artifact".into(),
+                traversal_artifact_id: "traversal".into(),
+                layout_artifact_id: "layout".into(),
+            })
+            .unwrap(),
+        };
+        let quality_payload = |world_artifact_id: &str| {
+            serde_json::to_value(schema::NativeVisualQualityReceiptPayload {
+                world_artifact_id: world_artifact_id.into(),
+                packet_artifact_id: "packet".into(),
+                frame_receipt_artifact_id: "frame".into(),
+                renderer_attestation_artifact_id: "attestation".into(),
+                capture_artifact_id: "capture".into(),
+                visual_quality_evidence_artifact_id: "quality".into(),
+            })
+            .unwrap()
+        };
+        let quality = ReceiptEnvelope {
+            schema_version: ENVELOPE_SCHEMA.into(),
+            receipt_id: "quality-receipt".into(),
+            project_id: "project".into(),
+            snapshot_id: "snapshot".into(),
+            candidate_sha256: sha256_prefixed(b"candidate"),
+            gate_id: "visual_quality".into(),
+            validator_id: "wge.validator.visual-quality/v1".into(),
+            receipt_schema: NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA.into(),
+            status: ReceiptStatus::Pass,
+            producer: "test".into(),
+            observed_input_sha256: sha256_prefixed(b"input"),
+            evidence: vec![world_binding.clone()],
+            payload: quality_payload("world-artifact"),
+        };
+        validate_visual_quality_world_binding(&[&world, &quality])
+            .expect("same artifact ID, kind, and digest remain bound across gates");
+
+        let detached_quality = ReceiptEnvelope {
+            evidence: vec![EvidenceBinding {
+                artifact_id: "other-world".into(),
+                kind: "world_artifact".into(),
+                sha256: sha256_prefixed(b"other world bytes"),
+            }],
+            payload: quality_payload("other-world"),
+            ..quality
+        };
+        let error = validate_visual_quality_world_binding(&[&world, &detached_quality])
+            .expect_err("strict native evidence cannot certify a different world");
+        assert!(error.detail.contains("different world"), "{error}");
     }
 }

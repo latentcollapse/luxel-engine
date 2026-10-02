@@ -225,47 +225,17 @@ pub fn run_replay(
     let snapshot_sha256 = sha256_json(snapshot)?;
     let trace_sha256 = sha256_json(trace)?;
     let mut state = initial_state(snapshot)?;
-    let mut cooldown_ready_at = BTreeMap::<EntityId, u64>::new();
+    let mut cooldown_ready_at = CooldownReadyAt::new();
     let mut event_receipts = Vec::with_capacity(trace.events.len());
 
     for (index, input) in trace.events.iter().enumerate() {
-        if state.outcome != GameOutcome::InProgress {
-            return Err(GameFailure::new(
-                FailureCode::GameAlreadyFinished,
-                format!(
-                    "input event {index} follows terminal outcome {:?}",
-                    state.outcome
-                ),
-            )
-            .at_event(index));
-        }
         let tick = state.tick.checked_add(1).ok_or_else(|| {
             GameFailure::new(FailureCode::TickOverflow, "runtime tick counter overflowed")
                 .at_event(index)
         })?;
-        let mut next_state = state.clone();
-        let mut next_cooldowns = cooldown_ready_at.clone();
-        let transition = apply_input(snapshot, &mut next_state, &mut next_cooldowns, input, tick)
-            .map_err(|failure| failure.at_event(index))?;
-        next_state.tick = tick;
-
-        let npc_action =
-            apply_npc_turn(snapshot, &mut next_state).map_err(|failure| failure.at_event(index))?;
-        if next_state.objective == ObjectiveState::Secured {
-            next_state.outcome = GameOutcome::Won;
-        } else if no_playable_entity_alive(&next_state) {
-            next_state.outcome = GameOutcome::Lost;
-        }
-
-        let resulting_state_sha256 = sha256_json(&next_state)?;
-        event_receipts.push(EventReceipt {
-            event_index: index,
-            tick,
-            input: input.clone(),
-            transition,
-            npc_action,
-            resulting_state_sha256,
-        });
+        let (next_state, next_cooldowns, event_receipt) =
+            step_runtime(snapshot, &state, &cooldown_ready_at, input, tick, index)?;
+        event_receipts.push(event_receipt);
         state = next_state;
         cooldown_ready_at = next_cooldowns;
     }
@@ -321,7 +291,9 @@ pub fn verify_replay(
     Ok(receipt)
 }
 
-fn initial_state(snapshot: &GameSnapshot) -> Result<RuntimeState, GameFailure> {
+pub(crate) type CooldownReadyAt = BTreeMap<EntityId, u64>;
+
+pub(crate) fn initial_state(snapshot: &GameSnapshot) -> Result<RuntimeState, GameFailure> {
     let selected_entity =
         snapshot.playable_ids().next().cloned().ok_or_else(|| {
             GameFailure::new(FailureCode::PlayableEntityCount, "no playable entity")
@@ -353,6 +325,70 @@ fn initial_state(snapshot: &GameSnapshot) -> Result<RuntimeState, GameFailure> {
         objective: ObjectiveState::Available,
         outcome: GameOutcome::InProgress,
     })
+}
+
+/// Apply one validated v1 input through the same transactional transition path
+/// used by batch replay and incremental sessions.
+pub(crate) fn step_runtime(
+    snapshot: &GameSnapshot,
+    state: &RuntimeState,
+    cooldown_ready_at: &CooldownReadyAt,
+    input: &InputEvent,
+    requested_tick: u64,
+    event_index: usize,
+) -> Result<(RuntimeState, CooldownReadyAt, EventReceipt), GameFailure> {
+    if state.outcome != GameOutcome::InProgress {
+        return Err(GameFailure::new(
+            FailureCode::GameAlreadyFinished,
+            format!(
+                "input event {event_index} follows terminal outcome {:?}",
+                state.outcome
+            ),
+        )
+        .at_event(event_index));
+    }
+    let expected_tick = state.tick.checked_add(1).ok_or_else(|| {
+        GameFailure::new(FailureCode::TickOverflow, "runtime tick counter overflowed")
+            .at_event(event_index)
+    })?;
+    if requested_tick != expected_tick {
+        return Err(GameFailure::subject(
+            FailureCode::UnexpectedTick,
+            "expected_tick",
+            format!("requested tick {requested_tick}; next tick is {expected_tick}"),
+        )
+        .at_event(event_index));
+    }
+
+    // Stage all mutations in local copies. The caller commits them only when
+    // the complete player input, NPC response, and outcome calculation succeed.
+    let mut next_state = state.clone();
+    let mut next_cooldowns = cooldown_ready_at.clone();
+    let transition = apply_input(
+        snapshot,
+        &mut next_state,
+        &mut next_cooldowns,
+        input,
+        requested_tick,
+    )
+    .map_err(|failure| failure.at_event(event_index))?;
+    next_state.tick = requested_tick;
+    let npc_action = apply_npc_turn(snapshot, &mut next_state)
+        .map_err(|failure| failure.at_event(event_index))?;
+    if next_state.objective == ObjectiveState::Secured {
+        next_state.outcome = GameOutcome::Won;
+    } else if no_playable_entity_alive(&next_state) {
+        next_state.outcome = GameOutcome::Lost;
+    }
+    let event_receipt = EventReceipt {
+        event_index,
+        tick: requested_tick,
+        input: input.clone(),
+        transition,
+        npc_action,
+        resulting_state_sha256: sha256_json(&next_state)?,
+    };
+    Ok((next_state, next_cooldowns, event_receipt))
 }
 
 fn apply_input(
@@ -731,7 +767,7 @@ fn no_playable_entity_alive(state: &RuntimeState) -> bool {
         .any(|entity| matches!(entity.control, Control::Playable) && entity.health > 0)
 }
 
-fn sha256_json<T: Serialize>(value: &T) -> Result<String, GameFailure> {
+pub(crate) fn sha256_json<T: Serialize>(value: &T) -> Result<String, GameFailure> {
     let bytes = serde_json::to_vec(value).map_err(|error| {
         GameFailure::new(
             FailureCode::ReplayDiverged,

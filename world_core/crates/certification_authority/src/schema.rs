@@ -45,6 +45,7 @@ pub struct GameplayReceiptPayload {
     pub traversal_artifact_id: String,
     pub capture_artifact_id: String,
     pub visual_evidence_artifact_id: String,
+    pub gameplay_kit_artifact_id: String,
     pub gameplay_binding_artifact_id: String,
 }
 
@@ -106,6 +107,20 @@ pub struct VisualReceiptPayload {
     pub world_artifact_id: String,
     pub capture_artifact_id: String,
     pub visual_evidence_artifact_id: String,
+}
+
+/// Strict native visual-quality evidence binds a graphics packet, promoted
+/// frame receipt, exact raw RGBA capture, and the Rust-remeasurable quality
+/// evidence. The world ID must also match the required world receipt.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct NativeVisualQualityReceiptPayload {
+    pub world_artifact_id: String,
+    pub packet_artifact_id: String,
+    pub frame_receipt_artifact_id: String,
+    pub renderer_attestation_artifact_id: String,
+    pub capture_artifact_id: String,
+    pub visual_quality_evidence_artifact_id: String,
 }
 
 /// The payload carries canonical intake/repair contract types directly.

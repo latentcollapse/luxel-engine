@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -9,14 +10,22 @@ use std::time::Duration;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Deserialize;
 use serde_json::{Value, json};
+use wge_asset_contract::{AssetPreparationReceipt, RenderAssetPackage};
+use wge_project_ledger::{SceneArtifact, validate_scene_against_asset_receipts_and_render_assets};
 
 use crate::{
-    ADAPTER_REVISION, CaptureFormat, FRAME_RECEIPT_SCHEMA, FrameStatus, GraphicsContractError,
-    GraphicsFrameMeasurements, GraphicsFrameReceipt, GraphicsFrameReceiptBody, GraphicsReady,
-    GraphicsScenePacket, GraphicsTelemetry, LAVA_BACKEND_ID, LAVA_REVISION, canonical_json,
-    measure_frame_capture, seal_frame_receipt_with_capture, sha256_prefixed,
-    validate_native_visual_gate, validate_ready, validate_scene_packet,
+    ADAPTER_REVISION, Campaign2View, CaptureFormat, FRAME_RECEIPT_SCHEMA, FrameStatus,
+    GraphicsAssetProjection, GraphicsCamera, GraphicsContractError, GraphicsFrameMeasurements,
+    GraphicsFrameReceipt, GraphicsFrameReceiptBody, GraphicsReady, GraphicsRendererAttestation,
+    GraphicsRendererAttestationBody, GraphicsScenePacket, GraphicsTelemetry, LAVA_BACKEND_ID,
+    LAVA_REVISION, MAX_DENSE_BENCHMARK_INSTANCES, canonical_json, compose_bound_scene_with_camera,
+    lower_campaign2_packet, lower_dense_benchmark_packet, lower_objective_close_packet,
+    lower_reference_world, lower_showcase_packet, lower_world_showcase_packet,
+    measure_frame_capture, seal_frame_receipt_with_capture, seal_renderer_attestation,
+    sha256_prefixed, validate_native_visual_gate, validate_ready, validate_scene_packet,
+    validate_texture_residency_telemetry,
 };
+use wge_reference_runtime::{WorldArtifact, validate_world_artifact};
 
 pub const WORKER_SCHEMA: &str = "wge.graphics-worker/v1";
 const MAX_WORKER_FRAME_BYTES: usize = 64 * 1024 * 1024;
@@ -101,16 +110,32 @@ pub struct GraphicsFrameOutput {
 pub struct PromotedFrame {
     pub frame: GraphicsFrameOutput,
     pub receipt: GraphicsFrameReceipt,
+    pub renderer_attestation: GraphicsRendererAttestation,
     pub capture_bytes: Vec<u8>,
+}
+
+/// Canonical inputs required to independently authorize a scene-bound packet
+/// before it crosses into the Julia/Lava execution boundary.
+pub struct BoundSceneRenderAuthorization<'a> {
+    pub base_packet: &'a GraphicsScenePacket,
+    pub scene: &'a SceneArtifact,
+    pub asset_receipts: &'a [AssetPreparationReceipt],
+    pub render_packages: &'a [RenderAssetPackage],
+    pub assets: &'a [GraphicsAssetProjection],
+    /// Optional derived inspection view. It is re-applied during independent
+    /// Rust recomposition and therefore cannot be changed after promotion.
+    pub camera: Option<&'a GraphicsCamera>,
 }
 
 pub struct GraphicsWorkerSupervisor {
     child: Child,
-    stdin: ChildStdin,
+    stdin: Option<ChildStdin>,
     responses: Receiver<Result<Vec<u8>, String>>,
     reader: Option<JoinHandle<()>>,
     response_timeout: Duration,
+    startup_timeout: Duration,
     restart_required: bool,
+    source_identity_sha256: String,
     ready_message: Value,
     ready: Option<GraphicsReady>,
     julia: PathBuf,
@@ -181,11 +206,13 @@ impl GraphicsWorkerSupervisor {
             })?;
         let mut supervisor = Self {
             child,
-            stdin,
+            stdin: Some(stdin),
             responses,
             reader: Some(reader),
             response_timeout,
+            startup_timeout: response_timeout,
             restart_required: false,
+            source_identity_sha256: String::new(),
             ready_message: Value::Null,
             ready: None,
             julia,
@@ -195,6 +222,7 @@ impl GraphicsWorkerSupervisor {
         let ready = supervisor.read_frame_json()?;
         supervisor.validate_worker_ready(&ready)?;
         supervisor.ready_message = ready;
+        supervisor.source_identity_sha256 = supervisor.renderer_source_identity_sha256()?;
         Ok(supervisor)
     }
 
@@ -212,7 +240,13 @@ impl GraphicsWorkerSupervisor {
 
     pub fn restart(&mut self) -> Result<(), GraphicsWorkerError> {
         self.stop_child();
-        let replacement = Self::start(&self.julia, &self.project, &self.worker)?;
+        let mut replacement = Self::start_with_timeout(
+            &self.julia,
+            &self.project,
+            &self.worker,
+            self.startup_timeout,
+        )?;
+        replacement.response_timeout = self.response_timeout;
         let old = std::mem::replace(self, replacement);
         drop(old);
         Ok(())
@@ -243,9 +277,61 @@ impl GraphicsWorkerSupervisor {
     pub fn render_and_promote(
         &mut self,
         packet: &GraphicsScenePacket,
+        world: &WorldArtifact,
     ) -> Result<PromotedFrame, GraphicsWorkerError> {
         validate_scene_packet(packet).map_err(GraphicsWorkerError::contract)?;
-        let ready = self.ready.as_ref().ok_or_else(|| {
+        validate_world_artifact_binding(packet, world)?;
+        validate_authorized_world_projection(packet, world)?;
+        self.render_validated_and_promote(packet)
+    }
+
+    /// Render a packet whose additional scene objects were produced by the
+    /// typed Rust scene-composition seam. The base packet, scene artifact,
+    /// runtime receipts, conditioned packages, and graphics projections are
+    /// all supplied so the supervisor can independently revalidate the exact
+    /// composition before any bytes reach Julia/Lava.
+    pub fn render_bound_scene_and_promote(
+        &mut self,
+        packet: &GraphicsScenePacket,
+        world: &WorldArtifact,
+        authorization: BoundSceneRenderAuthorization<'_>,
+    ) -> Result<PromotedFrame, GraphicsWorkerError> {
+        validate_scene_packet(packet).map_err(GraphicsWorkerError::contract)?;
+        validate_scene_packet(authorization.base_packet).map_err(GraphicsWorkerError::contract)?;
+        validate_world_artifact_binding(packet, world)?;
+        validate_world_artifact_binding(authorization.base_packet, world)?;
+        validate_authorized_world_projection(authorization.base_packet, world)?;
+        validate_scene_against_asset_receipts_and_render_assets(
+            authorization.scene,
+            authorization.asset_receipts,
+            authorization.render_packages,
+        )
+        .map_err(|error| {
+            GraphicsWorkerError::provenance(format!(
+                "bound scene failed independent asset validation: {error}"
+            ))
+        })?;
+        let mut base_body = authorization.base_packet.body.clone();
+        let recomposed = compose_bound_scene_with_camera(
+            &mut base_body,
+            authorization.scene,
+            authorization.assets,
+            authorization.camera,
+        )
+        .map_err(GraphicsWorkerError::contract)?;
+        if &recomposed != packet {
+            return Err(GraphicsWorkerError::provenance(
+                "bound scene packet does not match Rust recomposition",
+            ));
+        }
+        self.render_validated_and_promote(packet)
+    }
+
+    fn render_validated_and_promote(
+        &mut self,
+        packet: &GraphicsScenePacket,
+    ) -> Result<PromotedFrame, GraphicsWorkerError> {
+        let ready = self.ready.clone().ok_or_else(|| {
             GraphicsWorkerError::protocol(
                 "capabilities must be validated before a frame can be promoted",
             )
@@ -262,9 +348,14 @@ impl GraphicsWorkerSupervisor {
                 GraphicsWorkerError::provenance("worker ready message has no script identity")
             })?
             .to_owned();
+        self.ensure_renderer_sources_unchanged()?;
         let renderer_identity_sha256 =
-            self.renderer_identity_sha256(ready, &worker_script_sha256)?;
-        let response = self.request(json!({"op": "render_packet", "packet": packet}))?;
+            self.renderer_identity_sha256(&ready, &worker_script_sha256)?;
+        let response = self.request(json!({
+            "op": "render_packet",
+            "packet": packet,
+            "expected_packet_sha256": packet.packet_sha256,
+        }))?;
         let frame_value = response
             .get("frame")
             .ok_or_else(|| GraphicsWorkerError::protocol("render response has no frame payload"))?;
@@ -323,10 +414,13 @@ impl GraphicsWorkerSupervisor {
                 "frame capture digest does not match its bytes",
             ));
         }
+        self.ensure_renderer_sources_unchanged()?;
+        let renderer_attestation =
+            self.renderer_attestation(&ready, &worker_script_sha256, &renderer_identity_sha256)?;
         validate_frame_telemetry(packet, &frame.telemetry)?;
         let authoritative_measurements =
             measure_frame_capture(packet, &capture_bytes).map_err(GraphicsWorkerError::contract)?;
-        validate_native_visual_gate(packet, &authoritative_measurements)
+        validate_native_visual_gate(packet, &authoritative_measurements, &capture_bytes)
             .map_err(GraphicsWorkerError::contract)?;
         if !measurements_agree(&frame.measurements, &authoritative_measurements) {
             return Err(GraphicsWorkerError::provenance(
@@ -352,11 +446,12 @@ impl GraphicsWorkerSupervisor {
             telemetry: frame.telemetry.clone(),
             detail: "Rust-promoted Lava frame with independently verified capture bytes".into(),
         };
-        let receipt = seal_frame_receipt_with_capture(body, &capture_bytes)
+        let receipt = seal_frame_receipt_with_capture(packet, body, &capture_bytes)
             .map_err(GraphicsWorkerError::contract)?;
         Ok(PromotedFrame {
             frame,
             receipt,
+            renderer_attestation,
             capture_bytes,
         })
     }
@@ -370,7 +465,12 @@ impl GraphicsWorkerSupervisor {
         let payload = serde_json::to_vec(&request).map_err(|error| {
             GraphicsWorkerError::protocol(format!("request JSON serialization failed: {error}"))
         })?;
-        self.write_frame(&payload)?;
+        if let Err(error) = self.write_frame(&payload) {
+            self.ready = None;
+            self.restart_required = true;
+            self.stop_child();
+            return Err(error);
+        }
         let response = match self.read_frame_json() {
             Ok(response) => response,
             Err(error) => {
@@ -450,13 +550,7 @@ impl GraphicsWorkerSupervisor {
         ready: &GraphicsReady,
         worker_script_sha256: &str,
     ) -> Result<String, GraphicsWorkerError> {
-        let source_digests = json!({
-            "worker_script": worker_script_sha256,
-            "lava_adapter": sha256_file(&self.project.join("src/LavaAdapter.jl"))?,
-            "graphics_contract": sha256_file(&self.project.join("src/WGEGraphics.jl"))?,
-            "project": sha256_file(&self.project.join("Project.toml"))?,
-            "manifest": sha256_file(&self.project.join("Manifest.toml"))?,
-        });
+        let source_digests = self.renderer_source_digests(worker_script_sha256)?;
         let identity = json!({
             "capabilities": ready,
             "worker_ready": self.ready_message,
@@ -464,6 +558,75 @@ impl GraphicsWorkerSupervisor {
         });
         Ok(sha256_prefixed(
             &canonical_json(&identity).map_err(GraphicsWorkerError::contract)?,
+        ))
+    }
+
+    fn renderer_attestation(
+        &self,
+        ready: &GraphicsReady,
+        worker_script_sha256: &str,
+        renderer_identity_sha256: &str,
+    ) -> Result<GraphicsRendererAttestation, GraphicsWorkerError> {
+        let source_digests = self.renderer_source_digests(worker_script_sha256)?;
+        let source_identity_sha256 = sha256_prefixed(
+            &canonical_json(&source_digests).map_err(GraphicsWorkerError::contract)?,
+        );
+        seal_renderer_attestation(GraphicsRendererAttestationBody {
+            schema_version: crate::RENDERER_ATTESTATION_SCHEMA.into(),
+            backend_id: ready.backend_id.clone(),
+            adapter_revision: ready.adapter_revision.clone(),
+            lava_revision: ready.lava_revision.clone(),
+            worker_ready_message: self.ready_message.clone(),
+            ready: ready.clone(),
+            source_digests,
+            source_identity_sha256,
+            renderer_identity_sha256: renderer_identity_sha256.to_owned(),
+        })
+        .map_err(GraphicsWorkerError::contract)
+    }
+
+    fn renderer_source_digests(
+        &self,
+        worker_script_sha256: &str,
+    ) -> Result<BTreeMap<String, String>, GraphicsWorkerError> {
+        Ok(BTreeMap::from([
+            ("worker_script".into(), worker_script_sha256.to_owned()),
+            (
+                "lava_adapter".into(),
+                sha256_file(&self.project.join("src/LavaAdapter.jl"))?,
+            ),
+            (
+                "graphics_contract".into(),
+                sha256_file(&self.project.join("src/WGEGraphics.jl"))?,
+            ),
+            (
+                "project".into(),
+                sha256_file(&self.project.join("Project.toml"))?,
+            ),
+            (
+                "manifest".into(),
+                sha256_file(&self.project.join("Manifest.toml"))?,
+            ),
+        ]))
+    }
+
+    fn renderer_source_identity_sha256(&self) -> Result<String, GraphicsWorkerError> {
+        let source_digests = self.renderer_source_digests(&sha256_file(&self.worker)?)?;
+        Ok(sha256_prefixed(
+            &canonical_json(&source_digests).map_err(GraphicsWorkerError::contract)?,
+        ))
+    }
+
+    fn ensure_renderer_sources_unchanged(&mut self) -> Result<(), GraphicsWorkerError> {
+        let current = self.renderer_source_identity_sha256()?;
+        if current == self.source_identity_sha256 {
+            return Ok(());
+        }
+        self.ready = None;
+        self.restart_required = true;
+        self.stop_child();
+        Err(GraphicsWorkerError::restart_required(
+            "renderer source identity changed after worker startup; restart the graphics worker",
         ))
     }
 
@@ -475,13 +638,45 @@ impl GraphicsWorkerSupervisor {
         }
         let length = u32::try_from(payload.len())
             .map_err(|_| GraphicsWorkerError::protocol("request length overflows frame header"))?;
-        self.stdin
-            .write_all(&length.to_be_bytes())
-            .and_then(|_| self.stdin.write_all(payload))
-            .and_then(|_| self.stdin.flush())
-            .map_err(|error| {
-                GraphicsWorkerError::io(format!("failed to write worker frame: {error}"))
+        let mut frame = Vec::with_capacity(4 + payload.len());
+        frame.extend_from_slice(&length.to_be_bytes());
+        frame.extend_from_slice(payload);
+        let stdin = self
+            .stdin
+            .take()
+            .ok_or_else(|| GraphicsWorkerError::restart_required("worker stdin is unavailable"))?;
+        let timeout = self.response_timeout;
+        let (sender, receiver) = mpsc::channel();
+        thread::Builder::new()
+            .name("wge-lava-worker-writer".into())
+            .spawn(move || {
+                let mut stdin = stdin;
+                let result = stdin
+                    .write_all(&frame)
+                    .and_then(|_| stdin.flush())
+                    .map_err(|error| error.to_string());
+                // Returning the pipe on both success and failure avoids
+                // losing the live transport on the normal path.
+                let _ = sender.send((stdin, result));
             })
+            .map_err(|error| {
+                GraphicsWorkerError::io(format!("failed to start worker writer: {error}"))
+            })?;
+        match receiver.recv_timeout(timeout) {
+            Ok((stdin, result)) => {
+                self.stdin = Some(stdin);
+                result.map_err(|error| {
+                    GraphicsWorkerError::io(format!("failed to write worker frame: {error}"))
+                })
+            }
+            Err(RecvTimeoutError::Timeout) => Err(GraphicsWorkerError::timeout(format!(
+                "worker did not accept a request within {} ms",
+                timeout.as_millis()
+            ))),
+            Err(RecvTimeoutError::Disconnected) => {
+                Err(GraphicsWorkerError::io("worker writer disconnected"))
+            }
+        }
     }
 
     fn read_frame_json(&mut self) -> Result<Value, GraphicsWorkerError> {
@@ -510,6 +705,61 @@ impl GraphicsWorkerSupervisor {
             let _ = reader.join();
         }
     }
+}
+
+fn validate_authorized_world_projection(
+    packet: &GraphicsScenePacket,
+    world: &WorldArtifact,
+) -> Result<(), GraphicsWorkerError> {
+    let reference = lower_reference_world(world).map_err(GraphicsWorkerError::contract)?;
+    let mut authorized = vec![
+        reference.clone(),
+        lower_objective_close_packet(&reference).map_err(GraphicsWorkerError::contract)?,
+        lower_showcase_packet(&reference).map_err(GraphicsWorkerError::contract)?,
+        lower_world_showcase_packet(&reference).map_err(GraphicsWorkerError::contract)?,
+        lower_campaign2_packet(&reference, Campaign2View::Close)
+            .map_err(GraphicsWorkerError::contract)?,
+        lower_campaign2_packet(&reference, Campaign2View::Medium)
+            .map_err(GraphicsWorkerError::contract)?,
+        lower_campaign2_packet(&reference, Campaign2View::Wide)
+            .map_err(GraphicsWorkerError::contract)?,
+    ];
+    if let Some(added_instances) = packet
+        .body
+        .instances
+        .len()
+        .checked_sub(reference.body.instances.len())
+        .filter(|count| (1..=MAX_DENSE_BENCHMARK_INSTANCES).contains(count))
+    {
+        authorized.push(
+            lower_dense_benchmark_packet(&reference, added_instances)
+                .map_err(GraphicsWorkerError::contract)?,
+        );
+    }
+    if authorized.iter().any(|candidate| candidate == packet) {
+        return Ok(());
+    }
+    Err(GraphicsWorkerError::provenance(
+        "scene packet is not an authorized projection of the validated world artifact",
+    ))
+}
+
+fn validate_world_artifact_binding(
+    packet: &GraphicsScenePacket,
+    world: &WorldArtifact,
+) -> Result<(), GraphicsWorkerError> {
+    validate_world_artifact(world).map_err(|error| {
+        GraphicsWorkerError::provenance(format!("world artifact failed validation: {error}"))
+    })?;
+    if packet.body.world_artifact_id != world.artifact_id
+        || packet.body.world_artifact_sha256 != world.artifact_sha256
+        || packet.body.spatial_fields_sha256 != world.body.fields.spatial_sha256
+    {
+        return Err(GraphicsWorkerError::provenance(
+            "scene packet world provenance is detached from the validated world artifact",
+        ));
+    }
+    Ok(())
 }
 
 fn read_worker_frame(reader: &mut impl Read) -> Result<Vec<u8>, String> {
@@ -543,6 +793,8 @@ fn validate_frame_telemetry(
     packet: &GraphicsScenePacket,
     telemetry: &GraphicsTelemetry,
 ) -> Result<(), GraphicsWorkerError> {
+    validate_texture_residency_telemetry(packet, telemetry)
+        .map_err(GraphicsWorkerError::contract)?;
     let expected_terrain_vertices = (packet.body.terrain.resolution - 1)
         .checked_mul(packet.body.terrain.resolution - 1)
         .and_then(|cells| cells.checked_mul(6))

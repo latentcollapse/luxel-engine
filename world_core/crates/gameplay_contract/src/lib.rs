@@ -4,15 +4,28 @@
 //! transitions, replay checks, and receipts. It intentionally exposes no
 //! scripting or arbitrary host-language execution surface.
 
+mod live_runtime;
 mod model;
 mod runtime;
 
+/// Typed capability registry, profile catalog, and deterministic kit resolver.
+pub mod gcs;
 /// Versioned generalized gameplay substrate. The original v1 vertical-slice
 /// contract remains available for certified legacy bundles; new scenarios
 /// should use this bounded, data-driven contract instead of adding another
 /// fixture-specific branch to v1.
 pub mod general;
 
+pub use gcs::{
+    CapabilityFeatureId, CapabilityId, CapabilityRegistry, CapabilitySpec, DiagnosticSeverity,
+    KitManifest, KitProfileSpec, NetworkRequirement, OptionalIntegration, PersistenceRequirement,
+    PersistenceScope, ProfileId, REFERENCE_VERTICAL_SLICE_KIT_ID, ResolutionCode,
+    ResolutionDiagnostic, ResolutionReport, ResolvedKit, RuntimeCostClass, StateAuthority,
+    ValidationSuiteId, foundation_registry, reference_vertical_slice_kit,
+    reference_vertical_slice_manifest, resolve_kit,
+};
+
+pub use live_runtime::{GameplaySession, GameplaySessionSnapshot, GameplaySessionSnapshotBody};
 pub use model::{
     AbilityId, AbilitySpec, Control, EntityAttributes, EntityId, EntitySpec, GameSnapshot,
     GameplayEffect, GameplayTag, LocationId, NavigationGraph, NpcBehavior, ObjectivePrerequisite,
@@ -27,6 +40,7 @@ pub use runtime::{
 pub const GAMEPLAY_SNAPSHOT_SCHEMA: &str = "wge.gameplay-snapshot/v1";
 pub const GAMEPLAY_TRACE_SCHEMA: &str = "wge.gameplay-trace/v1";
 pub const GAMEPLAY_RECEIPT_SCHEMA: &str = "wge.gameplay-receipt/v1";
+pub const GAMEPLAY_SESSION_SNAPSHOT_SCHEMA: &str = "wge.gameplay-session-snapshot/v1";
 /// Every accepted gameplay input advances exactly one deterministic simulation tick.
 pub const GAMEPLAY_FIXED_TICK_RATE_HZ: u32 = 30;
 pub const MAX_REPLAY_EVENTS: usize = 100_000;
@@ -63,6 +77,7 @@ pub enum FailureCode {
     ObjectivePrerequisiteUnmet,
     GameAlreadyFinished,
     TickOverflow,
+    UnexpectedTick,
     ReplayDiverged,
     InputReadFailed,
     MalformedInput,

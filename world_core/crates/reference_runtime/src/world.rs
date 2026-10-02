@@ -108,6 +108,7 @@ pub struct WorldBuild {
     pub capture_bytes: Vec<u8>,
     pub visual: crate::VisualEvidence,
     pub gameplay: crate::GameplayWorldBinding,
+    pub gameplay_kit: wge_gameplay_contract::ResolvedKit,
 }
 
 impl WorldBuild {

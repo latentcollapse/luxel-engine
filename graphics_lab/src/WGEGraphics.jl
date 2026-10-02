@@ -10,6 +10,10 @@ const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v6"
 const MAX_PACKET_ELEMENTS = 16 * 1024 * 1024
 const MAX_CAPTURE_DIMENSION = 8192
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
+const MAX_NATIVE_COORDINATE_M = 1.0f6
+const MIN_NATIVE_DISTANCE_M = 1.0f-4
+const MIN_NATIVE_SCALE = 1.0f-4
+const MIN_VECTOR_LENGTH_SQUARED = 1.0f-8
 
 struct ProtocolError <: Exception
     code::String
@@ -71,6 +75,12 @@ struct MaterialPacket
     emissive_factor_rgb::NTuple{3,Float32}
 end
 
+struct TextureMipPacket
+    width_px::UInt32
+    height_px::UInt32
+    bytes::Vector{UInt8}
+end
+
 struct TexturePacket
     texture_id::String
     source_artifact_id::String
@@ -80,6 +90,7 @@ struct TexturePacket
     mip_levels::UInt32
     color_space::Symbol
     payload::Union{Nothing,Vector{UInt8}}
+    mip_chain::Vector{TextureMipPacket}
 end
 
 struct MeshPacket
@@ -89,7 +100,19 @@ struct MeshPacket
     uv0::Vector{NTuple{2,Float32}}
     indices::Vector{UInt32}
     material_id::String
+    tangents::Vector{NTuple{4,Float32}}
 end
+
+# Procedural/reference packet producers that predate canonical tangent
+# carry-through remain valid. Imported projections use the full constructor.
+MeshPacket(
+    mesh_id::String,
+    positions_m::Vector{NTuple{3,Float32}},
+    normals::Vector{NTuple{3,Float32}},
+    uv0::Vector{NTuple{2,Float32}},
+    indices::Vector{UInt32},
+    material_id::String,
+) = MeshPacket(mesh_id, positions_m, normals, uv0, indices, material_id, NTuple{4,Float32}[])
 
 struct TransformPacket
     translation_xyz_m::NTuple{3,Float32}
@@ -176,6 +199,7 @@ const OverlayValue = Union{PointOverlay,CircleOverlay,PolylineOverlay}
 
 struct GraphicsScenePacket
     packet_sha256::String
+    content_sha256::String
     packet_id::String
     world_artifact_id::String
     world_artifact_sha256::String
@@ -227,11 +251,19 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
         throw(ProtocolError("malformed_packet", "JSON decode failed: $(sprint(showerror, error))"))
     end
     value isa JSON3.Object || throw(ProtocolError("malformed_packet", "packet must be an object"))
-    _exact_keys(value, Set(("body", "packet_sha256")), "packet")
+    return _validate_scene_packet(value)
+end
+
+function validate_scene_packet(value::JSON3.Object)::GraphicsScenePacket
+    return _validate_scene_packet(value)
+end
+
+function _validate_scene_packet(value::JSON3.Object)::GraphicsScenePacket
+    _exact_keys(value, ("body", "packet_sha256"), "packet")
     body = _object(value["body"], "body")
     _exact_keys(
         body,
-        Set((
+        (
             "schema_version",
             "packet_id",
             "world_artifact_id",
@@ -249,12 +281,14 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
             "environment",
             "overlays",
             "capture",
-        )),
+        ),
+        ("scene_artifact_id", "scene_artifact_sha256"),
         "packet.body",
     )
     _string(body["schema_version"], "packet.body.schema_version") == SCENE_PACKET_SCHEMA ||
         throw(ProtocolError("unsupported_schema", "scene packet schema is unsupported"))
     packet_sha256 = _sha(body_value=value, path="packet_sha256")
+    content_sha256 = _packet_content_sha256(value)
     _valid_sha(packet_sha256, "packet_sha256")
     _valid_id(_string(body["packet_id"], "packet.body.packet_id"), "packet_id")
     world_id = _string(body["world_artifact_id"], "packet.body.world_artifact_id")
@@ -262,6 +296,19 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
     _valid_id(world_id, "world_artifact_id")
     _valid_sha(_string(body["world_artifact_sha256"], "world_artifact_sha256"), "world_artifact_sha256")
     _valid_sha(spatial_sha, "spatial_fields_sha256")
+    scene_artifact_id = _optional_string(body, "scene_artifact_id", "packet.body.scene_artifact_id")
+    scene_artifact_sha256 = _optional_string(
+        body,
+        "scene_artifact_sha256",
+        "packet.body.scene_artifact_sha256",
+    )
+    (scene_artifact_id === nothing) == (scene_artifact_sha256 === nothing) ||
+        throw(ProtocolError(
+            "provenance",
+            "scene artifact identity must include both id and digest",
+        ))
+    scene_artifact_sha256 === nothing ||
+        _valid_sha(scene_artifact_sha256, "packet.body.scene_artifact_sha256")
     frame_seed = _uint64(body["frame_seed"], "frame_seed")
 
     materials = _parse_materials(body["materials"])
@@ -281,6 +328,7 @@ function validate_scene_packet(payload::AbstractString)::GraphicsScenePacket
 
     return GraphicsScenePacket(
         packet_sha256,
+        content_sha256,
         _string(body["packet_id"], "packet_id"),
         world_id,
         _string(body["world_artifact_sha256"], "world_artifact_sha256"),
@@ -305,7 +353,7 @@ end
 function _parse_terrain(value::JSON3.Object, materials::Vector{MaterialPacket})::TerrainPacket
     _exact_keys(
         value,
-        Set((
+        (
             "terrain_id",
             "width_m",
             "length_m",
@@ -314,17 +362,20 @@ function _parse_terrain(value::JSON3.Object, materials::Vector{MaterialPacket}):
             "heights_m",
             "slope_grade",
             "region_codes",
-        )),
+        ),
         "terrain",
     )
     resolution = _integer(value["resolution"], "terrain.resolution")
-    resolution >= 3 || throw(ProtocolError("malformed_packet", "terrain resolution is too small"))
+    3 <= resolution <= 2049 ||
+        throw(ProtocolError("malformed_packet", "terrain resolution is outside the native range"))
     resolution * resolution <= MAX_PACKET_ELEMENTS ||
         throw(ProtocolError("malformed_packet", "terrain resolution exceeds packet bound"))
     width = _finite_float32(value["width_m"], "terrain.width_m")
     length = _finite_float32(value["length_m"], "terrain.length_m")
-    width > 0.0f0 && length > 0.0f0 ||
+    width >= MIN_NATIVE_DISTANCE_M && length >= MIN_NATIVE_DISTANCE_M ||
         throw(ProtocolError("malformed_packet", "terrain dimensions must be positive"))
+    width <= MAX_NATIVE_COORDINATE_M && length <= MAX_NATIVE_COORDINATE_M ||
+        throw(ProtocolError("malformed_packet", "terrain dimensions exceed native physical bounds"))
     terrain_id = _string(value["terrain_id"], "terrain.terrain_id")
     material_id = _string(value["material_id"], "terrain.material_id")
     _valid_id(terrain_id, "terrain_id")
@@ -344,17 +395,16 @@ function _parse_buffer(
     expected_encoding::Symbol,
 )
     object = _object(value, label)
-    actual_keys = Set(String(key) for key in keys(object))
-    required_keys = Set(("buffer_id", "byte_length", "count", "stride_bytes", "sha256", "payload"))
-    allowed_keys = union(required_keys, Set(("source_artifact_id",)))
-    (actual_keys == required_keys || actual_keys == allowed_keys) ||
-        throw(ProtocolError("malformed_packet", "$label has an unexpected or missing field"))
+    required_keys = ("buffer_id", "byte_length", "count", "stride_bytes", "sha256", "payload")
+    _exact_keys(object, required_keys, ("source_artifact_id",), label)
     buffer_id = _string(object["buffer_id"], "$label.buffer_id")
     _valid_id(buffer_id, "$label.buffer_id")
+    haskey(object, "source_artifact_id") && object["source_artifact_id"] !== nothing &&
+        _valid_id(_string(object["source_artifact_id"], "$label.source_artifact_id"), "$label.source_artifact_id")
     count = _integer(object["count"], "$label.count")
     count == expected_count || throw(ProtocolError("malformed_packet", "$label count does not match terrain"))
     payload = _object(object["payload"], "$label.payload")
-    _exact_keys(payload, Set(("encoding", "values")), "$label.payload")
+    _exact_keys(payload, ("encoding", "values"), "$label.payload")
     encoding = Symbol(_string(payload["encoding"], "$label.payload.encoding"))
     encoding == expected_encoding || throw(ProtocolError("malformed_packet", "$label encoding is not expected"))
     values = _values(payload["values"], encoding, label)
@@ -372,7 +422,10 @@ end
 
 function _values(value, ::Val{:f32}, label::String)
     array = _array(value, "$label.values")
-    return Float32[_finite_float32(item, "$label.values[$index]") for (index, item) in enumerate(array)]
+    values = Float32[_finite_float32(item, "$label.values[$index]") for (index, item) in enumerate(array)]
+    all(item -> abs(item) <= MAX_NATIVE_COORDINATE_M, values) ||
+        throw(ProtocolError("malformed_packet", "$label exceeds native physical bounds"))
+    return values
 end
 
 function _values(value, ::Val{:u8}, label::String)
@@ -433,7 +486,7 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
     sizehint!(materials, length(array))
     for material in array
         object = _object(material, "material")
-        required_keys = Set((
+        required_keys = (
             "material_id",
             "base_color_rgba",
             "metallic",
@@ -445,16 +498,14 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
             "normal_scale",
             "occlusion_strength",
             "emissive_factor_rgb",
-        ))
-        optional_keys = Set((
+        )
+        optional_keys = (
             "normal_texture_id",
             "roughness_texture_id",
             "occlusion_texture_id",
             "emissive_texture_id",
-        ))
-        actual_keys = Set(String(key) for key in keys(object))
-        issubset(required_keys, actual_keys) && issubset(setdiff(actual_keys, required_keys), optional_keys) ||
-            throw(ProtocolError("malformed_packet", "material has an unexpected or missing field"))
+        )
+        _exact_keys(object, required_keys, optional_keys, "material")
         id = _string(object["material_id"], "material.material_id")
         _valid_id(id, "material_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate material $id"))
@@ -527,7 +578,7 @@ function _parse_textures(value::JSON3.Array)::Vector{TexturePacket}
     sizehint!(textures, length(array))
     for texture in array
         object = _object(texture, "texture")
-        required_keys = Set((
+        required_keys = (
             "texture_id",
             "source_artifact_id",
             "sha256",
@@ -535,11 +586,8 @@ function _parse_textures(value::JSON3.Array)::Vector{TexturePacket}
             "height_px",
             "mip_levels",
             "color_space",
-        ))
-        actual_keys = Set(String(key) for key in keys(object))
-        actual_keys == required_keys ||
-            actual_keys == union(required_keys, Set(("payload",))) ||
-            throw(ProtocolError("malformed_packet", "texture has an unexpected or missing field"))
+        )
+        _exact_keys(object, required_keys, ("payload",), "texture")
         id = _string(object["texture_id"], "texture.texture_id")
         _valid_id(id, "texture_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate texture $id"))
@@ -553,34 +601,90 @@ function _parse_textures(value::JSON3.Array)::Vector{TexturePacket}
         mip_levels = _uint32(object["mip_levels"], "texture.mip_levels")
         width > 0 && height > 0 && mip_levels > 0 ||
             throw(ProtocolError("malformed_packet", "texture dimensions or mip count are invalid"))
+        mip_levels <= 32 ||
+            throw(ProtocolError("unsupported", "texture mip count exceeds the native bound"))
+        width <= MAX_CAPTURE_DIMENSION && height <= MAX_CAPTURE_DIMENSION ||
+            throw(ProtocolError("malformed_packet", "texture dimensions exceed the native range"))
         color_space = Symbol(_string(object["color_space"], "texture.color_space"))
         color_space in (:srgb, :linear, :normal_map, :data) ||
             throw(ProtocolError("unsupported", "texture color space is unsupported"))
         payload = nothing
-        if haskey(object, "payload")
+        mip_chain = TextureMipPacket[]
+        if haskey(object, "payload") && object["payload"] !== nothing
             payload_object = _object(object["payload"], "texture.payload")
-            _exact_keys(payload_object, Set(("encoding", "base64")), "texture.payload")
-            _string(payload_object["encoding"], "texture.payload.encoding") == "rgba8" ||
+            _exact_keys(payload_object, ("encoding", "base64"), "texture.payload")
+            encoding = _string(payload_object["encoding"], "texture.payload.encoding")
+            if encoding == "rgba8"
+                mip_levels == 1 ||
+                    throw(ProtocolError("unsupported", "single-level texture payload cannot claim multiple mip levels"))
+                encoded = _string(payload_object["base64"], "texture.payload.base64")
+                payload = _decode_texture_level(encoded, width, height, 0, id)
+                _sha256(payload) == sha256 ||
+                    throw(ProtocolError("provenance", "texture payload digest does not match metadata"))
+            elseif encoding == "rgba8_mip_chain"
+                levels_object = _object(payload_object["base64"], "texture.payload.base64")
+                _exact_keys(levels_object, ("levels",), "texture.payload.base64")
+                level_values = _array(levels_object["levels"], "texture.payload.base64.levels")
+                length(level_values) == Int(mip_levels) ||
+                    throw(ProtocolError("provenance", "texture mip payload level count does not match metadata"))
+                all_bytes = UInt8[]
+                for (level_index, level_value) in enumerate(level_values)
+                    level_object = _object(level_value, "texture mip level")
+                    _exact_keys(level_object, ("width_px", "height_px", "base64"), "texture mip level")
+                    level_width = _uint32(level_object["width_px"], "texture mip level.width_px")
+                    level_height = _uint32(level_object["height_px"], "texture mip level.height_px")
+                    expected_width, expected_height = _mip_dimensions(width, height, level_index - 1)
+                    (level_width, level_height) == (expected_width, expected_height) ||
+                        throw(ProtocolError("provenance", "texture mip level dimensions do not match metadata"))
+                    encoded = _string(level_object["base64"], "texture mip level.base64")
+                    level_bytes = _decode_texture_level(encoded, level_width, level_height, level_index - 1, id)
+                    append!(all_bytes, level_bytes)
+                    if level_index == 1
+                        payload = level_bytes
+                    else
+                        push!(mip_chain, TextureMipPacket(level_width, level_height, level_bytes))
+                    end
+                end
+                _sha256(all_bytes) == sha256 ||
+                    throw(ProtocolError("provenance", "texture mip payload digest does not match metadata"))
+            else
                 throw(ProtocolError("unsupported", "texture payload encoding is unsupported"))
-            encoded = _string(payload_object["base64"], "texture.payload.base64")
-            payload = try
-                base64decode(encoded)
-            catch error
-                throw(ProtocolError("malformed_packet", "texture payload is not valid base64: $(sprint(showerror, error))"))
             end
-            length(payload) == Int(width) * Int(height) * 4 ||
-                throw(ProtocolError("provenance", "texture payload byte length does not match dimensions"))
-            _sha256(payload) == sha256 ||
-                throw(ProtocolError("provenance", "texture payload digest does not match metadata"))
-            mip_levels == 1 ||
-                throw(ProtocolError("unsupported", "inline texture payloads require one mip level"))
         end
         push!(
             textures,
-            TexturePacket(id, source_artifact_id, sha256, width, height, mip_levels, color_space, payload),
+            TexturePacket(id, source_artifact_id, sha256, width, height, mip_levels, color_space, payload, mip_chain),
         )
     end
     return textures
+end
+
+function _decode_texture_level(
+    encoded::String,
+    width::UInt32,
+    height::UInt32,
+    level::Int,
+    texture_id::String,
+)
+    bytes = try
+        base64decode(encoded)
+    catch error
+        throw(ProtocolError("malformed_packet", "texture $texture_id mip $level payload is not valid base64: $(sprint(showerror, error))"))
+    end
+    length(bytes) == Int(width) * Int(height) * 4 ||
+        throw(ProtocolError("provenance", "texture $texture_id mip $level payload byte length does not match dimensions"))
+    return bytes
+end
+
+function _mip_dimensions(width::UInt32, height::UInt32, level::Int)
+    level >= 0 || throw(ProtocolError("malformed_packet", "texture mip level must be nonnegative"))
+    current_width = width
+    current_height = height
+    for _ in 1:level
+        current_width = max(UInt32(1), current_width ÷ UInt32(2))
+        current_height = max(UInt32(1), current_height ÷ UInt32(2))
+    end
+    return current_width, current_height
 end
 
 function _validate_material_texture_links(materials::Vector{MaterialPacket}, textures::Vector{TexturePacket})
@@ -613,7 +717,8 @@ function _parse_meshes(value::JSON3.Array, material_ids::Set{String})::Vector{Me
         object = _object(mesh, "mesh")
         _exact_keys(
             object,
-            Set(("mesh_id", "positions_m", "normals", "uv0", "indices", "material_id")),
+            ("mesh_id", "positions_m", "normals", "uv0", "indices", "material_id"),
+            ("tangents",),
             "mesh",
         )
         id = _string(object["mesh_id"], "mesh.mesh_id")
@@ -624,21 +729,46 @@ function _parse_meshes(value::JSON3.Array, material_ids::Set{String})::Vector{Me
             _tuple(position, Val(3), "mesh.positions_m") for
             position in _array(object["positions_m"], "mesh.positions_m")
         ]
+        all(position -> _bounded_values(position, "mesh.positions_m"), positions) ||
+            throw(ProtocolError("malformed_packet", "mesh positions exceed native physical bounds"))
         normals = NTuple{3,Float32}[
             _tuple(normal, Val(3), "mesh.normals") for
             normal in _array(object["normals"], "mesh.normals")
         ]
+        all(normal -> _bounded_values(normal, "mesh.normals"), normals) ||
+            throw(ProtocolError("malformed_packet", "mesh normals exceed native physical bounds"))
         uv0 = NTuple{2,Float32}[
             _tuple(uv, Val(2), "mesh.uv0") for
             uv in _array(object["uv0"], "mesh.uv0")
         ]
+        all(uv -> _bounded_values(uv, "mesh.uv0"), uv0) ||
+            throw(ProtocolError("malformed_packet", "mesh uv0 exceeds native physical bounds"))
         !isempty(positions) && length(positions) == length(normals) == length(uv0) ||
             throw(ProtocolError("malformed_packet", "mesh position, normal, and uv0 counts differ"))
+        tangents = haskey(object, "tangents") ?
+            NTuple{4,Float32}[
+                _tuple(tangent, Val(4), "mesh.tangents") for
+                tangent in _array(object["tangents"], "mesh.tangents")
+            ] :
+            NTuple{4,Float32}[]
+        isempty(tangents) || length(tangents) == length(positions) ||
+            throw(ProtocolError("malformed_packet", "mesh tangent count must be zero or match positions"))
+        all(tangent -> _bounded_values(tangent, "mesh.tangents"), tangents) ||
+            throw(ProtocolError("malformed_packet", "mesh tangents exceed native physical bounds"))
+        all(
+            tangent -> isfinite(_squared_norm((tangent[1], tangent[2], tangent[3]))) &&
+                _squared_norm((tangent[1], tangent[2], tangent[3])) > MIN_VECTOR_LENGTH_SQUARED &&
+                abs(abs(tangent[4]) - 1.0f0) <= 1.0f-3,
+            tangents,
+        ) || throw(ProtocolError("malformed_packet", "mesh tangents must be non-degenerate with unit handedness"))
         indices = UInt32[
             _uint32(index, "mesh.indices") for index in _array(object["indices"], "mesh.indices")
         ]
         isempty(positions) && throw(ProtocolError("malformed_packet", "mesh needs positions"))
-        all(normal -> isfinite(_squared_norm(normal)) && _squared_norm(normal) > eps(Float32), normals) ||
+        all(
+            normal -> isfinite(_squared_norm(normal)) && _squared_norm(normal) > MIN_VECTOR_LENGTH_SQUARED,
+            normals,
+        ) ||
             throw(ProtocolError("malformed_packet", "mesh normals must be non-degenerate"))
         !isempty(indices) && length(indices) % 3 == 0 ||
             throw(ProtocolError("malformed_packet", "mesh indices must form triangles"))
@@ -648,7 +778,7 @@ function _parse_meshes(value::JSON3.Array, material_ids::Set{String})::Vector{Me
         _valid_id(material_id, "mesh.material_id")
         material_id in material_ids ||
             throw(ProtocolError("provenance", "mesh references unknown material $material_id"))
-        push!(meshes, MeshPacket(id, positions, normals, uv0, indices, material_id))
+        push!(meshes, MeshPacket(id, positions, normals, uv0, indices, material_id, tangents))
     end
     return meshes
 end
@@ -665,7 +795,7 @@ function _parse_instances(
     sizehint!(instances, length(array))
     for instance in array
         object = _object(instance, "instance")
-        _exact_keys(object, Set(("instance_id", "mesh_id", "material_id", "importance", "transform")), "instance")
+        _exact_keys(object, ("instance_id", "mesh_id", "material_id", "importance", "transform"), "instance")
         id = _string(object["instance_id"], "instance.instance_id")
         _valid_id(id, "instance_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate instance $id"))
@@ -680,8 +810,10 @@ function _parse_instances(
             throw(ProtocolError("provenance", "instance references unknown material $material_id"))
         importance = _parse_instance_importance(_string(object["importance"], "instance.importance"))
         transform = _object(object["transform"], "instance.transform")
-        _exact_keys(transform, Set(("translation_xyz_m", "rotation_xyzw", "scale_xyz")), "instance.transform")
+        _exact_keys(transform, ("translation_xyz_m", "rotation_xyzw", "scale_xyz"), "instance.transform")
         translation = _tuple(transform["translation_xyz_m"], Val(3), "instance.transform.translation_xyz_m")
+        _bounded_values(translation, "instance.transform.translation_xyz_m") ||
+            throw(ProtocolError("malformed_packet", "instance translation exceeds native physical bounds"))
         rotation = _tuple(transform["rotation_xyzw"], Val(4), "instance.transform.rotation_xyzw")
         scale = _tuple(transform["scale_xyz"], Val(3), "instance.transform.scale_xyz")
         rotation_norm_squared = _squared_norm(rotation)
@@ -689,8 +821,10 @@ function _parse_instances(
             throw(ProtocolError("malformed_packet", "instance rotation is degenerate"))
         abs(rotation_norm_squared - 1.0f0) <= 1.0f-3 ||
             throw(ProtocolError("malformed_packet", "instance rotation must be a unit quaternion"))
-        all(value -> value > 0.0f0, scale) ||
+        all(value -> value >= MIN_NATIVE_SCALE, scale) ||
             throw(ProtocolError("malformed_packet", "instance scale must be positive"))
+        all(value -> value <= MAX_NATIVE_COORDINATE_M, scale) ||
+            throw(ProtocolError("malformed_packet", "instance scale exceeds native physical bounds"))
         push!(instances, InstancePacket(id, mesh_id, material_id, importance, TransformPacket(translation, rotation, scale)))
     end
     return instances
@@ -718,16 +852,17 @@ function _parse_lights(value::JSON3.Array)::Vector{LightPacket}
     sizehint!(lights, length(array))
     for light in array
         object = _object(light, "light")
-        _exact_keys(object, Set(("light_id", "kind", "color_rgb", "intensity")), "light")
+        _exact_keys(object, ("light_id", "kind", "color_rgb", "intensity"), "light")
         id = _string(object["light_id"], "light.light_id")
         _valid_id(id, "light_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate light $id"))
         push!(ids, id)
         color = _tuple(object["color_rgb"], Val(3), "light.color_rgb")
-        all(channel -> channel >= 0.0f0, color) ||
-            throw(ProtocolError("malformed_packet", "light color is negative"))
+        all(channel -> 0.0f0 <= channel <= MAX_NATIVE_COORDINATE_M, color) ||
+            throw(ProtocolError("malformed_packet", "light color is outside native bounds"))
         intensity = _finite_float32(object["intensity"], "light.intensity")
-        intensity >= 0.0f0 || throw(ProtocolError("malformed_packet", "light intensity is negative"))
+        0.0f0 <= intensity <= MAX_NATIVE_COORDINATE_M ||
+            throw(ProtocolError("malformed_packet", "light intensity is outside native bounds"))
         push!(lights, LightPacket(id, _parse_light_kind(_object(object["kind"], "light.kind")), color, intensity))
     end
     return lights
@@ -736,7 +871,7 @@ end
 function _parse_environment(value::JSON3.Object)::EnvironmentPacket
     _exact_keys(
         value,
-        Set(("sky_top_rgb", "sky_horizon_rgb", "ground_rgb", "fog_color_rgb", "fog_density", "exposure")),
+        ("sky_top_rgb", "sky_horizon_rgb", "ground_rgb", "fog_color_rgb", "fog_density", "exposure"),
         "environment",
     )
     sky_top = _tuple(value["sky_top_rgb"], Val(3), "environment.sky_top_rgb")
@@ -762,19 +897,24 @@ function _parse_light_kind(value::JSON3.Object)::LightKindPacket
 end
 
 function _parse_light_kind(::Val{:directional}, value::JSON3.Object)::DirectionalLightPacket
-    _exact_keys(value, Set(("kind", "direction_xyz")), "light.kind")
+    _exact_keys(value, ("kind", "direction_xyz"), "light.kind")
     direction = _tuple(value["direction_xyz"], Val(3), "light.kind.direction_xyz")
-    isfinite(_squared_norm(direction)) && _squared_norm(direction) > eps(Float32) ||
+    direction_norm_squared = _squared_norm(direction)
+    isfinite(direction_norm_squared) && direction_norm_squared > MIN_VECTOR_LENGTH_SQUARED ||
         throw(ProtocolError("malformed_packet", "directional light direction is degenerate"))
     return DirectionalLightPacket(direction)
 end
 
 function _parse_light_kind(::Val{:point}, value::JSON3.Object)::PointLightPacket
-    _exact_keys(value, Set(("kind", "position_xyz_m", "range_m")), "light.kind")
+    _exact_keys(value, ("kind", "position_xyz_m", "range_m"), "light.kind")
     range = _finite_float32(value["range_m"], "light.kind.range_m")
-    range > 0.0f0 || throw(ProtocolError("malformed_packet", "point light range is invalid"))
+    range > 0.0f0 && range <= MAX_NATIVE_COORDINATE_M ||
+        throw(ProtocolError("malformed_packet", "point light range is invalid"))
+    position = _tuple(value["position_xyz_m"], Val(3), "light.kind.position_xyz_m")
+    _bounded_values(position, "light.kind.position_xyz_m") ||
+        throw(ProtocolError("malformed_packet", "point light position exceeds native physical bounds"))
     return PointLightPacket(
-        _tuple(value["position_xyz_m"], Val(3), "light.kind.position_xyz_m"),
+        position,
         range,
     )
 end
@@ -823,16 +963,22 @@ end
 function _parse_overlay(::Val{:point}, value::JSON3.Object)::PointOverlay
     _exact_keys(
         value,
-        Set(("kind", "marker_id", "role", "position_xyz_m", "radius_m", "color_rgba")),
+        ("kind", "marker_id", "role", "position_xyz_m", "radius_m", "color_rgba"),
         "overlay",
     )
     marker_id, role = _overlay_header(value)
     radius = _finite_float32(value["radius_m"], "overlay.radius_m")
-    radius > 0.0f0 || throw(ProtocolError("malformed_packet", "overlay radius is invalid"))
+    MIN_NATIVE_DISTANCE_M <= radius <= MAX_NATIVE_COORDINATE_M ||
+        throw(ProtocolError("malformed_packet", "overlay radius is invalid"))
     return PointOverlay(
         marker_id,
         role,
-        _tuple(value["position_xyz_m"], Val(3), "overlay.position_xyz_m"),
+        begin
+            position = _tuple(value["position_xyz_m"], Val(3), "overlay.position_xyz_m")
+            _bounded_values(position, "overlay.position_xyz_m") ||
+                throw(ProtocolError("malformed_packet", "overlay position exceeds native physical bounds"))
+            position
+        end,
         radius,
         _overlay_color(value),
     )
@@ -841,16 +987,22 @@ end
 function _parse_overlay(::Val{:circle}, value::JSON3.Object)::CircleOverlay
     _exact_keys(
         value,
-        Set(("kind", "marker_id", "role", "center_xyz_m", "radius_m", "color_rgba")),
+        ("kind", "marker_id", "role", "center_xyz_m", "radius_m", "color_rgba"),
         "overlay",
     )
     marker_id, role = _overlay_header(value)
     radius = _finite_float32(value["radius_m"], "overlay.radius_m")
-    radius > 0.0f0 || throw(ProtocolError("malformed_packet", "overlay radius is invalid"))
+    MIN_NATIVE_DISTANCE_M <= radius <= MAX_NATIVE_COORDINATE_M ||
+        throw(ProtocolError("malformed_packet", "overlay radius is invalid"))
     return CircleOverlay(
         marker_id,
         role,
-        _tuple(value["center_xyz_m"], Val(3), "overlay.center_xyz_m"),
+        begin
+            center = _tuple(value["center_xyz_m"], Val(3), "overlay.center_xyz_m")
+            _bounded_values(center, "overlay.center_xyz_m") ||
+                throw(ProtocolError("malformed_packet", "overlay center exceeds native physical bounds"))
+            center
+        end,
         radius,
         _overlay_color(value),
     )
@@ -859,15 +1011,18 @@ end
 function _parse_overlay(::Val{:polyline}, value::JSON3.Object)::PolylineOverlay
     _exact_keys(
         value,
-        Set(("kind", "marker_id", "role", "points_xyz_m", "thickness_m", "color_rgba")),
+        ("kind", "marker_id", "role", "points_xyz_m", "thickness_m", "color_rgba"),
         "overlay",
     )
     marker_id, role = _overlay_header(value)
     point_values = _array(value["points_xyz_m"], "overlay.points_xyz_m")
     length(point_values) >= 2 || throw(ProtocolError("malformed_packet", "polyline needs two points"))
     points = NTuple{3,Float32}[_tuple(point, Val(3), "overlay point") for point in point_values]
+    all(point -> _bounded_values(point, "overlay point"), points) ||
+        throw(ProtocolError("malformed_packet", "polyline point exceeds native physical bounds"))
     thickness = _finite_float32(value["thickness_m"], "overlay.thickness_m")
-    thickness > 0.0f0 || throw(ProtocolError("malformed_packet", "overlay thickness is invalid"))
+    MIN_NATIVE_DISTANCE_M <= thickness <= MAX_NATIVE_COORDINATE_M ||
+        throw(ProtocolError("malformed_packet", "overlay thickness is invalid"))
     return PolylineOverlay(marker_id, role, points, thickness, _overlay_color(value))
 end
 
@@ -876,7 +1031,7 @@ function _parse_overlay(::Val{kind}, ::JSON3.Object) where {kind}
 end
 
 function _validate_coordinate_system(value::JSON3.Object)::Nothing
-    _exact_keys(value, Set(("up_axis", "handedness", "units_per_meter")), "coordinate_system")
+    _exact_keys(value, ("up_axis", "handedness", "units_per_meter"), "coordinate_system")
     _string(value["up_axis"], "coordinate_system.up_axis") == "y" ||
         throw(ProtocolError("unsupported", "native graphics requires Y up"))
     _string(value["handedness"], "coordinate_system.handedness") == "right" ||
@@ -889,7 +1044,7 @@ end
 function _parse_camera(value::JSON3.Object)::CameraPacket
     _exact_keys(
         value,
-        Set((
+        (
             "camera_id",
             "projection",
             "position_xyz_m",
@@ -899,18 +1054,21 @@ function _parse_camera(value::JSON3.Object)::CameraPacket
             "far_plane_m",
             "width_px",
             "height_px",
-        )),
+        ),
         "camera",
     )
     camera_id = _string(value["camera_id"], "camera.camera_id")
     _valid_id(camera_id, "camera_id")
     position = _tuple(value["position_xyz_m"], Val(3), "camera.position_xyz_m")
+    _bounded_values(position, "camera.position_xyz_m") ||
+        throw(ProtocolError("malformed_packet", "camera position exceeds native physical bounds"))
     forward = _tuple(value["forward_xyz"], Val(3), "camera.forward_xyz")
     up = _tuple(value["up_xyz"], Val(3), "camera.up_xyz")
     _validate_basis(forward, up, "camera forward/up basis")
     near = _finite_float32(value["near_plane_m"], "camera.near_plane_m")
     far = _finite_float32(value["far_plane_m"], "camera.far_plane_m")
-    near > 0.0f0 && far > near || throw(ProtocolError("malformed_packet", "camera planes are invalid"))
+    near >= MIN_NATIVE_DISTANCE_M && far > near && far <= MAX_NATIVE_COORDINATE_M ||
+        throw(ProtocolError("malformed_packet", "camera planes are invalid"))
     width = _integer(value["width_px"], "camera.width_px")
     height = _integer(value["height_px"], "camera.height_px")
     _dimensions(width, height, "camera")
@@ -933,14 +1091,15 @@ function _parse_projection(value::JSON3.Object)::CameraProjectionValue
 end
 
 function _parse_projection(::Val{:orthographic}, value::JSON3.Object)::OrthographicProjection
-    _exact_keys(value, Set(("kind", "span_m")), "camera.projection")
+    _exact_keys(value, ("kind", "span_m"), "camera.projection")
     span = _finite_float32(value["span_m"], "camera.projection.span_m")
-    span > 0.0f0 || throw(ProtocolError("malformed_packet", "orthographic camera span is invalid"))
+    MIN_NATIVE_DISTANCE_M <= span <= MAX_NATIVE_COORDINATE_M ||
+        throw(ProtocolError("malformed_packet", "orthographic camera span is invalid"))
     return OrthographicProjection(span)
 end
 
 function _parse_projection(::Val{:perspective}, value::JSON3.Object)::PerspectiveProjection
-    _exact_keys(value, Set(("kind", "fov_y_degrees")), "camera.projection")
+    _exact_keys(value, ("kind", "fov_y_degrees"), "camera.projection")
     fov = _finite_float32(value["fov_y_degrees"], "camera.projection.fov_y_degrees")
     1.0f0 <= fov <= 179.0f0 ||
         throw(ProtocolError("malformed_packet", "perspective camera field of view is invalid"))
@@ -954,7 +1113,7 @@ end
 function _validate_capture(value::JSON3.Object, camera::JSON3.Object)::Nothing
     _exact_keys(
         value,
-        Set((
+        (
             "capture_id",
             "camera_id",
             "width_px",
@@ -962,7 +1121,7 @@ function _validate_capture(value::JSON3.Object, camera::JSON3.Object)::Nothing
             "format",
             "include_depth",
             "deterministic",
-        )),
+        ),
         "capture",
     )
     _valid_id(_string(value["capture_id"], "capture.capture_id"), "capture_id")
@@ -978,7 +1137,12 @@ function _validate_capture(value::JSON3.Object, camera::JSON3.Object)::Nothing
         throw(ProtocolError("malformed_packet", "capture byte length exceeds the native frame bound"))
     _string(value["format"], "capture.format") == "rgba8_srgb" ||
         throw(ProtocolError("unsupported", "capture format is unsupported"))
-    _bool(value["include_depth"], "capture.include_depth")
+    include_depth = _bool(value["include_depth"], "capture.include_depth")
+    !include_depth ||
+        throw(ProtocolError(
+            "unsupported",
+            "native certification currently promotes color-only captures; depth evidence is deferred",
+        ))
     _bool(value["deterministic"], "capture.deterministic") ||
         throw(ProtocolError("unsupported", "capture must be deterministic"))
     return nothing
@@ -1000,6 +1164,10 @@ function _tuple(value, ::Val{N}, label::String)::NTuple{N,Float32} where {N}
     return ntuple(index -> _finite_float32(array[index], "$label[$index]"), N)
 end
 
+function _bounded_values(values::NTuple{N,Float32}, ::String)::Bool where {N}
+    return all(value -> abs(value) <= MAX_NATIVE_COORDINATE_M, values)
+end
+
 function _squared_norm(values::NTuple{N,Float32})::Float32 where {N}
     return sum(value * value for value in values)
 end
@@ -1012,7 +1180,7 @@ function _validate_basis(
     forward_norm_squared = _squared_norm(forward)
     up_norm_squared = _squared_norm(up)
     isfinite(forward_norm_squared) && isfinite(up_norm_squared) &&
-        forward_norm_squared > eps(Float32) && up_norm_squared > eps(Float32) ||
+    forward_norm_squared > MIN_VECTOR_LENGTH_SQUARED && up_norm_squared > MIN_VECTOR_LENGTH_SQUARED ||
         throw(ProtocolError("malformed_packet", "$label contains a degenerate direction"))
     forward_norm = sqrt(forward_norm_squared)
     up_norm = sqrt(up_norm_squared)
@@ -1022,9 +1190,25 @@ function _validate_basis(
     return nothing
 end
 
-function _exact_keys(value::JSON3.Object, expected::Set{String}, label::String)::Nothing
-    actual = Set(String(key) for key in keys(value))
-    actual == expected || throw(ProtocolError("malformed_packet", "$label has an unexpected or missing field"))
+function _exact_keys(
+    value::JSON3.Object,
+    expected::Union{Tuple,AbstractSet{String}},
+    label::String,
+)::Nothing
+    length(value) == length(expected) && all(key -> haskey(value, key), expected) ||
+        throw(ProtocolError("malformed_packet", "$label has an unexpected or missing field"))
+    return nothing
+end
+
+function _exact_keys(value::JSON3.Object, required::Tuple, optional::Tuple, label::String)::Nothing
+    all(key -> haskey(value, key), required) ||
+        throw(ProtocolError("malformed_packet", "$label has an unexpected or missing field"))
+    allowed = (required..., optional...)
+    all(key -> String(key) in allowed, keys(value)) ||
+        throw(ProtocolError("malformed_packet", "$label has an unexpected or missing field"))
+    optional_count = count(key -> haskey(value, key), optional)
+    length(value) == length(required) + optional_count ||
+        throw(ProtocolError("malformed_packet", "$label has an unexpected or missing field"))
     return nothing
 end
 
@@ -1052,24 +1236,27 @@ function _bool(value, label::String)::Bool
 end
 
 function _integer(value, label::String)::Int
-    if value isa Integer
+    # Preserve JSON token types: Rust's integer fields reject floats and booleans.
+    if value isa Integer && !(value isa Bool)
         try
             return Int(value)
         catch
             throw(ProtocolError("malformed_packet", "$label is outside the host integer range"))
         end
-    elseif value isa AbstractFloat && isfinite(value) && isinteger(value)
-        typemin(Int) <= value <= typemax(Int) ||
-            throw(ProtocolError("malformed_packet", "$label is outside the host integer range"))
-        return Int(value)
     end
     throw(ProtocolError("malformed_packet", "$label must be an integer"))
 end
 
 function _uint64(value, label::String)::UInt64
-    integer = _integer(value, label)
-    integer >= 0 || throw(ProtocolError("malformed_packet", "$label must be non-negative"))
-    return UInt64(integer)
+    if value isa Integer && !(value isa Bool)
+        value >= 0 || throw(ProtocolError("malformed_packet", "$label must be non-negative"))
+        try
+            return UInt64(value)
+        catch
+            throw(ProtocolError("malformed_packet", "$label is outside UInt64"))
+        end
+    end
+    throw(ProtocolError("malformed_packet", "$label must be an unsigned integer"))
 end
 
 function _uint32(value, label::String)::UInt32
@@ -1085,7 +1272,7 @@ function _uint8(value, label::String)::UInt8
 end
 
 function _finite_float32(value, label::String)::Float32
-    number = if value isa Integer
+    number = if value isa Integer && !(value isa Bool)
         Float32(value)
     elseif value isa AbstractFloat
         Float32(value)
@@ -1097,13 +1284,15 @@ function _finite_float32(value, label::String)::Float32
 end
 
 function _valid_id(value::String, label::String)::Nothing
-    (!isempty(value) && length(value) <= 256) || throw(ProtocolError("malformed_packet", "$label is empty or too long"))
+    # Match Rust String::len, which bounds UTF-8 bytes rather than codepoints.
+    (!isempty(value) && ncodeunits(value) <= 256) ||
+        throw(ProtocolError("malformed_packet", "$label is empty or too long"))
     any(isspace, value) && throw(ProtocolError("malformed_packet", "$label contains whitespace"))
     return nothing
 end
 
 function _valid_sha(value::String, label::String)::Nothing
-    length(value) == 71 && startswith(value, "sha256:") && all(isxdigit, value[8:end]) ||
+    ncodeunits(value) == 71 && startswith(value, "sha256:") && all(isxdigit, value[8:end]) ||
         throw(ProtocolError("malformed_packet", "$label is not a sha256 digest"))
     return nothing
 end
@@ -1116,6 +1305,10 @@ end
 
 function _sha(; body_value, path::String)
     return _string(body_value[path], path)
+end
+
+function _packet_content_sha256(value::JSON3.Object)::String
+    return _sha256(Vector{UInt8}(codeunits(JSON3.write(value["body"]))))
 end
 
 function _sha256(bytes::Vector{UInt8})::String

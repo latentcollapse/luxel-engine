@@ -10,6 +10,7 @@ mod fields;
 mod gameplay_binding;
 mod general_gameplay;
 mod model;
+mod physics;
 mod runtime;
 mod visual;
 mod worker;
@@ -22,7 +23,7 @@ pub use bevy_capture::{
 pub use fields::{JuliaFieldProvenance, JuliaFieldResponse, NumericalFields};
 pub use gameplay_binding::{
     GameplayTickTelemetry, GameplayWorldBinding, GameplayWorldBindingBody, RuntimeCaptureMetadata,
-    RuntimeCapturePhase, RuntimeEntityPose, build_gameplay_world_binding,
+    RuntimeCapturePhase, RuntimeEntityPose, build_gameplay_world_binding, validate_gameplay_kit,
     validate_gameplay_world_binding,
 };
 pub use general_gameplay::{
@@ -33,9 +34,18 @@ pub use model::{
     AuthoredLayout, EncounterSpec, ObstacleSpec, ReferenceCamera, SemanticRegion, SpawnRole,
     SpawnSpec, TerrainFeature, TerrainIntent, TraversalIntent, validate_layout,
 };
+pub use physics::{
+    KinematicContact, KinematicContactKind, KinematicInput, KinematicState, KinematicStateBody,
+    KinematicStepBody, KinematicStepDisposition, KinematicStepReceipt, PHYSICS_MAX_SWEEP_SAMPLES,
+    PHYSICS_STATE_SCHEMA, PHYSICS_STEP_SCHEMA, PhysicsWorld,
+};
 pub use runtime::{
-    TraversalEvidence, TraversalEvidenceBody, TraversalOutcome, TraversalStep, run_playthrough,
-    validate_traversal_evidence,
+    MAX_TRAVERSAL_SESSION_STEPS, TRAVERSAL_SESSION_COMPLETION_SCHEMA,
+    TRAVERSAL_SESSION_SNAPSHOT_SCHEMA, TraversalEventKind, TraversalEvidence,
+    TraversalEvidenceBody, TraversalOutcome, TraversalSession, TraversalSessionCompletion,
+    TraversalSessionCompletionBody, TraversalSessionInput, TraversalSessionSnapshot,
+    TraversalSessionSnapshotBody, TraversalStep, run_playthrough, validate_traversal_evidence,
+    validate_traversal_session_completion,
 };
 pub use visual::{
     VisualEvidence, VisualEvidenceBody, VisualGateStatus, VisualMeasurements,
@@ -77,6 +87,20 @@ impl ReferenceRuntimeError {
     pub(crate) fn provenance(message: String) -> Self {
         Self {
             code: "provenance_failure",
+            message,
+        }
+    }
+
+    pub(crate) fn stale(message: String) -> Self {
+        Self {
+            code: "stale_runtime_step",
+            message,
+        }
+    }
+
+    pub(crate) fn divergence(message: String) -> Self {
+        Self {
+            code: "runtime_state_diverged",
             message,
         }
     }

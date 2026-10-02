@@ -6,7 +6,7 @@ use wge_gameplay_contract::{
     GAMEPLAY_SNAPSHOT_SCHEMA, GAMEPLAY_TRACE_SCHEMA, GameOutcome, GameSnapshot, GameplayEffect,
     GameplayReceipt, GameplayTag, InputEvent, LocationId, MAX_REPLAY_EVENTS, NavigationGraph,
     NpcAction, NpcBehavior, ObjectivePrerequisite, ObjectiveSpec, ObjectiveState, ReplayTrace,
-    TargetingRule, Transition, run_replay, verify_replay,
+    ResolvedKit, TargetingRule, Transition, run_replay, verify_replay,
 };
 
 use crate::fields::prefixed_sha256;
@@ -86,6 +86,27 @@ pub struct GameplayWorldBindingBody {
 pub struct GameplayWorldBinding {
     pub body: GameplayWorldBindingBody,
     pub evidence_sha256: String,
+}
+
+pub fn validate_gameplay_kit(kit: &ResolvedKit) -> Result<(), ReferenceRuntimeError> {
+    let expected =
+        wge_gameplay_contract::reference_vertical_slice_kit().map_err(|diagnostics| {
+            ReferenceRuntimeError::contract(format!(
+                "reference gameplay kit registry is invalid: {diagnostics:?}"
+            ))
+        })?;
+    let expected_digest = expected.sha256().map_err(|error| {
+        ReferenceRuntimeError::contract(format!("gameplay kit hashing failed: {error}"))
+    })?;
+    let actual_digest = kit.sha256().map_err(|error| {
+        ReferenceRuntimeError::contract(format!("gameplay kit hashing failed: {error}"))
+    })?;
+    if kit != &expected || actual_digest != expected_digest {
+        return Err(ReferenceRuntimeError::provenance(
+            "gameplay kit is not the registered reference vertical-slice resolution".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub fn build_gameplay_world_binding(

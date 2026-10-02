@@ -1,0 +1,10 @@
+{
+  "schema_version": "wge.render-asset-request/v1",
+  "meters_per_unit": 1.0,
+  "vertical_axis": "y",
+  "require_uv0": true,
+  "generate_normals": true,
+  "generate_tangents": true,
+  "mip_policy": "single_level_explicit",
+  "max_texture_dimension": 8192
+}

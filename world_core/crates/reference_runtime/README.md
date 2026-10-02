@@ -22,10 +22,16 @@ cargo run --offline -p wge-reference-runtime -- verify --bundle /tmp/wge-riverwa
 ```
 
 `build` writes the authored-layout-derived world artifact, traversal receipt,
-gameplay/world binding, deterministic `reference_capture.ppm`, visual receipt,
-and a gate report. A failed visual gate is preserved as failed evidence and
-returns exit code 2. The crate does not inspect or promote the supplied GLB and
-has no engine import dependency.
+gameplay/world binding, the resolved `gameplay_kit.json`, deterministic
+`reference_capture.ppm`, visual receipt, and a gate report. A failed visual
+gate is preserved as failed evidence and returns exit code 2. The crate does
+not inspect or promote the supplied GLB and has no external-engine import
+dependency.
+
+The reference vertical slice binds the registered
+`wge.reference.vertical-slice` kit (`action_rpg` plus `network.offline`). Rust
+re-resolves that kit during verification; `gameplay_kit.json` is not a
+producer-only label.
 
 The gameplay/world binding uses `wge.gameplay-world-binding/v2`. It includes a
 30 Hz deterministic action-tick stream with world-cell poses, input and NPC

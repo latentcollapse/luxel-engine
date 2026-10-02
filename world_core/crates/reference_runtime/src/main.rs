@@ -6,8 +6,8 @@ use std::process::ExitCode;
 use serde::Serialize;
 use wge_reference_runtime::{
     GameplayWorldBinding, TraversalEvidence, VisualEvidence, WorldArtifact, build_from_layout_path,
-    validate_gameplay_world_binding, validate_traversal_evidence, validate_visual_evidence,
-    validate_world_artifact,
+    validate_gameplay_kit, validate_gameplay_world_binding, validate_traversal_evidence,
+    validate_visual_evidence, validate_world_artifact,
 };
 
 #[derive(Serialize)]
@@ -71,6 +71,7 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
                 &output_dir.join("gameplay_world_binding.json"),
                 &build.gameplay,
             )?;
+            write_json(&output_dir.join("gameplay_kit.json"), &build.gameplay_kit)?;
             // Keep the authored fixed-tick input trace as an independently
             // addressable native artifact.  The binding remains the authority
             // for replay validation; this projection exists so the project
@@ -127,12 +128,15 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
             let traversal: TraversalEvidence = read_json(&bundle.join("traversal_evidence.json"))?;
             let gameplay: GameplayWorldBinding =
                 read_json(&bundle.join("gameplay_world_binding.json"))?;
+            let gameplay_kit: wge_gameplay_contract::ResolvedKit =
+                read_json(&bundle.join("gameplay_kit.json"))?;
             let visual: VisualEvidence = read_json(&bundle.join("visual_evidence.json"))?;
             let capture = fs::read(bundle.join("reference_capture.ppm"))?;
             validate_world_artifact(&world)?;
             validate_traversal_evidence(&world, &traversal)?;
             validate_visual_evidence(&world, &capture, &visual)?;
             validate_gameplay_world_binding(&world, &traversal, &capture, &visual, &gameplay)?;
+            validate_gameplay_kit(&gameplay_kit)?;
             let passed = traversal.body.outcome
                 == wge_reference_runtime::TraversalOutcome::Completed
                 && gameplay.body.outcome == wge_gameplay_contract::GameOutcome::Won
@@ -155,7 +159,7 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
         }
         "help" | "--help" | "-h" => {
             println!(
-                "wge-reference-runtime\n\n  build --layout FILE --output-dir DIR [--julia PATH]\n  verify --bundle DIR\n\nBuild creates world_artifact.json, traversal_evidence.json, gameplay_world_binding.json, reference_capture.ppm, visual_evidence.json, and candidate_report.json. A measured visual failure is retained in the bundle and exits 2."
+                "wge-reference-runtime\n\n  build --layout FILE --output-dir DIR [--julia PATH]\n  verify --bundle DIR\n\nBuild creates world_artifact.json, traversal_evidence.json, gameplay_world_binding.json, gameplay_kit.json, reference_capture.ppm, visual_evidence.json, and candidate_report.json. A measured visual failure is retained in the bundle and exits 2."
             );
             Ok(0)
         }

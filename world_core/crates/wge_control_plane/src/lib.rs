@@ -6,6 +6,11 @@
 //! contracts and moves the current pointer after an independently validated
 //! certification report.
 
+pub mod capability_registry;
+pub mod construction_plan;
+pub mod semantic_facade;
+pub mod style_profile;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;

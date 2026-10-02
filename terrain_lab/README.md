@@ -1,21 +1,22 @@
-# Codeweald Terrain Lab
+# WGE Terrain Lab
 
-Julia owns numerical terrain experiments; it does not own world authority or
-engine rendering. The first executable seam analyzes the canonical Float32
-heightfield and separates steep edges inside authored non-traversable relief
-from steep edges in nominally accessible terrain.
+`terrain_lab/` is the Julia numerical/spatial package in the active WGE path.
+Julia owns terrain analysis, hydrology, placement fields, and related numerical
+experiments. It does not own world identity, semantic authority, receipt
+promotion, or engine rendering. Typed packets and provenance cross back to the
+Rust authority plane.
+
+The environment is locked by `Project.toml` and `Manifest.toml`.
 
 ```bash
-julia --project=. -e 'using Pkg; Pkg.instantiate()'
-julia --project=. test/runtests.jl
-julia --project=. bin/analyze_heightfield.jl \
-  --heightfield ../godot_renderer/concept_batches/codeweald_alpine_arena_v1/terrain/heightfield_f32le.bin \
-  --protected-mask ../godot_renderer/concept_batches/codeweald_alpine_arena_v1/terrain/protected_relief_mask.bin \
-  --semantic-region-mask ../godot_renderer/concept_batches/codeweald_alpine_arena_v1/terrain/semantic_region_mask.bin \
-  --manifest ../godot_renderer/concept_batches/codeweald_alpine_arena_v1/terrain/terrain_manifest.json \
-  --output ../godot_renderer/concept_batches/codeweald_alpine_arena_v1/terrain/terrain_analysis.json
+julia --project=terrain_lab --startup-file=no -e 'using Pkg; Pkg.instantiate()'
+julia --project=terrain_lab --startup-file=no terrain_lab/test/runtests.jl
 ```
 
-The output is evidence, not permission to mutate terrain. Rust validates its
-provenance and policy; a later optimizer must demonstrate better accessible
-metrics while preserving protected relief, traversal, and source fidelity.
+For package-specific utilities, inspect `terrain_lab/bin/` and the current
+tests before constructing a command. Do not copy old paths under
+`godot_renderer/`; those belong to the historical migration lane.
+
+Julia output is evidence or a bounded numerical field, not permission to mutate
+canonical terrain. Rust validates provenance, policy, determinism, and any
+promotion decision.

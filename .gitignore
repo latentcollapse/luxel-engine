@@ -14,12 +14,21 @@ __pycache__/
 .venv/
 venv/
 
-# Julia
-terrain_lab/Manifest.toml
+# Julia lockfiles are canonical build inputs and must remain visible to source
+# control. Caches and generated reports remain excluded below.
+
+# Generated reports, bundles, caches, and local orchestration state
+artifacts/
+asset_intake_reports/
+.freebuff/
+kvfold/
+.pytest_cache/
 
 # Generated kit output. The generators in pipeline/ are the source; the meshes
 # they emit are not, and they land wherever the caller points them.
 *.glb
+!world_core/crates/asset_contract/tests/fixtures/
+!world_core/crates/asset_contract/tests/fixtures/*.glb
 *.gltf
 *.fbx
 *.blend
@@ -30,3 +39,4 @@ terrain_lab/Manifest.toml
 
 # Generated repository graph; source and reports remain in the tree.
 graphify-out/
+graphics_lab/TetLab.zip

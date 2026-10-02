@@ -1194,12 +1194,12 @@ fn validate_proposal_fields(proposal: &RepairProposal) -> Result<(), ContractErr
     // that depends on it. Keep that repair bounded, but do not force callers
     // to hide those derived changes behind an under-specified target list.
     if proposal.authorized_targets.is_empty()
-        || proposal.authorized_targets.len() > 8
+        || proposal.authorized_targets.len() > 12
         || proposal.max_artifact_changes == 0
         || usize::from(proposal.max_artifact_changes) > proposal.authorized_targets.len()
     {
         return Err(ContractError::Repair(
-            "repair scope must authorize 1..=8 targets and no more changes than targets".into(),
+            "repair scope must authorize 1..=12 targets and no more changes than targets".into(),
         ));
     }
     let mut ids = BTreeSet::new();
@@ -1332,6 +1332,7 @@ pub enum MetricId {
     GameplayObjectiveCompletion,
     MissingAssetFeatures,
     VisualSimilarityScore,
+    TechnicalVisualQuality,
     ReachableObjectives,
 }
 
@@ -1592,6 +1593,7 @@ fn metric_direction(metric: MetricId) -> MetricDirection {
     match metric {
         MetricId::GameplayObjectiveCompletion
         | MetricId::VisualSimilarityScore
+        | MetricId::TechnicalVisualQuality
         | MetricId::ReachableObjectives => MetricDirection::HigherIsBetter,
         MetricId::UnresolvedConflicts
         | MetricId::NavigationComponents
@@ -1879,5 +1881,13 @@ mod tests {
         assert!(valid_digest(&sha256_prefixed(b"x")));
         assert!(!valid_digest(&format!("SHA256:{}", "a".repeat(64))));
         assert!(!valid_digest(&format!("sha256:{}", "A".repeat(64))));
+    }
+
+    #[test]
+    fn technical_visual_quality_is_a_higher_is_better_metric() {
+        assert_eq!(
+            metric_direction(MetricId::TechnicalVisualQuality),
+            MetricDirection::HigherIsBetter
+        );
     }
 }

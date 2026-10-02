@@ -5,8 +5,9 @@ use std::process::ExitCode;
 use serde::Serialize;
 use wge_asset_contract::{
     AcceptanceStatus, AssetPreparationRequest, AssetUse, PhysicalCalibration, PhysicalRole,
-    PreparationStatus, StructuralAcceptance, evaluate_physical_acceptance,
-    evaluate_structural_acceptance, inspect_file, prepare_asset,
+    PreparationStatus, RenderConditioningRequest, RenderPreparationStatus, StructuralAcceptance,
+    condition_render_asset, evaluate_physical_acceptance, evaluate_structural_acceptance,
+    inspect_file, prepare_asset,
 };
 
 #[derive(Serialize)]
@@ -33,6 +34,9 @@ fn run() -> Result<ExitCode, String> {
     };
     if first == "prepare" {
         return run_prepare(args);
+    }
+    if first == "prepare-render" {
+        return run_prepare_render(args);
     }
     let path = first;
     let mut asset_use = AssetUse::Unspecified;
@@ -139,6 +143,30 @@ fn run_prepare(args: impl Iterator<Item = String>) -> Result<ExitCode, String> {
     })
 }
 
+fn run_prepare_render(args: impl Iterator<Item = String>) -> Result<ExitCode, String> {
+    let values = args.collect::<Vec<_>>();
+    if values.len() != 2 {
+        return Err("usage: wge-asset-contract prepare-render ASSET.glb REQUEST.json".into());
+    }
+    let asset_path = &values[0];
+    let request_path = &values[1];
+    let bytes =
+        fs::read(asset_path).map_err(|error| format!("cannot read {asset_path}: {error}"))?;
+    let request_bytes =
+        fs::read(request_path).map_err(|error| format!("cannot read {request_path}: {error}"))?;
+    let request: RenderConditioningRequest = serde_json::from_slice(&request_bytes)
+        .map_err(|error| format!("invalid typed render conditioning request: {error}"))?;
+    let receipt = condition_render_asset(&bytes, &request).map_err(|error| error.to_string())?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&receipt).map_err(|error| error.to_string())?
+    );
+    Ok(match receipt.status {
+        RenderPreparationStatus::Ready => ExitCode::SUCCESS,
+        RenderPreparationStatus::Rejected => ExitCode::from(3),
+    })
+}
+
 fn parse_positive(flag: &str, value: &str) -> Result<f64, String> {
     let parsed = value
         .parse::<f64>()
@@ -169,5 +197,6 @@ fn parse_role(value: &str) -> Option<PhysicalRole> {
 fn usage() -> &'static str {
     "usage: wge-asset-contract ASSET.glb [--kind character|static_mesh|unspecified] \
      [--role ROLE] [--meters-per-unit N --vertical-axis x|y|z --placed-scale N]\n\
-     or: wge-asset-contract prepare ASSET.glb REQUEST.json"
+     or: wge-asset-contract prepare ASSET.glb REQUEST.json\n\
+     or: wge-asset-contract prepare-render ASSET.glb REQUEST.json"
 }

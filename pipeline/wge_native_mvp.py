@@ -53,6 +53,10 @@ class NativeMvpCommands:
     ledger: str
     julia: str | None = None
     asset: str | None = None
+    graphics: str | None = None
+    terrain_lab: str | None = None
+    graphics_project: str | None = None
+    graphics_worker: str | None = None
 
     @classmethod
     def from_environment(cls) -> "NativeMvpCommands":
@@ -64,10 +68,28 @@ class NativeMvpCommands:
             os.environ.get("WGE_LEDGER_CLI", str(target / "wge-project-ledger")),
             os.environ.get("WGE_JULIA"),
             os.environ.get("WGE_ASSET_CONTRACT", str(target / "wge-asset-contract")),
+            os.environ.get("WGE_NATIVE_GRAPHICS", str(target / "wge-native-graphics-contract")),
+            os.environ.get("WGE_TERRAIN_LAB", str(ROOT / "terrain_lab")),
+            os.environ.get("WGE_GRAPHICS_PROJECT", str(ROOT / "graphics_lab")),
+            os.environ.get(
+                "WGE_GRAPHICS_WORKER",
+                str(ROOT / "graphics_lab" / "bin" / "wge_graphics_worker.jl"),
+            ),
         )
 
     def smoke(self) -> NativeCommands:
-        return NativeCommands(self.intake, self.runtime, self.authority, self.julia, self.asset, self.ledger)
+        return NativeCommands(
+            self.intake,
+            self.runtime,
+            self.authority,
+            self.julia,
+            self.asset,
+            self.ledger,
+            self.graphics,
+            self.terrain_lab,
+            self.graphics_project,
+            self.graphics_worker,
+        )
 
 
 @dataclass(frozen=True)

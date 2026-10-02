@@ -15,8 +15,10 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 mod intake_compiler;
+mod scene;
 mod world;
 pub use intake_compiler::{PROJECT_TEMPLATE_SCHEMA, ProjectTemplate, compile_project_spec};
+pub use scene::*;
 pub use world::validate_world_bundle;
 
 pub const PROJECT_SPEC_SCHEMA: &str = "wge.project-spec/v1";

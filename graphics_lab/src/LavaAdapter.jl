@@ -4,7 +4,6 @@ using Base64
 using GeometryBasics: Vec2f, Vec4f
 using Lava
 using SHA
-using Statistics
 using Vulkan
 import WGEGraphics
 
@@ -18,7 +17,7 @@ export AdapterError,
     render_texture_probe,
     render_scene
 
-const ADAPTER_REVISION = "wge.lava-adapter/v5"
+const ADAPTER_REVISION = "wge.lava-adapter/v6"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 const VULKAN_REVISION = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"
 const VULKAN_CORE_REVISION = "1d02829e8fa92da430d879db4dd7bf564a872035"
@@ -32,7 +31,7 @@ end
 Base.showerror(io::IO, error::AdapterError) = print(io, error.code, ": ", error.detail)
 
 struct TerrainResources
-    packet_sha256::String
+    cache_key::String
     heights::Lava.LavaArray{Float32,1}
     slopes::Lava.LavaArray{Float32,1}
     regions::Lava.LavaArray{UInt8,1}
@@ -40,7 +39,7 @@ struct TerrainResources
 end
 
 struct OverlayResources
-    packet_sha256::String
+    cache_key::String
     positions::Lava.LavaArray{Vec4f,1}
     colors::Lava.LavaArray{Vec4f,1}
     vertex_count::Int
@@ -51,6 +50,7 @@ struct MeshBatchResources
     positions::Lava.LavaArray{Vec4f,1}
     normals::Lava.LavaArray{Vec4f,1}
     uvs::Lava.LavaArray{Vec2f,1}
+    tangents::Lava.LavaArray{Vec4f,1}
     translations::Lava.LavaArray{Vec4f,1}
     rotations::Lava.LavaArray{Vec4f,1}
     scales::Lava.LavaArray{Vec4f,1}
@@ -63,7 +63,7 @@ struct MeshBatchResources
 end
 
 struct MeshResources
-    packet_sha256::String
+    cache_key::String
     batches::Vector{MeshBatchResources}
     instance_count::Int
     visible_instance_count::Int
@@ -90,7 +90,7 @@ struct TextureProbeResources
 end
 
 struct MaterialTextureResources
-    packet_sha256::String
+    cache_key::String
     material_id::String
     albedo_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
     normal_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
@@ -118,12 +118,17 @@ struct CameraFrame
     right::Vec4f
     up::Vec4f
     forward::Vec4f
+    # projection = (horizontal/vertical half extent for orthographic, or
+    # tan(horizontal/vertical half-FOV) for perspective, near, far).
     projection::Vec4f
+    # mode 0 is orthographic; mode 1 is perspective.
     mode::Float32
+    width_px::Float32
+    height_px::Float32
 end
 
 struct ShadowResources
-    packet_sha256::String
+    cache_key::String
     framebuffer::Lava.LavaFramebuffer
     texture::Lava.LavaTexture2D{NTuple{4,Float32}}
     sampler::Lava.LavaSampler
@@ -331,8 +336,24 @@ function _cross_vector(first::Vec4f, second::Vec4f)::Vec4f
     )
 end
 
+function _stable_tangent(normal::Vec4f)::Vec4f
+    surface_normal = _normalize_vector(normal)
+    reference = abs(surface_normal[1]) < 0.9f0 ?
+        Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0) :
+        Vec4f(0.0f0, 0.0f0, 1.0f0, 0.0f0)
+    projected_reference = Vec4f(
+        reference[1] - surface_normal[1] * _dot_vector(surface_normal, reference),
+        reference[2] - surface_normal[2] * _dot_vector(surface_normal, reference),
+        reference[3] - surface_normal[3] * _dot_vector(surface_normal, reference),
+        0.0f0,
+    )
+    tangent = _normalize_vector(projected_reference)
+    return Vec4f(tangent[1], tangent[2], tangent[3], 1.0f0)
+end
+
 function _perturbed_normal(
     normal::Vec4f,
+    tangent::Vec4f,
     uv::Vec2f,
     normal_scale::Float32,
 )::Vec4f
@@ -344,20 +365,20 @@ function _perturbed_normal(
         max(normal_sample[3] * 2.0f0 - 1.0f0, 0.05f0),
         0.0f0,
     )
-    # Pick a stable world-space reference axis from the actual surface normal.
-    # The previous check used the unused w component, so every face selected
-    # the z axis.  That made z-facing faces degenerate (zero tangent and
-    # bitangent) and silently collapsed their normal-map response.
-    reference = abs(surface_normal[2]) < 0.9f0 ?
-        Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0) :
-        Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)
-    tangent = _normalize_vector(_cross_vector(reference, surface_normal))
-    bitangent = _normalize_vector(_cross_vector(surface_normal, tangent))
+    tangent_orthogonal = Vec4f(
+        tangent[1] - surface_normal[1] * _dot_vector(surface_normal, tangent),
+        tangent[2] - surface_normal[2] * _dot_vector(surface_normal, tangent),
+        tangent[3] - surface_normal[3] * _dot_vector(surface_normal, tangent),
+        0.0f0,
+    )
+    tangent_vector = _normalize_vector(tangent_orthogonal)
+    bitangent = _normalize_vector(_cross_vector(surface_normal, tangent_vector))
+    handedness = tangent[4] < 0.0f0 ? -1.0f0 : 1.0f0
     return _normalize_vector(
         Vec4f(
-            tangent[1] * tangent_space[1] + bitangent[1] * tangent_space[2] + surface_normal[1] * tangent_space[3],
-            tangent[2] * tangent_space[1] + bitangent[2] * tangent_space[2] + surface_normal[2] * tangent_space[3],
-            tangent[3] * tangent_space[1] + bitangent[3] * tangent_space[2] + surface_normal[3] * tangent_space[3],
+            tangent_vector[1] * tangent_space[1] + handedness * bitangent[1] * tangent_space[2] + surface_normal[1] * tangent_space[3],
+            tangent_vector[2] * tangent_space[1] + handedness * bitangent[2] * tangent_space[2] + surface_normal[2] * tangent_space[3],
+            tangent_vector[3] * tangent_space[1] + handedness * bitangent[3] * tangent_space[2] + surface_normal[3] * tangent_space[3],
             0.0f0,
         ),
     )
@@ -578,14 +599,75 @@ function _project_world(
     perspective_distance = max(forward_distance, camera_projection[3])
     scale = 1.0f0 - camera_mode + camera_mode * perspective_distance
     ndc_x = horizontal / (camera_projection[1] * scale)
-    ndc_y = vertical / (camera_projection[2] * scale)
-    depth = clamp(
-        (forward_distance - camera_projection[3]) /
-            max(camera_projection[4] - camera_projection[3], 1.0f-4),
-        0.0f0,
-        1.0f0,
-    )
+    # WGE camera up is a semantic world-space basis. Vulkan's positive-height
+    # viewport maps positive NDC Y toward the framebuffer's lower rows, so
+    # negate the vertical component at this single lowering boundary. Keeping
+    # the flip here makes raster geometry, overlays, measurements, and shadow
+    # projections agree without burdening the engine-neutral packet contract.
+    ndc_y = -vertical / (camera_projection[2] * scale)
+    depth_range = camera_projection[4] - camera_projection[3]
+    depth = camera_mode < 0.5f0 ?
+        (forward_distance - camera_projection[3]) / depth_range :
+        camera_projection[4] * (forward_distance - camera_projection[3]) /
+        (depth_range * perspective_distance)
     return Vec4f(ndc_x, ndc_y, depth, 1.0f0)
+end
+
+"""Return homogeneous clip coordinates for a raster vertex.
+
+`_project_world` intentionally returns NDC for CPU-side visibility and for
+shadow-map lookup values. Rasterization needs the undivided form, however:
+perspective interpolation is defined by the clip-space `w` component.
+"""
+function _project_clip(
+    world_position::Vec4f,
+    camera_position::Vec4f,
+    camera_right::Vec4f,
+    camera_up::Vec4f,
+    camera_forward::Vec4f,
+    camera_projection::Vec4f,
+    camera_mode::Float32,
+)::Vec4f
+    relative = Vec4f(
+        world_position[1] - camera_position[1],
+        world_position[2] - camera_position[2],
+        world_position[3] - camera_position[3],
+        0.0f0,
+    )
+    horizontal = _dot_vector(camera_right, relative)
+    vertical = _dot_vector(camera_up, relative)
+    forward_distance = _dot_vector(camera_forward, relative)
+    depth_range = camera_projection[4] - camera_projection[3]
+    if camera_mode < 0.5f0
+        return Vec4f(
+            horizontal / camera_projection[1],
+            -vertical / camera_projection[2],
+            (forward_distance - camera_projection[3]) / depth_range,
+            1.0f0,
+        )
+    end
+    clip_depth = camera_projection[4] * (forward_distance - camera_projection[3]) / depth_range
+    return Vec4f(
+        horizontal / camera_projection[1],
+        -vertical / camera_projection[2],
+        clip_depth,
+        forward_distance,
+    )
+end
+
+function _project_overlay_point(
+    frame::CameraFrame,
+    world_position::NTuple{3,Float32},
+)::Union{Nothing,Vec4f}
+    relative = Vec4f(
+        world_position[1] - frame.position[1],
+        world_position[2] - frame.position[2],
+        world_position[3] - frame.position[3],
+        0.0f0,
+    )
+    forward_distance = _dot_vector(frame.forward, relative)
+    frame.projection[3] <= forward_distance <= frame.projection[4] || return nothing
+    return _project_point(frame, world_position)
 end
 
 function _terrain_normal(
@@ -627,6 +709,40 @@ function _terrain_normal(
             0.0f0,
         ),
     )
+end
+
+function _terrain_tangent(
+    heights::Lava.LavaDeviceArray{Float32,1},
+    resolution::Int32,
+    sample_x::Int32,
+    sample_z::Int32,
+    width_m::Float32,
+    ::Float32,
+)::Vec4f
+    cells_per_axis = resolution - Int32(1)
+    left_x = max(sample_x - Int32(1), Int32(0))
+    right_x = min(sample_x + Int32(1), cells_per_axis)
+    left_height = heights[sample_z*resolution+left_x+Int32(1)]
+    right_height = heights[sample_z*resolution+right_x+Int32(1)]
+    horizontal_step = width_m / Float32(cells_per_axis)
+    return _normalize_vector(Vec4f(
+        Float32(right_x - left_x) * horizontal_step,
+        right_height - left_height,
+        0.0f0,
+        0.0f0,
+    ))
+end
+
+@inline function _terrain_base_color(
+    base_color::Vec4f,
+    ::Float32,
+    ::UInt8,
+)::Vec4f
+    # Slope already affects the geometric normal and therefore receives
+    # direction-dependent lighting. Region codes are categorical traversal
+    # labels, not an ordered material palette. Keep albedo tied to the typed
+    # material until the packet carries an explicit surface-layer mapping.
+    return base_color
 end
 
 function _terrain_vertex(
@@ -687,7 +803,7 @@ function _terrain_vertex(
     world_z = (0.5f0 - normalized_z) * length_m
     world_position = Vec4f(world_x, height, world_z, 1.0f0)
     Lava.set_position!(
-        _project_world(
+        _project_clip(
             world_position,
             camera_position,
             camera_right,
@@ -697,18 +813,11 @@ function _terrain_vertex(
             camera_mode,
         ),
     )
-    slope_factor = min(max(slope * 0.8f0, 0.0f0), 1.0f0)
-    region_tint = 0.82f0 + min(Float32(region) * 0.015f0, 0.18f0)
-    shade = (1.0f0 - 0.45f0 * slope_factor) * region_tint
-    terrain_color = Vec4f(
-        base_color[1] * shade,
-        base_color[2] * shade,
-        base_color[3] * shade,
-        base_color[4],
-    )
+    terrain_color = _terrain_base_color(base_color, slope, region)
     uv = Vec2f(normalized_x, normalized_z)
+    terrain_normal = _terrain_normal(heights, resolution, sample_x, sample_z, width_m, length_m)
     Lava.gfx_output(0, terrain_color)
-    Lava.gfx_output(1, _terrain_normal(heights, resolution, sample_x, sample_z, width_m, length_m))
+    Lava.gfx_output(1, terrain_normal)
     Lava.gfx_output(2, world_position)
     Lava.gfx_output(3, uv)
     Lava.gfx_output(4, Vec4f(metallic, roughness, normal_scale, occlusion_strength))
@@ -734,6 +843,10 @@ function _terrain_vertex(
     )
     Lava.gfx_output(14, emissive_factor)
     Lava.gfx_output(15, Vec4f(clearcoat, clearcoat_roughness, 0.0f0, 0.0f0))
+    Lava.gfx_output(
+        16,
+        _terrain_tangent(heights, resolution, sample_x, sample_z, width_m, length_m),
+    )
     return nothing
 end
 
@@ -741,6 +854,7 @@ function _mesh_vertex(
     positions::Lava.LavaDeviceArray{Vec4f,1},
     normals::Lava.LavaDeviceArray{Vec4f,1},
     uvs::Lava.LavaDeviceArray{Vec2f,1},
+    tangents::Lava.LavaDeviceArray{Vec4f,1},
     translations::Lava.LavaDeviceArray{Vec4f,1},
     rotations::Lava.LavaDeviceArray{Vec4f,1},
     scales::Lava.LavaDeviceArray{Vec4f,1},
@@ -775,6 +889,7 @@ function _mesh_vertex(
     instance_id = Lava.instance_index()
     local_position = positions[vertex_id]
     local_normal = normals[vertex_id]
+    local_tangent = tangents[vertex_id]
     translation = translations[instance_id]
     rotation = rotations[instance_id]
     scale = scales[instance_id]
@@ -793,9 +908,16 @@ function _mesh_vertex(
         rotated_position[3] + translation[3],
         1.0f0,
     )
-    normal = _rotate_vector(rotation, local_normal)
+    inverse_scaled_normal = Vec4f(
+        local_normal[1] / scale[1],
+        local_normal[2] / scale[2],
+        local_normal[3] / scale[3],
+        0.0f0,
+    )
+    normal = _normalize_vector(_rotate_vector(rotation, inverse_scaled_normal))
+    tangent = _transform_tangent(rotation, local_tangent, scale)
     Lava.set_position!(
-        _project_world(
+        _project_clip(
             world_position,
             camera_position,
             camera_right,
@@ -833,6 +955,7 @@ function _mesh_vertex(
     )
     Lava.gfx_output(14, emissive_parameters[instance_id])
     Lava.gfx_output(15, surface_parameters[instance_id])
+    Lava.gfx_output(16, tangent)
     return nothing
 end
 
@@ -876,7 +999,17 @@ function _terrain_shadow_vertex(
         light_projection,
         light_mode,
     )
-    Lava.set_position!(light_space)
+    Lava.set_position!(
+        _project_clip(
+            world_position,
+            light_position,
+            light_right,
+            light_up,
+            light_forward,
+            light_projection,
+            light_mode,
+        ),
+    )
     Lava.gfx_output(0, light_space)
     return nothing
 end
@@ -921,7 +1054,17 @@ function _mesh_shadow_vertex(
         light_projection,
         light_mode,
     )
-    Lava.set_position!(light_space)
+    Lava.set_position!(
+        _project_clip(
+            world_position,
+            light_position,
+            light_right,
+            light_up,
+            light_forward,
+            light_projection,
+            light_mode,
+        ),
+    )
     Lava.gfx_output(0, light_space)
     return nothing
 end
@@ -1012,6 +1155,7 @@ function _terrain_fragment()
     light_space = Lava.gfx_input(Vec4f, 13)
     material_emissive = Lava.gfx_input(Vec4f, 14)
     surface_parameters = Lava.gfx_input(Vec4f, 15)
+    tangent = Lava.gfx_input(Vec4f, 16)
     light_intensity = lighting_parameters[1]
     fog_density = lighting_parameters[2]
     exposure = lighting_parameters[3]
@@ -1027,7 +1171,7 @@ function _terrain_fragment()
     emissive_sample = _sample_texture(UInt32(4), uv)
     lit_color = _material_response(
         _textured_color(base_color, uv, texture_enabled),
-        _perturbed_normal(normal, uv, material[3]),
+        _perturbed_normal(normal, tangent, uv, material[3]),
         light_direction,
         light_color,
         light_intensity,
@@ -1105,7 +1249,7 @@ function backend()::LavaBackend
             ;
             vertex=_overlay_vertex,
             fragment=_overlay_fragment,
-            topology=LineList(),
+            topology=TriangleList(),
             blend=Opaque(),
             cull=NoCull(),
             depth=DepthOff(),
@@ -1263,7 +1407,9 @@ function _rgba8(value::NTuple{4,<:Real})::NTuple{4,UInt8}
             isfinite(channel) && 0.0f0 <= channel <= 1.0f0 ||
                 throw(AdapterError("invalid_capture", "RGBA channel is outside [0, 1]"))
             encoded = index == 4 ? channel : _linear_to_srgb(channel)
-            UInt8(clamp(round(Int, encoded * 255.0f0), 0, 255))
+            # Rust's authority quantizer rounds positive half-way values away
+            # from zero; Julia's default `round` is ties-to-even.
+            UInt8(clamp(floor(Int, encoded * 255.0f0 + 0.5f0), 0, 255))
         end,
         4,
     )
@@ -1350,10 +1496,12 @@ function render_probe(
     state::LavaBackend=backend(),
 )
     width, height = _validate_dimensions(width_px, height_px)
+    draw_calls_start = state.draw_calls
+    readback_bytes_start = state.readback_bytes
+    pipeline_compilations_start = state.pipeline_compilations
     framebuffer = _framebuffer!(state, width, height)
     target = OffscreenTarget(framebuffer)
     draw!(state.queue, state.probe_pipeline, target, 3; clear_color=(0.0f0, 0.0f0, 0.0f0, 1.0f0))
-    Lava.vk_flush!(state.context)
     pixels = readback_framebuffer(framebuffer)
     capture_bytes = _capture_bytes(pixels)
     state.draw_calls += 1
@@ -1378,10 +1526,10 @@ function render_probe(
         capture_base64=base64encode(capture_bytes),
         telemetry=(
             upload_bytes=0,
-            readback_bytes=Int(state.readback_bytes),
-            draw_calls=Int(state.draw_calls),
+            readback_bytes=Int(state.readback_bytes - readback_bytes_start),
+            draw_calls=Int(state.draw_calls - draw_calls_start),
             dispatch_calls=0,
-            pipeline_compilations=Int(state.pipeline_compilations),
+            pipeline_compilations=Int(state.pipeline_compilations - pipeline_compilations_start),
         ),
     )
 end
@@ -1412,7 +1560,6 @@ function render_depth_probe(state::LavaBackend=backend())
         state.depth_compiled = true
         state.pipeline_compilations += 1
     end
-    Lava.vk_flush!(state.context)
     pixels = readback_framebuffer(framebuffer)
     center = pixels[cld(size(pixels, 1), 2), cld(size(pixels, 2), 2)]
     return (
@@ -1561,6 +1708,11 @@ function _texture_payload(
         ))
     texture.payload === nothing &&
         throw(AdapterError("unsupported_texture", "native path requires inline texture payloads"))
+    isempty(texture.mip_chain) ||
+        throw(AdapterError(
+            "unsupported_texture",
+            "multi-level texture payloads require the native residency uploader",
+        ))
     return (
         bytes=texture.payload::Vector{UInt8},
         width=texture.width_px,
@@ -1576,7 +1728,7 @@ function _material_texture_resources!(
     material::WGEGraphics.MaterialPacket,
 )
     cache = state.material_texture_resources
-    if any(resource -> resource.packet_sha256 != packet.packet_sha256, values(cache))
+    if any(resource -> resource.cache_key != packet.content_sha256, values(cache))
         empty!(cache)
     end
     haskey(cache, material.material_id) && return cache[material.material_id]
@@ -1606,7 +1758,7 @@ function _material_texture_resources!(
         shadow.texture * shadow.sampler,
     ])
     created = MaterialTextureResources(
-        packet.packet_sha256,
+        packet.content_sha256,
         material.material_id,
         textures[1],
         textures[2],
@@ -1646,7 +1798,6 @@ function render_texture_probe(state::LavaBackend=backend())
         state.texture_compiled = true
         state.pipeline_compilations += 1
     end
-    Lava.vk_flush!(state.context)
     pixels = readback_framebuffer(framebuffer)
     center = pixels[cld(size(pixels, 1), 2), cld(size(pixels, 2), 2)]
     expected = (0.2f0, 0.7f0, 0.9f0, 1.0f0)
@@ -1658,15 +1809,6 @@ function render_texture_probe(state::LavaBackend=backend())
         expected_rgba=collect(expected),
         texture_sampled=all(isapprox(center[index], expected[index]; atol=0.05f0) for index in 1:4),
         texture_binding_count=1,
-    )
-end
-
-function _cross_vector(first::Vec4f, second::Vec4f)::Vec4f
-    return Vec4f(
-        first[2] * second[3] - first[3] * second[2],
-        first[3] * second[1] - first[1] * second[3],
-        first[1] * second[2] - first[2] * second[1],
-        0.0f0,
     )
 end
 
@@ -1743,7 +1885,16 @@ function _camera_frame(camera::WGEGraphics.CameraPacket)::CameraFrame
         camera.near_plane_m,
         camera.far_plane_m,
     )
-    return CameraFrame(position, right, up, forward, projection, mode)
+    return CameraFrame(
+        position,
+        right,
+        up,
+        forward,
+        projection,
+        mode,
+        Float32(camera.width_px),
+        Float32(camera.height_px),
+    )
 end
 
 function _shadow_frame(
@@ -1771,14 +1922,14 @@ function _shadow_frame(
         1.0f0,
     )
     for instance in packet.instances
-        translation = instance.transform.translation_xyz_m
+        world_center, bound_radius = _instance_world_bound(packet, instance)
         offset = Vec4f(
-            translation[1] - center[1],
-            translation[2] - center[2],
-            translation[3] - center[3],
+            world_center[1] - center[1],
+            world_center[2] - center[2],
+            world_center[3] - center[3],
             0.0f0,
         )
-        radius = max(radius, sqrt(_dot_vector(offset, offset)) + max(instance.transform.scale_xyz...))
+        radius = max(radius, sqrt(_dot_vector(offset, offset)) + bound_radius)
     end
 
     distance = max(2.0f0 * radius, 32.0f0)
@@ -1797,6 +1948,8 @@ function _shadow_frame(
         light_direction,
         Vec4f(0.5f0 * span, 0.5f0 * span, 0.1f0, far_plane),
         0.0f0,
+        1.0f0,
+        1.0f0,
     )
 end
 
@@ -2065,9 +2218,23 @@ function _rotate_vector(rotation::Vec4f, vector::Vec4f)::Vec4f
     )
 end
 
+function _transform_tangent(
+    rotation::Vec4f,
+    local_tangent::Vec4f,
+    scale::Vec4f,
+)::Vec4f
+    tangent = _normalize_vector(_rotate_vector(rotation, Vec4f(
+        local_tangent[1] * scale[1],
+        local_tangent[2] * scale[2],
+        local_tangent[3] * scale[3],
+        0.0f0,
+    )))
+    return Vec4f(tangent[1], tangent[2], tangent[3], local_tangent[4])
+end
+
 function _terrain_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)
     current = state.terrain_resources
-    current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
+    current !== nothing && current.cache_key == packet.content_sha256 && return current
     heights = Lava.LavaArray{Float32,1}(packet.terrain.heights_m; bq=state.queue)
     slopes = Lava.LavaArray{Float32,1}(packet.terrain.slope_grade; bq=state.queue)
     regions = Lava.LavaArray{UInt8,1}(packet.terrain.region_codes; bq=state.queue)
@@ -2075,16 +2242,149 @@ function _terrain_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsSce
         sizeof(Float32) * (length(packet.terrain.heights_m) + length(packet.terrain.slope_grade)) +
             sizeof(UInt8) * length(packet.terrain.region_codes),
     )
-    created = TerrainResources(packet.packet_sha256, heights, slopes, regions, Int32(packet.terrain.resolution))
+    created = TerrainResources(packet.content_sha256, heights, slopes, regions, Int32(packet.terrain.resolution))
     state.terrain_resources = created
     return created
 end
 
-function _append_segment!(positions::Vector{Vec4f}, colors::Vector{Vec4f}, first::Vec4f, last::Vec4f, color::Vec4f)
-    push!(positions, first)
-    push!(positions, last)
-    push!(colors, color)
-    push!(colors, color)
+function _clip_overlay_segment(
+    frame::CameraFrame,
+    first::NTuple{3,Float32},
+    last::NTuple{3,Float32},
+)::Union{Nothing,Tuple{NTuple{3,Float32},NTuple{3,Float32}}}
+    first_relative = Vec4f(
+        first[1] - frame.position[1],
+        first[2] - frame.position[2],
+        first[3] - frame.position[3],
+        0.0f0,
+    )
+    last_relative = Vec4f(
+        last[1] - frame.position[1],
+        last[2] - frame.position[2],
+        last[3] - frame.position[3],
+        0.0f0,
+    )
+    first_depth = _dot_vector(frame.forward, first_relative)
+    last_depth = _dot_vector(frame.forward, last_relative)
+    depth_delta = last_depth - first_depth
+    if depth_delta == 0.0f0
+        frame.projection[3] <= first_depth <= frame.projection[4] || return nothing
+        return first, last
+    end
+    lower = (frame.projection[3] - first_depth) / depth_delta
+    upper = (frame.projection[4] - first_depth) / depth_delta
+    lower > upper && ((lower, upper) = (upper, lower))
+    start_amount = max(0.0f0, lower)
+    end_amount = min(1.0f0, upper)
+    start_amount <= end_amount || return nothing
+    clipped_first = ntuple(
+        index -> first[index] + (last[index] - first[index]) * start_amount,
+        3,
+    )
+    clipped_last = ntuple(
+        index -> first[index] + (last[index] - first[index]) * end_amount,
+        3,
+    )
+    return clipped_first, clipped_last
+end
+
+function _overlay_pixels_per_meter(frame::CameraFrame, position::NTuple{3,Float32})::Float32
+    relative = Vec4f(
+        position[1] - frame.position[1],
+        position[2] - frame.position[2],
+        position[3] - frame.position[3],
+        0.0f0,
+    )
+    depth = max(_dot_vector(frame.forward, relative), frame.projection[3])
+    return frame.mode < 0.5f0 ?
+        frame.height_px / (2.0f0 * frame.projection[2]) :
+        frame.height_px / (2.0f0 * depth * frame.projection[2])
+end
+
+function _overlay_offset(
+    frame::CameraFrame,
+    projected::Vec4f,
+    normal_x::Float32,
+    normal_y::Float32,
+    half_width_px::Float32,
+)
+    return Vec4f(
+        projected[1] + normal_x * half_width_px / (0.5f0 * frame.width_px),
+        projected[2] + normal_y * half_width_px / (0.5f0 * frame.height_px),
+        projected[3],
+        1.0f0,
+    )
+end
+
+function _append_overlay_segment!(
+    positions::Vector{Vec4f},
+    colors::Vector{Vec4f},
+    frame::CameraFrame,
+    first::NTuple{3,Float32},
+    last::NTuple{3,Float32},
+    color::Vec4f,
+    thickness_m::Float32,
+)
+    clipped = _clip_overlay_segment(frame, first, last)
+    clipped === nothing && return nothing
+    clipped_first, clipped_last = clipped
+    projected_first = _project_overlay_point(frame, clipped_first)
+    projected_last = _project_overlay_point(frame, clipped_last)
+    projected_first === nothing && return nothing
+    projected_last === nothing && return nothing
+    delta_x = (projected_last[1] - projected_first[1]) * 0.5f0 * frame.width_px
+    delta_y = (projected_last[2] - projected_first[2]) * 0.5f0 * frame.height_px
+    segment_length = sqrt(delta_x * delta_x + delta_y * delta_y)
+    normal_x, normal_y = segment_length > 1.0f-6 ?
+        (-delta_y / segment_length, delta_x / segment_length) :
+        (0.0f0, 1.0f0)
+    half_width_first = 0.5f0 * thickness_m * _overlay_pixels_per_meter(frame, clipped_first)
+    half_width_last = 0.5f0 * thickness_m * _overlay_pixels_per_meter(frame, clipped_last)
+    first_left = _overlay_offset(frame, projected_first, normal_x, normal_y, half_width_first)
+    first_right = _overlay_offset(frame, projected_first, -normal_x, -normal_y, half_width_first)
+    last_left = _overlay_offset(frame, projected_last, normal_x, normal_y, half_width_last)
+    last_right = _overlay_offset(frame, projected_last, -normal_x, -normal_y, half_width_last)
+    append!(positions, (first_left, first_right, last_left, last_left, first_right, last_right))
+    append!(colors, (color, color, color, color, color, color))
+    return nothing
+end
+
+function _overlay_line_thickness(radius_m::Float32)::Float32
+    return max(0.05f0, 0.08f0 * radius_m)
+end
+
+function _append_overlay_disc!(
+    positions::Vector{Vec4f},
+    colors::Vector{Vec4f},
+    frame::CameraFrame,
+    center::NTuple{3,Float32},
+    radius_m::Float32,
+    color::Vec4f,
+)
+    projected = _project_overlay_point(frame, center)
+    projected === nothing && return nothing
+    radius_px = max(radius_m * _overlay_pixels_per_meter(frame, center), 1.0f0)
+    radius_ndc_x = radius_px / (0.5f0 * frame.width_px)
+    radius_ndc_y = radius_px / (0.5f0 * frame.height_px)
+    center_vertex = Vec4f(projected[1], projected[2], projected[3], 1.0f0)
+    for step in 0:7
+        first_angle = Float32(2.0 * pi * step / 8.0)
+        last_angle = Float32(2.0 * pi * (step + 1) / 8.0)
+        first_vertex = Vec4f(
+            projected[1] + radius_ndc_x * cos(first_angle),
+            projected[2] + radius_ndc_y * sin(first_angle),
+            projected[3],
+            1.0f0,
+        )
+        last_vertex = Vec4f(
+            projected[1] + radius_ndc_x * cos(last_angle),
+            projected[2] + radius_ndc_y * sin(last_angle),
+            projected[3],
+            1.0f0,
+        )
+        append!(positions, (center_vertex, first_vertex, last_vertex))
+        append!(colors, (color, color, color))
+    end
     return nothing
 end
 
@@ -2101,19 +2401,27 @@ function _append_overlay!(
     center = overlay.position_xyz_m
     radius = overlay.radius_m
     color = _overlay_color(overlay)
-    _append_segment!(
+    # The authored radius is the marker's semantic footprint.  A filled
+    # center keeps that footprint visible even when the physical cross arms
+    # fall between raster pixel centers at a distant camera.
+    _append_overlay_disc!(positions, colors, frame, center, radius, color)
+    _append_overlay_segment!(
         positions,
         colors,
-        _project_point(frame, (center[1] - radius, center[2], center[3])),
-        _project_point(frame, (center[1] + radius, center[2], center[3])),
+        frame,
+        (center[1] - radius, center[2], center[3]),
+        (center[1] + radius, center[2], center[3]),
         color,
+        _overlay_line_thickness(radius),
     )
-    _append_segment!(
+    _append_overlay_segment!(
         positions,
         colors,
-        _project_point(frame, (center[1], center[2], center[3] - radius)),
-        _project_point(frame, (center[1], center[2], center[3] + radius)),
+        frame,
+        (center[1], center[2], center[3] - radius),
+        (center[1], center[2], center[3] + radius),
         color,
+        _overlay_line_thickness(radius),
     )
     return nothing
 end
@@ -2140,7 +2448,15 @@ function _append_overlay!(
             center[2],
             center[3] + overlay.radius_m * sin(last_angle),
         )
-        _append_segment!(positions, colors, _project_point(frame, first), _project_point(frame, last), color)
+        _append_overlay_segment!(
+            positions,
+            colors,
+            frame,
+            first,
+            last,
+            color,
+            _overlay_line_thickness(overlay.radius_m),
+        )
     end
     return nothing
 end
@@ -2153,33 +2469,91 @@ function _append_overlay!(
 )
     color = _overlay_color(overlay)
     for index in 1:(length(overlay.points_xyz_m)-1)
-        first = _project_point(frame, overlay.points_xyz_m[index])
-        last = _project_point(frame, overlay.points_xyz_m[index+1])
-        _append_segment!(positions, colors, first, last, color)
+        _append_overlay_segment!(
+            positions,
+            colors,
+            frame,
+            overlay.points_xyz_m[index],
+            overlay.points_xyz_m[index+1],
+            color,
+            overlay.thickness_m,
+        )
     end
     return nothing
 end
 
-function _instance_visible(
-    frame::CameraFrame,
+function _mesh_bound_sphere(mesh::WGEGraphics.MeshPacket)
+    minimums = ntuple(index -> minimum(position[index] for position in mesh.positions_m), 3)
+    maximums = ntuple(index -> maximum(position[index] for position in mesh.positions_m), 3)
+    center = ntuple(index -> 0.5f0 * (minimums[index] + maximums[index]), 3)
+    radius = maximum(
+        sqrt(sum((position[index] - center[index])^2 for index in 1:3))
+        for position in mesh.positions_m
+    )
+    return center, Float32(radius)
+end
+
+function _instance_world_bound(
+    packet::WGEGraphics.GraphicsScenePacket,
     instance::WGEGraphics.InstancePacket,
 )
-    center = _project_point(frame, instance.transform.translation_xyz_m)
-    radius = max(instance.transform.scale_xyz...) + _importance_margin(instance.importance)
+    mesh_index = findfirst(mesh -> mesh.mesh_id == instance.mesh_id, packet.meshes)
+    mesh_index === nothing &&
+        throw(AdapterError("provenance", "instance references an absent mesh"))
+    local_center, local_radius = _mesh_bound_sphere(packet.meshes[mesh_index])
+    scale = instance.transform.scale_xyz
+    rotated_center = _rotate_vector(
+        Vec4f(instance.transform.rotation_xyzw...),
+        Vec4f(
+            local_center[1] * scale[1],
+            local_center[2] * scale[2],
+            local_center[3] * scale[3],
+            0.0f0,
+        ),
+    )
+    world_center = Vec4f(
+        rotated_center[1] + instance.transform.translation_xyz_m[1],
+        rotated_center[2] + instance.transform.translation_xyz_m[2],
+        rotated_center[3] + instance.transform.translation_xyz_m[3],
+        0.0f0,
+    )
+    return world_center, max(scale...) * local_radius
+end
+
+function _sphere_visible(frame::CameraFrame, world_center::Vec4f, radius::Float32)::Bool
     relative = Vec4f(
-        instance.transform.translation_xyz_m[1] - frame.position[1],
-        instance.transform.translation_xyz_m[2] - frame.position[2],
-        instance.transform.translation_xyz_m[3] - frame.position[3],
+        world_center[1] - frame.position[1],
+        world_center[2] - frame.position[2],
+        world_center[3] - frame.position[3],
         0.0f0,
     )
     forward_distance = _dot_vector(frame.forward, relative)
-    projection_scale = 1.0f0 - frame.mode + frame.mode * max(forward_distance, frame.projection[3])
-    margin_x = radius / (frame.projection[1] * projection_scale)
-    margin_y = radius / (frame.projection[2] * projection_scale)
-    in_front = frame.mode < 0.5f0 || forward_distance + radius >= frame.projection[3]
-    return in_front &&
-        -1.0f0 - margin_x <= center[1] <= 1.0f0 + margin_x &&
-        -1.0f0 - margin_y <= center[2] <= 1.0f0 + margin_y
+    horizontal_distance = _dot_vector(frame.right, relative)
+    vertical_distance = _dot_vector(frame.up, relative)
+    if frame.mode < 0.5f0
+        return forward_distance + radius >= frame.projection[3] &&
+               forward_distance - radius <= frame.projection[4] &&
+               abs(horizontal_distance) <= frame.projection[1] + radius &&
+               abs(vertical_distance) <= frame.projection[2] + radius
+    end
+    horizontal_plane_radius = radius * sqrt(1.0f0 + frame.projection[1] * frame.projection[1])
+    vertical_plane_radius = radius * sqrt(1.0f0 + frame.projection[2] * frame.projection[2])
+    return forward_distance + radius >= frame.projection[3] &&
+           forward_distance - radius <= frame.projection[4] &&
+           horizontal_distance - forward_distance * frame.projection[1] <= horizontal_plane_radius &&
+           -horizontal_distance - forward_distance * frame.projection[1] <= horizontal_plane_radius &&
+           vertical_distance - forward_distance * frame.projection[2] <= vertical_plane_radius &&
+           -vertical_distance - forward_distance * frame.projection[2] <= vertical_plane_radius
+end
+
+function _instance_visible(
+    frame::CameraFrame,
+    packet::WGEGraphics.GraphicsScenePacket,
+    instance::WGEGraphics.InstancePacket,
+)
+    world_center, mesh_radius = _instance_world_bound(packet, instance)
+    radius = mesh_radius + _importance_margin(instance.importance)
+    return _sphere_visible(frame, world_center, radius)
 end
 
 _importance_margin(::WGEGraphics.BackgroundImportance)::Float32 = 0.0f0
@@ -2201,7 +2575,7 @@ function _mesh_visibility(
     gameplay_critical_visible_count = 0
     gameplay_critical_culled_count = 0
     for instance in packet.instances
-        visible = _instance_visible(frame, instance)
+        visible = _instance_visible(frame, packet, instance)
         visible && (visible_instance_count += 1)
         if instance.importance isa WGEGraphics.BackgroundImportance
             visible ? (background_visible_count += 1) : (background_culled_count += 1)
@@ -2226,6 +2600,52 @@ function _mesh_visibility(
     )
 end
 
+function _mesh_triangle_tangent(
+    mesh::WGEGraphics.MeshPacket,
+    first_index::Int,
+    second_index::Int,
+    third_index::Int,
+)
+    first_position = Vec4f(mesh.positions_m[first_index]..., 0.0f0)
+    second_position = Vec4f(mesh.positions_m[second_index]..., 0.0f0)
+    third_position = Vec4f(mesh.positions_m[third_index]..., 0.0f0)
+    edge_one = Vec4f(
+        second_position[1] - first_position[1],
+        second_position[2] - first_position[2],
+        second_position[3] - first_position[3],
+        0.0f0,
+    )
+    edge_two = Vec4f(
+        third_position[1] - first_position[1],
+        third_position[2] - first_position[2],
+        third_position[3] - first_position[3],
+        0.0f0,
+    )
+    first_uv = mesh.uv0[first_index]
+    second_uv = mesh.uv0[second_index]
+    third_uv = mesh.uv0[third_index]
+    delta_one = (second_uv[1] - first_uv[1], second_uv[2] - first_uv[2])
+    delta_two = (third_uv[1] - first_uv[1], third_uv[2] - first_uv[2])
+    geometric_normal = _normalize_vector(_cross_vector(edge_one, edge_two))
+    determinant = delta_one[1] * delta_two[2] - delta_one[2] * delta_two[1]
+    abs(determinant) > 1.0f-8 || return _stable_tangent(geometric_normal)
+    inverse_determinant = inv(determinant)
+    tangent = _normalize_vector(Vec4f(
+        (edge_one[1] * delta_two[2] - edge_two[1] * delta_one[2]) * inverse_determinant,
+        (edge_one[2] * delta_two[2] - edge_two[2] * delta_one[2]) * inverse_determinant,
+        (edge_one[3] * delta_two[2] - edge_two[3] * delta_one[2]) * inverse_determinant,
+        0.0f0,
+    ))
+    bitangent = Vec4f(
+        (edge_two[1] * delta_one[1] - edge_one[1] * delta_two[1]) * inverse_determinant,
+        (edge_two[2] * delta_one[1] - edge_one[2] * delta_two[1]) * inverse_determinant,
+        (edge_two[3] * delta_one[1] - edge_one[3] * delta_two[1]) * inverse_determinant,
+        0.0f0,
+    )
+    handedness = _dot_vector(_cross_vector(geometric_normal, tangent), bitangent) < 0.0f0 ? -1.0f0 : 1.0f0
+    return Vec4f(tangent[1], tangent[2], tangent[3], handedness)
+end
+
 function _mesh_resources!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
@@ -2235,10 +2655,10 @@ function _mesh_resources!(
     shadow::Bool=false,
 )::Union{Nothing,MeshResources}
     current = shadow ? state.shadow_mesh_resources : state.mesh_resources
-    current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
+    current !== nothing && current.cache_key == packet.content_sha256 && return current
     groups = Dict{Tuple{String,String},Vector{WGEGraphics.InstancePacket}}()
     for instance in packet.instances
-        _instance_visible(frame, instance) || continue
+        _instance_visible(frame, packet, instance) || continue
         key = (instance.mesh_id, instance.material_id)
         instances = get!(groups, key) do
             WGEGraphics.InstancePacket[]
@@ -2257,11 +2677,28 @@ function _mesh_resources!(
         positions = Vec4f[]
         normals = Vec4f[]
         uvs = Vec2f[]
-        for index in mesh_packet.indices
-            vertex = Int(index) + 1
-            push!(positions, Vec4f(mesh_packet.positions_m[vertex]..., 0.0f0))
-            push!(normals, Vec4f(mesh_packet.normals[vertex]..., 0.0f0))
-            push!(uvs, Vec2f(mesh_packet.uv0[vertex]...))
+        tangents = Vec4f[]
+        for triangle_start in 1:3:length(mesh_packet.indices)
+            first_index = Int(mesh_packet.indices[triangle_start]) + 1
+            second_index = Int(mesh_packet.indices[triangle_start + 1]) + 1
+            third_index = Int(mesh_packet.indices[triangle_start + 2]) + 1
+            triangle_tangent = _mesh_triangle_tangent(
+                mesh_packet,
+                first_index,
+                second_index,
+                third_index,
+            )
+            for vertex in (first_index, second_index, third_index)
+                push!(positions, Vec4f(mesh_packet.positions_m[vertex]..., 0.0f0))
+                push!(normals, Vec4f(mesh_packet.normals[vertex]..., 0.0f0))
+                push!(uvs, Vec2f(mesh_packet.uv0[vertex]...))
+                push!(
+                    tangents,
+                    isempty(mesh_packet.tangents) ?
+                    triangle_tangent :
+                    Vec4f(mesh_packet.tangents[vertex]...),
+                )
+            end
         end
         batch_instances = groups[(mesh_id, material_id)]
         translations = Vec4f[
@@ -2282,6 +2719,7 @@ function _mesh_resources!(
         gpu_positions = Lava.LavaArray{Vec4f,1}(positions; bq=state.queue)
         gpu_normals = Lava.LavaArray{Vec4f,1}(normals; bq=state.queue)
         gpu_uvs = Lava.LavaArray{Vec2f,1}(uvs; bq=state.queue)
+        gpu_tangents = Lava.LavaArray{Vec4f,1}(tangents; bq=state.queue)
         gpu_translations = Lava.LavaArray{Vec4f,1}(translations; bq=state.queue)
         gpu_rotations = Lava.LavaArray{Vec4f,1}(rotations; bq=state.queue)
         gpu_scales = Lava.LavaArray{Vec4f,1}(scales; bq=state.queue)
@@ -2291,7 +2729,7 @@ function _mesh_resources!(
         gpu_emissive_parameters = Lava.LavaArray{Vec4f,1}(emissive_parameters; bq=state.queue)
         state.upload_bytes += UInt64(
             sizeof(Vec4f) *
-                (length(positions) + length(normals) + length(translations) +
+                (length(positions) + length(normals) + length(tangents) + length(translations) +
                 length(rotations) + length(scales) + length(colors) +
                 length(material_parameters) + length(surface_parameters) +
                 length(emissive_parameters)),
@@ -2304,6 +2742,7 @@ function _mesh_resources!(
                 gpu_positions,
                 gpu_normals,
                 gpu_uvs,
+                gpu_tangents,
                 gpu_translations,
                 gpu_rotations,
                 gpu_scales,
@@ -2318,7 +2757,7 @@ function _mesh_resources!(
         total_vertices += length(positions)
     end
     created = MeshResources(
-        packet.packet_sha256,
+        packet.content_sha256,
         batches,
         visibility.instance_count,
         visibility.visible_instance_count,
@@ -2409,7 +2848,7 @@ function _shadow_resources!(
     lighting::DirectionalLighting,
 )::ShadowResources
     current = state.shadow_resources
-    current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
+    current !== nothing && current.cache_key == packet.content_sha256 && return current
     light_frame = _shadow_frame(packet, lighting)
     framebuffer = _framebuffer!(state, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, true, :shadow)
     texture = _framebuffer_texture(framebuffer, state)
@@ -2417,7 +2856,7 @@ function _shadow_resources!(
     # the typed shadow contract. Nearest filtering made hero-scale shadows
     # visibly stair-stepped in the native showcase.
     sampler = Lava.LavaSampler(ctx=state.context, filter=:linear, wrap=:clamp)
-    created = ShadowResources(packet.packet_sha256, framebuffer, texture, sampler, light_frame)
+    created = ShadowResources(packet.content_sha256, framebuffer, texture, sampler, light_frame)
     terrain = _terrain_resources!(state, packet)
     visibility = _mesh_visibility(packet, light_frame)
     mesh_resources = _mesh_resources!(state, packet, light_frame, visibility; shadow=true)
@@ -2432,7 +2871,7 @@ function _overlay_resources!(
     frame::CameraFrame,
 )
     current = state.overlay_resources
-    current !== nothing && current.packet_sha256 == packet.packet_sha256 && return current
+    current !== nothing && current.cache_key == packet.content_sha256 && return current
     positions = Vec4f[]
     colors = Vec4f[]
     for overlay in packet.overlays
@@ -2442,7 +2881,7 @@ function _overlay_resources!(
     gpu_positions = Lava.LavaArray{Vec4f,1}(positions; bq=state.queue)
     gpu_colors = Lava.LavaArray{Vec4f,1}(colors; bq=state.queue)
     state.upload_bytes += UInt64(sizeof(Vec4f) * (length(positions) + length(colors)))
-    created = OverlayResources(packet.packet_sha256, gpu_positions, gpu_colors, length(positions))
+    created = OverlayResources(packet.content_sha256, gpu_positions, gpu_colors, length(positions))
     state.overlay_resources = created
     return created
 end
@@ -2469,44 +2908,186 @@ function _capture_pixels(capture_bytes::Vector{UInt8})::Vector{NTuple{4,UInt8}}
     return pixels
 end
 
-function _distinct_colors(pixels::AbstractVector{<:NTuple{4,<:Real}})::Int
-    return length(Set((rgba[1], rgba[2], rgba[3]) for rgba in (_rgba8(pixel) for pixel in pixels)))
+function _measurement_screen_projection(
+    frame::CameraFrame,
+    camera::WGEGraphics.CameraPacket,
+    position::NTuple{3,Float32},
+)::Union{Nothing,NTuple{3,Float32}}
+    projected = _project_overlay_point(frame, position)
+    projected === nothing && return nothing
+    relative = Vec4f(
+        position[1] - frame.position[1],
+        position[2] - frame.position[2],
+        position[3] - frame.position[3],
+        0.0f0,
+    )
+    forward_distance = _dot_vector(frame.forward, relative)
+    pixels_per_meter = frame.mode < 0.5f0 ?
+        Float32(camera.height_px) / (2.0f0 * frame.projection[2]) :
+        Float32(camera.height_px) / (2.0f0 * forward_distance * frame.projection[2])
+    return (
+        (projected[1] * 0.5f0 + 0.5f0) * Float32(camera.width_px),
+        (projected[2] * 0.5f0 + 0.5f0) * Float32(camera.height_px),
+        pixels_per_meter,
+    )
 end
 
-function _role_pixels(
-    pixels::AbstractVector{<:NTuple{4,<:Real}},
-    overlays::Vector{<:WGEGraphics.OverlayPacket},
-    role::Symbol,
-)::Int
-    colors = Set{NTuple{4,UInt8}}()
-    for overlay in overlays
-        overlay.role == role && push!(colors, _rgba8(overlay.color_rgba))
+function _measurement_overlay_samples(
+    packet::WGEGraphics.GraphicsScenePacket,
+    frame::CameraFrame,
+    overlay::WGEGraphics.PointOverlay,
+)
+    camera = packet.camera
+    radius = Float32(overlay.radius_m)
+    center = overlay.position_xyz_m
+    projection = _measurement_screen_projection(frame, camera, center)
+    sample = projection === nothing ? nothing : (
+        projection[1],
+        projection[2],
+        max(radius * projection[3] + 3.0f0, 4.0f0),
+    )
+    sample === nothing ? NTuple{3,Float32}[] : [sample]
+end
+
+function _measurement_overlay_samples(
+    packet::WGEGraphics.GraphicsScenePacket,
+    frame::CameraFrame,
+    overlay::WGEGraphics.CircleOverlay,
+)
+    camera = packet.camera
+    samples = NTuple{3,Float32}[]
+    center = overlay.center_xyz_m
+    for step in 0:15
+        angle = 2.0f0 * Float32(pi) * Float32(step) / 16.0f0
+        position = (
+            center[1] + overlay.radius_m * cos(angle),
+            center[2],
+            center[3] + overlay.radius_m * sin(angle),
+        )
+        projection = _measurement_screen_projection(frame, camera, position)
+        sample = projection === nothing ? nothing : (
+            projection[1],
+            projection[2],
+            max(4.0f0 + projection[3] * 0.08f0, 4.0f0),
+        )
+        sample === nothing || push!(samples, sample)
     end
-    isempty(colors) && return 0
-    return count(pixel -> _rgba8(pixel) in colors, pixels)
+    return samples
+end
+
+function _measurement_overlay_samples(
+    packet::WGEGraphics.GraphicsScenePacket,
+    frame::CameraFrame,
+    overlay::WGEGraphics.PolylineOverlay,
+)
+    camera = packet.camera
+    samples = NTuple{3,Float32}[]
+    for index in 1:(length(overlay.points_xyz_m)-1)
+        clipped = _clip_overlay_segment(
+            frame,
+            overlay.points_xyz_m[index],
+            overlay.points_xyz_m[index + 1],
+        )
+        clipped === nothing && continue
+        first, last = clipped
+        for step in 0:8
+            amount = Float32(step) / 8.0f0
+            position = (
+                first[1] + (last[1] - first[1]) * amount,
+                first[2] + (last[2] - first[2]) * amount,
+                first[3] + (last[3] - first[3]) * amount,
+            )
+            projection = _measurement_screen_projection(frame, camera, position)
+            sample = projection === nothing ? nothing : (
+                projection[1],
+                projection[2],
+                max(overlay.thickness_m * projection[3] + 3.0f0, 4.0f0),
+            )
+            sample === nothing || push!(samples, sample)
+        end
+    end
+    return samples
 end
 
 function _scene_measurements(
     pixels::AbstractVector{<:NTuple{4,<:Real}},
     packet::WGEGraphics.GraphicsScenePacket,
 )
-    luminance = Float64[_pixel_luminance(pixel) for pixel in pixels]
-    return (
-        terrain_luminance_stddev=std(luminance; corrected=false),
-        distinct_terrain_colors=_distinct_colors(pixels),
-        route_visible_pixels=_role_pixels(pixels, packet.overlays, :route),
-        player_spawn_visible_pixels=_role_pixels(pixels, packet.overlays, :player_spawn),
-        opponent_spawn_visible_pixels=_role_pixels(pixels, packet.overlays, :opponent_spawn),
-        encounter_visible_pixels=_role_pixels(pixels, packet.overlays, :encounter),
-        objective_visible_pixels=_role_pixels(pixels, packet.overlays, :objective),
-    )
+    bytes = Vector{UInt8}(undef, 4 * length(pixels))
+    offset = 1
+    for pixel in pixels
+        rgba = _rgba8(pixel)
+        for component in 1:4
+            bytes[offset + component - 1] = rgba[component]
+        end
+        offset += 4
+    end
+    return _scene_measurements(bytes, packet)
 end
 
 function _scene_measurements(
     capture_bytes::Vector{UInt8},
     packet::WGEGraphics.GraphicsScenePacket,
+    frame::CameraFrame=_camera_frame(packet.camera),
 )
-    return _scene_measurements(_capture_pixels(capture_bytes), packet)
+    length(capture_bytes) % 4 == 0 ||
+        throw(AdapterError("invalid_capture", "capture byte length is not RGBA-aligned"))
+    role_colors = ntuple(_ -> Set{NTuple{4,UInt8}}(), 5)
+    role_samples = ntuple(_ -> NTuple{3,Float32}[], 5)
+    for overlay in packet.overlays
+        role_index = _measurement_role_index(overlay.role)
+        push!(role_colors[role_index], _rgba8(overlay.color_rgba))
+        append!(role_samples[role_index], _measurement_overlay_samples(packet, frame, overlay))
+    end
+    distinct_colors = Set{NTuple{3,UInt8}}()
+    role_pixels = zeros(Int, 5)
+    mean = 0.0
+    sum_squared_delta = 0.0
+    sample_count = 0
+    width = Int(packet.width_px)
+    for (pixel_index, offset) in enumerate(1:4:length(capture_bytes))
+        rgba = (
+            capture_bytes[offset],
+            capture_bytes[offset + 1],
+            capture_bytes[offset + 2],
+            capture_bytes[offset + 3],
+        )
+        push!(distinct_colors, (rgba[1], rgba[2], rgba[3]))
+        luminance = _pixel_luminance(rgba)
+        sample_count += 1
+        delta = luminance - mean
+        mean += delta / sample_count
+        sum_squared_delta += delta * (luminance - mean)
+        for role_index in eachindex(role_colors)
+            if rgba in role_colors[role_index]
+                pixel_x = Float32((pixel_index - 1) % width) + 0.5f0
+                pixel_y = Float32((pixel_index - 1) ÷ width) + 0.5f0
+                any(
+                    sample ->
+                        (pixel_x - sample[1])^2 + (pixel_y - sample[2])^2 <= sample[3]^2,
+                    role_samples[role_index],
+                ) && (role_pixels[role_index] += 1)
+            end
+        end
+    end
+    return (
+        terrain_luminance_stddev=sqrt(sum_squared_delta / sample_count),
+        distinct_terrain_colors=length(distinct_colors),
+        route_visible_pixels=role_pixels[1],
+        player_spawn_visible_pixels=role_pixels[2],
+        opponent_spawn_visible_pixels=role_pixels[3],
+        encounter_visible_pixels=role_pixels[4],
+        objective_visible_pixels=role_pixels[5],
+    )
+end
+
+function _measurement_role_index(role::Symbol)::Int
+    role === :route && return 1
+    role === :player_spawn && return 2
+    role === :opponent_spawn && return 3
+    role === :encounter && return 4
+    role === :objective && return 5
+    throw(AdapterError("unsupported_overlay", "overlay role $role is unsupported"))
 end
 
 function render_scene(
@@ -2527,6 +3108,10 @@ function _render_scene(
     gpu_timing_slot::Union{Nothing,Int},
 )
     started_ns = time_ns()
+    upload_bytes_start = state.upload_bytes
+    draw_calls_start = state.draw_calls
+    readback_bytes_start = state.readback_bytes
+    pipeline_compilations_start = state.pipeline_compilations
     width, height = _validate_dimensions(packet.width_px, packet.height_px)
     material = _terrain_material(packet)
     for material_intent in packet.materials
@@ -2644,6 +3229,7 @@ function _render_scene(
                     batch.positions,
                     batch.normals,
                     batch.uvs,
+                    batch.tangents,
                     batch.translations,
                     batch.rotations,
                     batch.scales,
@@ -2740,7 +3326,6 @@ function _render_scene(
 
     flush_readback_started_ns = time_ns()
     _end_gpu_frame_timing!(state, gpu_timing_slot)
-    Lava.vk_flush!(state.context)
     pixels = readback_framebuffer(capture_framebuffer)
     gpu_timing_reports = _read_gpu_timing_reports(state, gpu_timing_slot)
     gpu_frame_time_us = _timing_report_us(gpu_timing_reports, GPU_FRAME_TIMING_LABEL)
@@ -2776,13 +3361,13 @@ function _render_scene(
         height_px=height,
         capture_sha256="sha256:" * bytes2hex(sha256(capture_bytes)),
         capture_base64=base64encode(capture_bytes),
-        measurements=_scene_measurements(capture_bytes, packet),
+        measurements=_scene_measurements(capture_bytes, packet, camera_frame),
         telemetry=(
-            upload_bytes=Int(state.upload_bytes),
-            readback_bytes=Int(state.readback_bytes),
-            draw_calls=Int(state.draw_calls),
+            upload_bytes=Int(state.upload_bytes - upload_bytes_start),
+            readback_bytes=Int(state.readback_bytes - readback_bytes_start),
+            draw_calls=Int(state.draw_calls - draw_calls_start),
             dispatch_calls=0,
-            pipeline_compilations=Int(state.pipeline_compilations),
+            pipeline_compilations=Int(state.pipeline_compilations - pipeline_compilations_start),
             instance_count=visibility.instance_count,
             visible_instance_count=visibility.visible_instance_count,
             culled_instance_count=visibility.culled_instance_count,

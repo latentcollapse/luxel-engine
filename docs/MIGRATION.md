@@ -1,5 +1,13 @@
 # Migrating WGE out of `Codeweald/godot_renderer/`
 
+> **Historical migration record.** This document describes an earlier
+> multi-target layout and is retained for archaeology and salvage only. It is
+> not the current product doctrine or execution plan. Use
+> [`../ACTIVE_ARCHITECTURE.md`](../ACTIVE_ARCHITECTURE.md) and
+> [`../WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md`](../WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md)
+> for the native Rust/Julia/Lava path. Godot, Unity, and Unreal references
+> below must not be interpreted as current runtime gates.
+
 ## Why
 
 `godot_renderer/` is a historical name that no longer describes its contents. Of the code in there,

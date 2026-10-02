@@ -1,5 +1,11 @@
 # WGE MVP roadmap
 
+> **Historical roadmap.** This 2026-07-31 document predates the native
+> engine-neutral convergence and is retained as a decision record. It is not
+> the current MVP definition. Use [`../ACTIVE_ARCHITECTURE.md`](../ACTIVE_ARCHITECTURE.md)
+> and [`../WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md`](../WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md)
+> for the active demo-ready native engine roadmap.
+
 Written 2026-07-31, from the [debt ledger](DEBT_LEDGER.md), the
 [missing inventory](MISSING_INVENTORY.md), and the
 [tooling plan](TOOLING_UPGRADES.md) (items 1-3 landed).

@@ -1,6 +1,7 @@
 # WGE Native Graphics Showcase Evidence
 
-Status: deterministic native visual-quality probe, 2026-09-28
+Status: deterministic native visual-quality probe; adapter-v6 evidence closed,
+with the v5 receipt retained as a historical control, 2026-09-29
 
 The canonical Riverwatch overview remains the semantic/gameplay evidence
 profile. `render-showcase-layout` derives a separate, engine-neutral visual
@@ -42,6 +43,21 @@ composition-path coverage gap while leaving the measured vegetation/terrain
 quality gap visible. The current foliage-material camera-cut replay is bound to packet
 `sha256:28a91341960a2b67057a5266f0c538f0ca1510bd344d8f6508a56fba987cb2b5`
 and capture `sha256:e68989b5d54a73117fbdc4da7829a27ee3edb6802f67b3c5ca13a1880fd02e33`.
+
+## Current adapter-v6 evidence
+
+The fresh 2026-09-29 material showcase promoted packet
+`sha256:bd96a891e590b84aec8e61f9a27a01efc81bd98c09338df28235fa82c2ad119b`
+and capture
+`sha256:fda34e0e82898ae29505f854b3374099e11ebf77ca92643e8b5c0056a3790332`.
+It rendered 9 landmark instances at 640x480 with 20 draw calls, 4,608 mesh
+vertices, and 547,153 uploaded bytes. The composed-world v6 profile promoted
+packet
+`sha256:ab8162df9af469c48da81747fa9c2691230c50c2ea31be10a201698e17139183`
+and capture
+`sha256:7d11a5caecc99c4f0b03f1f83f02105c938c1bee901ab59843d98172f54934b1`;
+it rendered 40 instances at 768x512 with 24 draw calls and 4,656 mesh
+vertices. Both captures passed the Rust-owned visual and telemetry validators.
 
 ## Frozen evidence
 

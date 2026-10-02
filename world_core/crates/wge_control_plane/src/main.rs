@@ -6,7 +6,10 @@ use std::process::ExitCode;
 
 use serde::de::DeserializeOwned;
 use serde_json::{Value, json};
-use wge_control_plane::{ProjectStore, WorkOrderResult, profile_gates};
+use wge_control_plane::{
+    ProjectStore, WorkOrderResult, capability_registry, construction_plan, profile_gates,
+    semantic_facade, style_profile,
+};
 use wge_project_ledger::WorkOrder;
 
 fn main() -> ExitCode {
@@ -29,6 +32,106 @@ fn dispatch() -> Result<Value, String> {
     let mut args = env::args().skip(1);
     let command = args.next().ok_or_else(usage)?;
     match command.as_str() {
+        "capabilities" => {
+            let (class, status) = optional_capability_filters(&mut args)?;
+            reject_extra(&mut args)?;
+            let catalog = capability_registry::CapabilityCatalog::native_v1();
+            catalog.validate().map_err(|error| error.to_string())?;
+            let class = match class.as_deref() {
+                Some(value) => Some(
+                    capability_registry::class_from_str(value)
+                        .ok_or_else(|| format!("unknown capability class {value}"))?,
+                ),
+                None => None,
+            };
+            let status = match status.as_deref() {
+                Some(value) => Some(
+                    capability_registry::status_from_str(value)
+                        .ok_or_else(|| format!("unknown capability status {value}"))?,
+                ),
+                None => None,
+            };
+            Ok(serde_json::json!({
+                "schema_version": capability_registry::CAPABILITY_REGISTRY_SCHEMA,
+                "registry_id": catalog.registry_id.clone(),
+                "registry_sha256": catalog.registry_sha256.clone(),
+                "capabilities": catalog.list(class, status),
+            }))
+        }
+        "capability-explain" => {
+            let id = required(&mut args, "capability id")?;
+            reject_extra(&mut args)?;
+            let catalog = capability_registry::CapabilityCatalog::native_v1();
+            catalog.validate().map_err(|error| error.to_string())?;
+            capability_registry::descriptor_json(&catalog, &id).map_err(|error| error.to_string())
+        }
+        "facade" => {
+            let status = optional_facade_status(&mut args)?;
+            reject_extra(&mut args)?;
+            let catalog = semantic_facade::SemanticFacadeCatalog::native_v1();
+            catalog.validate().map_err(|error| error.to_string())?;
+            let status = status
+                .as_deref()
+                .map(semantic_facade_status_from_str)
+                .transpose()?;
+            Ok(json!({
+                "schema_version": semantic_facade::SEMANTIC_FACADE_SCHEMA,
+                "facade_id": catalog.facade_id,
+                "facade_sha256": catalog.facade_sha256,
+                "operations": catalog.list(status),
+            }))
+        }
+        "facade-explain" => {
+            let id = required(&mut args, "facade operation id")?;
+            reject_extra(&mut args)?;
+            let catalog = semantic_facade::SemanticFacadeCatalog::native_v1();
+            catalog.validate().map_err(|error| error.to_string())?;
+            catalog.explain(&id).map_err(|error| error.to_string())
+        }
+        "style-validate" | "style-lower" => {
+            let profile_path = PathBuf::from(required(&mut args, "style profile")?);
+            reject_extra(&mut args)?;
+            let profile: style_profile::StyleProfile = read_json(&profile_path)?;
+            profile.validate().map_err(|error| error.to_string())?;
+            if command == "style-validate" {
+                Ok(serde_json::json!({
+                    "schema_version": style_profile::STYLE_PROFILE_SCHEMA,
+                    "status": "valid",
+                    "profile_id": profile.profile_id,
+                    "profile_sha256": profile.profile_sha256,
+                }))
+            } else {
+                let catalog = capability_registry::CapabilityCatalog::native_v1();
+                let plan = style_profile::StylePlan::lower(&profile, &catalog)
+                    .map_err(|error| error.to_string())?;
+                serde_json::to_value(plan).map_err(|error| error.to_string())
+            }
+        }
+        "project-plan" => {
+            let draft_path = PathBuf::from(required(&mut args, "construction plan draft")?);
+            let style_path = PathBuf::from(required(&mut args, "style plan")?);
+            reject_extra(&mut args)?;
+            let draft: construction_plan::ConstructionPlanDraft = read_json(&draft_path)?;
+            let style: style_profile::StylePlan = read_json(&style_path)?;
+            let plan = construction_plan::ConstructionPlan::compile(&draft, &style)
+                .map_err(|error| error.to_string())?;
+            serde_json::to_value(plan).map_err(|error| error.to_string())
+        }
+        "construction-validate" => {
+            let plan_path = PathBuf::from(required(&mut args, "construction plan")?);
+            let style_path = PathBuf::from(required(&mut args, "style plan")?);
+            reject_extra(&mut args)?;
+            let plan: construction_plan::ConstructionPlan = read_json(&plan_path)?;
+            let style: style_profile::StylePlan = read_json(&style_path)?;
+            plan.validate(&style).map_err(|error| error.to_string())?;
+            Ok(json!({
+                "schema_version": construction_plan::CONSTRUCTION_PLAN_SCHEMA,
+                "status": "valid",
+                "plan_id": plan.plan_id,
+                "plan_sha256": plan.plan_sha256,
+                "readiness": plan.readiness,
+            }))
+        }
         "create" => {
             let root = PathBuf::from(required(&mut args, "root")?);
             let spec = PathBuf::from(required_flag(&mut args, "--spec")?);
@@ -216,6 +319,51 @@ fn required_flag(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<
     }
 }
 
+fn optional_capability_filters(
+    args: &mut impl Iterator<Item = String>,
+) -> Result<(Option<String>, Option<String>), String> {
+    let mut class = None;
+    let mut status = None;
+    while let Some(flag) = args.next() {
+        match flag.as_str() {
+            "--class" => {
+                if class.is_some() {
+                    return Err("duplicate --class".into());
+                }
+                class = Some(required(args, "--class")?);
+            }
+            "--status" => {
+                if status.is_some() {
+                    return Err("duplicate --status".into());
+                }
+                status = Some(required(args, "--status")?);
+            }
+            _ => return Err(format!("unexpected argument {flag}")),
+        }
+    }
+    Ok((class, status))
+}
+
+fn optional_facade_status(
+    args: &mut impl Iterator<Item = String>,
+) -> Result<Option<String>, String> {
+    match args.next() {
+        None => Ok(None),
+        Some(flag) if flag == "--status" => Ok(Some(required(args, "--status")?)),
+        Some(flag) => Err(format!("unexpected argument {flag}")),
+    }
+}
+
+fn semantic_facade_status_from_str(value: &str) -> Result<semantic_facade::FacadeStatus, String> {
+    match value {
+        "available" => Ok(semantic_facade::FacadeStatus::Available),
+        "partial" => Ok(semantic_facade::FacadeStatus::Partial),
+        "planned" => Ok(semantic_facade::FacadeStatus::Planned),
+        "deferred" => Ok(semantic_facade::FacadeStatus::Deferred),
+        _ => Err(format!("unknown semantic facade status {value}")),
+    }
+}
+
 fn reject_extra(args: &mut impl Iterator<Item = String>) -> Result<(), String> {
     if let Some(extra) = args.next() {
         Err(format!("unexpected argument {extra}"))
@@ -238,5 +386,5 @@ fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
 }
 
 fn usage() -> String {
-    "usage: wge-control-plane <create ROOT --spec SPEC --profile PROFILE | open ROOT | inspect-project ROOT | inspect-current ROOT | inspect-failures ROOT --candidate ID | inspect-artifact ROOT --candidate ID --artifact ID | propose-work ROOT --work-order ORDER --capabilities CAP,... | create-candidate/build-candidate ROOT --manifest MANIFEST --artifact-root ROOT | attach-evidence ROOT --candidate ID --request REQUEST | run-playtest ROOT --candidate ID --world-artifact ID | capture-evidence ROOT --candidate ID --world-artifact ID --output RELATIVE_DIR | validate/evaluate/verify-candidate ROOT --candidate ID | propose-repair ROOT --candidate ID | commit-candidate ROOT --candidate ID | rollback ROOT --snapshot ID | execute-work-order/apply-repair ROOT --work-order ORDER --result RESULT --capabilities CAP,... | profile PROFILE>".into()
+    "usage: wge-control-plane <capabilities [--class CLASS] [--status STATUS] | capability-explain ID | facade [--status STATUS] | facade-explain ID | style-validate PROFILE | style-lower PROFILE | project-plan DRAFT STYLE_PLAN | construction-validate PLAN STYLE_PLAN | create ROOT --spec SPEC --profile PROFILE | open ROOT | inspect-project ROOT | inspect-current ROOT | inspect-failures ROOT --candidate ID | inspect-artifact ROOT --candidate ID --artifact ID | propose-work ROOT --work-order ORDER --capabilities CAP,... | create-candidate/build-candidate ROOT --manifest MANIFEST --artifact-root ROOT | attach-evidence ROOT --candidate ID --request REQUEST | run-playtest ROOT --candidate ID --world-artifact ID | capture-evidence ROOT --candidate ID --world-artifact ID --output RELATIVE_DIR | validate/evaluate/verify-candidate ROOT --candidate ID | propose-repair ROOT --candidate ID | commit-candidate ROOT --candidate ID | rollback ROOT --snapshot ID | execute-work-order/apply-repair ROOT --work-order ORDER --result RESULT --capabilities CAP,... | profile PROFILE>".into()
 }

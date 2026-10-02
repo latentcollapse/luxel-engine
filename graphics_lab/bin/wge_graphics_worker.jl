@@ -51,11 +51,12 @@ function handle(payload::AbstractString)::String
         if operation == "validate_packet"
             Set(String(key) for key in keys(value)) == Set(("op", "packet")) ||
                 return failure("malformed_request", "validate_packet request fields are closed")
-            packet = validate_scene_packet(JSON3.write(value["packet"]))
+            packet = validate_scene_packet(value["packet"])
             summary = packet_summary(packet)
             return JSON3.write((
                 schema=WORKER_SCHEMA,
-                kind="packet_validated",
+                kind="packet_shape_checked",
+                authority="producer_only",
                 packet_sha256=summary.packet_sha256,
                 world_artifact_id=summary.world_artifact_id,
                 spatial_fields_sha256=summary.spatial_fields_sha256,
@@ -85,9 +86,19 @@ function handle(payload::AbstractString)::String
                 render=render,
             ))
         elseif operation == "render_packet"
-            Set(String(key) for key in keys(value)) == Set(("op", "packet")) ||
+            Set(String(key) for key in keys(value)) ==
+                Set(("op", "packet", "expected_packet_sha256")) ||
                 return failure("malformed_request", "render_packet request fields are closed")
-            packet = validate_scene_packet(JSON3.write(value["packet"]))
+            packet = validate_scene_packet(value["packet"])
+            expected_packet_sha256 = WGEGraphics._string(
+                value["expected_packet_sha256"],
+                "expected_packet_sha256",
+            )
+            expected_packet_sha256 == packet.packet_sha256 ||
+                return failure(
+                    "provenance",
+                    "Rust packet identity does not match the worker packet",
+                )
             frame = LavaAdapter.render_scene(packet)
             return JSON3.write((schema=WORKER_SCHEMA, kind="frame_rendered", frame=frame))
         elseif operation == "probe_capabilities"

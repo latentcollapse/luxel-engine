@@ -31,6 +31,13 @@ class AgentSurfaceTest(unittest.TestCase):
             self.assertIn("inspect_project", capabilities["operations"])
             self.assertIn("inspect_current", capabilities["operations"])
             self.assertIn("attach_evidence", capabilities["operations"])
+            self.assertIn("capability_list", capabilities["operations"])
+            self.assertIn("style_compile", capabilities["operations"])
+            self.assertIn("facade_list", capabilities["operations"])
+            self.assertIn("facade_explain", capabilities["operations"])
+            self.assertIn("project_plan", capabilities["operations"])
+            self.assertIn("construction_validate", capabilities["operations"])
+            self.assertEqual(capabilities["capability_registry"], "wge.capability-registry/v1")
             self.assertIn("build_candidate", capabilities["native_operations"])
             self.assertEqual(capabilities["deferred_operations"], [])
             self.assertIn("rigging", capabilities["deferred_gates"])
@@ -81,6 +88,72 @@ class AgentSurfaceTest(unittest.TestCase):
             self.assertEqual(result["status"], "ok")
             self.assertEqual(calls[0][1:], ["inspect-project", str(root)])
             self.assertTrue(all(";" not in part and "&&" not in part for part in calls[0]))
+
+    def test_capability_discovery_maps_to_rust_without_backend_reimplementation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "wge-control-plane"
+            binary.write_bytes(b"control-plane-test-double")
+            calls: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, '{"capabilities":[]}', "")
+
+            surface = LocalAgentSurface(SurfaceConfig(root, binary), runner=runner)
+            surface.dispatch("capability_list", {"class": "graphics", "status": "candidate"})
+            surface.dispatch("capability_explain", {"capability": "graphics.scene.packet/v1"})
+            surface.dispatch("facade_list", {"status": "partial"})
+            surface.dispatch("facade_explain", {"operation_id": "project.plan/v1"})
+            self.assertEqual(calls[0][1:], ["capabilities", "--class", "graphics", "--status", "candidate"])
+            self.assertEqual(calls[1][1:], ["capability-explain", "graphics.scene.packet/v1"])
+            self.assertEqual(calls[2][1:], ["facade", "--status", "partial"])
+            self.assertEqual(calls[3][1:], ["facade-explain", "project.plan/v1"])
+
+    def test_style_compile_maps_a_profile_file_to_rust_lowering(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "wge-control-plane"
+            binary.write_bytes(b"control-plane-test-double")
+            profile = root / "style.json"
+            profile.write_text("{}", encoding="utf-8")
+            calls: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, '{"status":"native"}', "")
+
+            surface = LocalAgentSurface(SurfaceConfig(root, binary), runner=runner)
+            surface.dispatch("style_compile", {"profile": "style.json"})
+            self.assertEqual(calls[0][1:], ["style-lower", str(profile)])
+
+    def test_project_plan_and_validation_map_typed_resources_to_rust(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            binary = root / "wge-control-plane"
+            binary.write_bytes(b"control-plane-test-double")
+            for name in ("draft.json", "style-plan.json", "plan.json"):
+                (root / name).write_text("{}", encoding="utf-8")
+            calls: list[list[str]] = []
+
+            def runner(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+                calls.append(command)
+                return subprocess.CompletedProcess(command, 0, '{"status":"native"}', "")
+
+            surface = LocalAgentSurface(SurfaceConfig(root, binary), runner=runner)
+            surface.dispatch("project_plan", {"draft": "draft.json", "style_plan": "style-plan.json"})
+            surface.dispatch(
+                "construction_validate",
+                {"plan": "plan.json", "style_plan": "style-plan.json"},
+            )
+            self.assertEqual(
+                calls[0][1:],
+                ["project-plan", str(root / "draft.json"), str(root / "style-plan.json")],
+            )
+            self.assertEqual(
+                calls[1][1:],
+                ["construction-validate", str(root / "plan.json"), str(root / "style-plan.json")],
+            )
 
     def test_work_order_mapping_is_a_real_native_argv(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -143,6 +216,14 @@ class AgentSurfaceTest(unittest.TestCase):
             self.assertTrue(all(tool["inputSchema"]["additionalProperties"] is False for tool in tools["result"]["tools"]))
             by_name = {tool["name"]: tool for tool in tools["result"]["tools"]}
             self.assertEqual(by_name["wge_commit_candidate"]["inputSchema"]["required"], ["root", "candidate"])
+            self.assertEqual(
+                by_name["wge_project_plan"]["inputSchema"]["required"],
+                ["root", "draft", "style_plan"],
+            )
+            self.assertEqual(
+                by_name["wge_facade_explain"]["inputSchema"]["required"],
+                ["operation_id"],
+            )
             self.assertIn("work_order", by_name["wge_apply_work_order"]["inputSchema"]["required"])
             self.assertIsNone(
                 surface.handle_mcp_json_rpc(

@@ -9,6 +9,21 @@ members = [
     "crates/reference_runtime",
     "crates/intake_repair_contract",
     "crates/certification_authority",
+    "crates/live_evidence_contract",
+    "crates/native_graphics_contract",
+    "crates/wge_control_plane",
+]
+# The default native gate intentionally excludes the compatibility worldspec,
+# semantic-kernel, and inspection-app lanes. They remain workspace members so
+# they can be audited explicitly, but cannot enter the native gate by accident.
+default-members = [
+    "crates/asset_contract",
+    "crates/gameplay_contract",
+    "crates/project_ledger",
+    "crates/reference_runtime",
+    "crates/intake_repair_contract",
+    "crates/certification_authority",
+    "crates/live_evidence_contract",
     "crates/native_graphics_contract",
     "crates/wge_control_plane",
 ]

@@ -54,6 +54,10 @@ class NativeCommands:
     julia: str | None = None
     asset: str | None = None
     ledger: str | None = None
+    graphics: str | None = None
+    terrain_lab: str | None = None
+    graphics_project: str | None = None
+    graphics_worker: str | None = None
 
 
 @dataclass(frozen=True)
@@ -88,11 +92,23 @@ RUNTIME_ARTIFACTS = (
     ("world-artifact", "world_artifact", "world_artifact.json"),
     ("traversal-evidence", "traversal_evidence", "traversal_evidence.json"),
     ("gameplay-binding", "gameplay_world_binding", "gameplay_world_binding.json"),
+    ("gameplay-kit", "gameplay_kit", "gameplay_kit.json"),
     ("gameplay-trace", "gameplay_trace", "gameplay_trace.json"),
     ("reference-capture", "reference_capture_ppm", "reference_capture.ppm"),
     ("visual-evidence", "visual_evidence", "visual_evidence.json"),
 )
 REPAIR_ARTIFACT_KINDS = {"repair_proposal", "repair_delta", "repair_record"}
+VISUAL_QUALITY_ARTIFACTS = (
+    ("graphics-scene-packet", "native_graphics_scene_packet", "graphics_scene_packet.json"),
+    ("graphics-frame-receipt", "native_graphics_frame_receipt", "graphics_frame_receipt.json"),
+    (
+        "graphics-renderer-attestation",
+        "native_graphics_renderer_attestation",
+        "graphics_renderer_attestation.json",
+    ),
+    ("native-capture", "native_rgba8_capture", "native_capture.rgba"),
+    ("visual-quality-evidence", "native_visual_quality_evidence", "visual_quality_evidence.json"),
+)
 
 
 def _run(
@@ -379,6 +395,55 @@ def _stage_candidate(
         if not source.is_file():
             raise OrchestrationError(f"additional candidate artifact is missing: {source}")
         _write_bytes(artifact_dir / f"{artifact_id}--{kind}", source.read_bytes())
+
+
+def _render_visual_quality(
+    commands: NativeCommands,
+    layout: Path,
+    output_dir: Path,
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+) -> tuple[dict[str, object], list[tuple[str, str, Path]]]:
+    required = {
+        "graphics": commands.graphics,
+        "julia": commands.julia,
+        "terrain_lab": commands.terrain_lab,
+        "graphics_project": commands.graphics_project,
+        "graphics_worker": commands.graphics_worker,
+    }
+    missing = [name for name, value in required.items() if not value]
+    if missing:
+        raise OrchestrationError(
+            "strict native visual-quality certification requires configured graphics commands: "
+            + ", ".join(missing)
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    result = _run(
+        [
+            str(commands.graphics),
+            "render-quality-layout",
+            str(layout),
+            str(commands.julia),
+            str(commands.terrain_lab),
+            str(commands.graphics_project),
+            str(commands.graphics_worker),
+            str(output_dir),
+        ],
+        runner=runner,
+    )
+    summary = _stdout_json(result, "render-quality-layout")
+    if not isinstance(summary, dict):
+        raise OrchestrationError("native visual-quality renderer returned a malformed summary")
+    outcome = summary.get("outcome")
+    if outcome not in {"good", "bad", "indeterminate", "failed"}:
+        raise OrchestrationError(f"native visual-quality renderer returned unknown outcome {outcome!r}")
+    artifacts = [
+        (artifact_id, kind, output_dir / filename)
+        for artifact_id, kind, filename in VISUAL_QUALITY_ARTIFACTS
+    ]
+    for _artifact_id, _kind, path in artifacts:
+        if not path.is_file():
+            raise OrchestrationError(f"native visual-quality renderer omitted {path.name}")
+    return summary, artifacts
 
 
 def _candidate_path(
@@ -693,11 +758,34 @@ def run_smoke(
     )
     _run([commands.runtime, "verify", "--bundle", str(current_dir)], runner=runner)
 
-    deferred_gate_ids = (
-        ["unity_import", "unity_build", "unity_playthrough"]
-        if profile == "native-mvp"
-        else ["rigging", "unity_import", "unity_build", "unity_playthrough"]
+    # Bind the failing candidate to the same native visual bundle as the
+    # repaired candidate.  The repair contract intentionally represents
+    # byte-for-byte changes, so verification artifacts must exist on both
+    # sides of the before/after comparison rather than appearing only after
+    # the repair.
+    _before_quality_summary, before_quality_artifacts = _render_visual_quality(
+        commands,
+        source_dir / "before-layout.json",
+        before_dir / "native-quality",
+        runner,
     )
+
+    quality_summary, quality_artifacts = _render_visual_quality(
+        commands,
+        source_dir / "layout.json",
+        current_dir / "native-quality",
+        runner,
+    )
+    if (
+        quality_summary.get("world_artifact_id") != current_report.get("world_artifact_id")
+        or quality_summary.get("world_artifact_sha256")
+        != current_report.get("world_artifact_sha256")
+    ):
+        raise OrchestrationError(
+            "native visual-quality packet is bound to a different world artifact than the runtime candidate"
+        )
+
+    deferred_gate_ids = [] if profile == "native-mvp" else ["rigging"]
     project_manifest = {
         "schema_version": "wge.project-manifest/v1",
         "project_id": project_id,
@@ -719,7 +807,7 @@ def run_smoke(
         before_dir,
         source_dir / "before-layout.json",
         before_artifact_dir,
-        extra_artifacts,
+        [*extra_artifacts, *before_quality_artifacts],
     )
     _stage_candidate(
         source_dir,
@@ -729,7 +817,7 @@ def run_smoke(
         current_dir,
         source_dir / "layout.json",
         current_artifact_dir,
-        extra_artifacts,
+        [*extra_artifacts, *quality_artifacts],
     )
     for artifact_dir in (before_artifact_dir, current_artifact_dir):
         _write_bytes(
@@ -921,6 +1009,7 @@ def run_smoke(
         "traversal_artifact_id": current_runtime["traversal"],
         "capture_artifact_id": current_runtime["capture"],
         "visual_evidence_artifact_id": current_runtime["visual"],
+        "gameplay_kit_artifact_id": "gameplay-kit",
         "gameplay_binding_artifact_id": current_runtime["gameplay"],
     }
     current_receipts.append(
@@ -977,15 +1066,39 @@ def run_smoke(
         runner,
     )
     current_receipts.append(current_visual)
+    quality_payload = {
+        "world_artifact_id": "world-artifact",
+        "packet_artifact_id": "graphics-scene-packet",
+        "frame_receipt_artifact_id": "graphics-frame-receipt",
+        "renderer_attestation_artifact_id": "graphics-renderer-attestation",
+        "capture_artifact_id": "native-capture",
+        "visual_quality_evidence_artifact_id": "visual-quality-evidence",
+    }
+    quality_status = {
+        "good": "pass",
+        "bad": "fail",
+        "indeterminate": "indeterminate",
+        "failed": "fail",
+    }[quality_summary["outcome"]]
+    current_receipts.append(
+        _seal_receipt(
+            commands,
+            output_dir,
+            current_candidate,
+            descriptors,
+            "visual_quality",
+            quality_status,
+            list(quality_payload.values()),
+            quality_payload,
+            receipt_producer,
+            runner,
+        )
+    )
     for gate_id in deferred_gate_ids:
         deferred_payload = {
             "reason_code": "deferred_by_scope",
             "deferral_scope": gate_id,
-            "detail": (
-                "This native MVP scope explicitly defers Unity integration."
-                if profile == "native-mvp"
-                else "This engine-neutral scope explicitly defers character rigging and Unity integration."
-            ),
+            "detail": "This engine-neutral scope explicitly defers character rigging.",
         }
         current_receipts.append(
             _seal_receipt(
@@ -1078,7 +1191,7 @@ def run_smoke(
         current_dir,
         applied_layout_path,
         current_artifact_dir,
-        extra_artifacts,
+        [*extra_artifacts, *quality_artifacts],
     )
     _write_bytes(current_artifact_dir / "project-manifest--project_manifest", manifest_path.read_bytes())
     previous_current_sha256 = current_candidate["candidate_sha256"]
@@ -1264,6 +1377,11 @@ def run_smoke(
         ],
         "before_visual_status": before_report.get("visual_status"),
         "current_visual_status": current_report.get("visual_status"),
+        "visual_quality_outcome": quality_summary.get("outcome"),
+        "visual_quality_profile": quality_summary.get("render_profile"),
+        "visual_quality_packet_sha256": quality_summary.get("packet_sha256"),
+        "visual_quality_capture_sha256": quality_summary.get("capture_sha256"),
+        "visual_quality_evidence_sha256": quality_summary.get("evidence_sha256"),
         "bad_glb_sha256": _digest((output_dir / "negative_controls" / bad_glb.name).read_bytes()) if bad_glb is not None else None,
         "certification_profile": profile,
         "certification_status": report.get("status"),

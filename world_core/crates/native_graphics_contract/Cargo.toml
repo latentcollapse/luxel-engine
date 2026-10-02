@@ -13,6 +13,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 sha2 = "0.10"
 wge-reference-runtime = { path = "../reference_runtime" }
+wge-live-evidence-contract = { path = "../live_evidence_contract" }
+wge-asset-contract = { path = "../asset_contract" }
+wge-project-ledger = { path = "../project_ledger" }
 
 [[bin]]
 name = "wge-native-graphics-contract"

@@ -221,9 +221,9 @@ The harness must be able to launch fresh builds, send scripted input, capture
 screenshots/video, collect logs and profiler data, evaluate the run, and
 produce source-level repair proposals.
 
-Bevy remains a valuable reference/world-inspection renderer. It is not enough
-to certify the Unity or UE runtime; imported target-runtime evidence is
-mandatory.
+Bevy remains a valuable reference/world-inspection renderer. The native WGE
+runtime is the delivery and playtest target for this roadmap; its typed build,
+runtime, and evidence path is mandatory.
 
 ## Quality bar
 
@@ -271,8 +271,9 @@ gates, and identify the semantic source or artifact that must change.
 ### Phase 1 — A genuinely playable WGE world
 
 Connect the semantic kernel to the actual world build path. Make collision and
-navigation acceptance hard requirements, finish spawns and objectives, export to
-the chosen Unity target, and prove traversal with an automated controller.
+navigation acceptance hard requirements, finish spawns and objectives, build
+through the native WGE runtime, and prove traversal with an automated
+controller.
 
 This is the immediate continuation of the current WGE MVP work.
 
@@ -292,10 +293,10 @@ reach the objective, and finish successfully.
 
 Take one concept-art character and one environment kit through model creation,
 materials, rigging, animation, LOD, collision, lighting, effects, sound,
-engine import, and runtime capture.
+native import/build, and runtime capture.
 
-Exit condition: the polished slice passes technical gates and reference
-comparison without editor-only hand repair.
+Exit condition: the polished slice passes technical gates and native reference
+quality checks without editor-only hand repair.
 
 ### Phase 4 — Closed-loop critique and repair
 

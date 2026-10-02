@@ -1,10 +1,10 @@
 # WGE Lava Graphics Audit
 
-Status: audit complete; supervised native Lava adapter checkpoint green through
-adapter v5, typed clearcoat lowering, composed-world coverage, and independent
-capture promotion.
+Status: audit closed; supervised native Lava adapter-v6 checkpoint green through
+typed clearcoat/material lowering, composed-world coverage, independent capture
+promotion, and adversarial Rust↔Julia/GPU verification.
 
-Date: 2026-09-28
+Date: 2026-09-29
 
 Audited WGE checkpoint: `10c3823` (`lift native foliage material readability`)
 
@@ -153,7 +153,7 @@ runtime, and Bevy is an inspection renderer rather than semantic authority.
 | Reference runtime | deterministic Rust runtime can run the current world/gameplay checks | EXISTS IN WGE | Keep as a semantic oracle. A Lava frame cannot make a runtime failure pass. |
 | Python ownership | Python is transport/orchestration glue; no new semantic behavior is authorized | EXISTS IN WGE | Graphics protocol must be Rust-owned/Julia-owned typed data; Python remains out of semantic authority. |
 | Bevy canonical leakage | viewer code has explicit native separation and comments rejecting Bevy as authoring authority | PARTIAL | Audit every new packet and receipt for Bevy-specific types, shader assumptions, or asset paths. |
-| Target-engine export | optional adapters exist, but Unity/engine comparison is intentionally deferred | DO NOT NEED | This goal is the native WGE graphics path, not engine parity or Unity benchmarking. |
+| Target-engine export | external delivery adapters are outside the native graphics path | DO NOT NEED | This goal is the native WGE graphics path, not external-engine parity. |
 | Rigging/skinning/retargeting | intentionally deferred by the current certification goal | DO NOT NEED | Keep the supplied bad GLB as a permanent negative control in the asset/receipt suite. |
 
 ## What Lava gives WGE, and what it does not
@@ -229,7 +229,7 @@ The audit record now has an executable native follow-up. It still does not
 claim:
 
 - high-end game-renderer quality or broad material/lighting breadth;
-- engine parity, Unity integration, rigging, or post-MVP asset generation;
+- engine parity, rigging, or post-MVP asset generation;
 - a Bevy representation as canonical graphics state;
 - that a producer-reported measurement is authoritative without Rust
   remeasurement.
@@ -317,15 +317,19 @@ frame receipt only after capture-backed validation. A clean worker restart has
 been exercised; the same `riverwatch` packet reproduced byte-identical RGBA8
 capture bytes and identical Rust measurements.
 
-The supervisor also has a bounded response deadline with a separate startup
-handshake budget. A stalled worker is now a `worker_timeout` failure that clears
+The supervisor applies a bounded response deadline to the ready handshake and
+to every request; the same startup budget is retained when a worker is
+reconstructed. A stalled worker is now a `worker_timeout` failure that clears
 validated capability state; the worker must be torn down and restarted before a
 new frame can be promoted. The adversarial timeout/recovery test uses a worker
 that emits a valid ready message and then stops responding, proving that a
-blocked graphics process cannot silently become an unbounded Rust call. These
-contract and shader-basis corrections are recorded as adapter revision
-`wge.lava-adapter/v5`; v4 benchmark receipts remain historical evidence, not
-current renderer identity.
+blocked graphics process cannot silently become an unbounded Rust call. The
+mandatory capability probe absorbs device initialization before promotion, but
+the first frame may still pay lazy scene-pipeline compilation under the same
+bounded response deadline. These contract and shader-basis corrections are
+recorded as adapter revision
+`wge.lava-adapter/v6`; v4/v5 benchmark receipts remain historical evidence,
+not current renderer identity.
 
 The native visual gate is authority-owned rather than appearance-shaped: Rust
 recomputes luminance variation, RGB color diversity, and exact semantic
@@ -343,5 +347,5 @@ authority boundary; it is recorded in `WGE_NATIVE_SHOWCASE.md` and is not
 claimed as imported hero-asset parity. Cascades, contact/production soft
 shadows, prefiltered IBL, production foliage density/alpha/LOD, particles,
 water, post-processing, and asset-rich quality work remain downstream of this
-certified substrate. No rigging, Unity, Bevy canonicalization, or broad
+certified substrate. No rigging, Bevy canonicalization, or broad
 text-to-3D work was used to close this checkpoint.

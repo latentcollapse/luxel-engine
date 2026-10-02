@@ -42,7 +42,8 @@ The relevant architectural statements are in README.md:
 - Compiler and pipeline: currently Python.
 - Contracts and identity: Rust.
 - Solvers: Julia.
-- Backends: Godot, Unreal, Unity, and Bevy.
+- Legacy external-engine adapters and Bevy inspection remain compatibility
+  surfaces; the native WGE runtime is the current delivery path.
 
 The production choke point is pipeline/build_zone.py. It imports and orders
 most of the pipeline, invokes Julia workers, invokes the Rust worldspec
@@ -74,7 +75,7 @@ The target boundary is deliberately strict.
 | Terrain arrays, erosion, hydrology, ecology, spatial solves | Julia | Launch workers and encode results |
 | Numerical result schemas and artifact manifests | Rust | Serialize provider output |
 | Blender, Gaea, ComfyUI, DEM/network, image codecs | External tool plus thin Python adapter | Own the adapter and raw evidence |
-| Godot, Unreal, Unity, Bevy process integration | Target engine plus adapter | Launch, capture, package, and collect logs |
+| External-engine and Bevy process integration | Target adapter or inspection tool | Launch, capture, package, and collect raw logs; never promote native evidence |
 | Developer audits and exploratory metrics | Python is acceptable | Must not promote runtime artifacts |
 
 A useful test is: if deleting the Python module would allow a model to produce
@@ -220,7 +221,6 @@ threshold, gate identity, and final receipt.
 | pipeline/capture_bevy.py | 283 | Launches Bevy and captures runtime evidence | Fence as adapter | Bevy capture wrapper with Rust receipt | P3 |
 | pipeline/zone_assets_to_godot.py | 125 | Converts planned assets into Godot resources | Fence as adapter | Godot adapter; Rust supplies typed asset plan | P3 |
 | pipeline/zone_spec_to_godot.py | 130 | Converts ZoneSpec into Godot scene/runtime artifacts | Fence as adapter | Godot adapter; Rust supplies canonical spec | P3 |
-| pipeline/zone_to_unity.py | 167 | Emits Unity import/manifest artifacts | Fence as adapter | Unity adapter; Rust supplies canonical manifest | P3 |
 | pipeline/zone_to_unreal.py | 129 | Emits Unreal import/manifest artifacts | Fence as adapter | Unreal adapter; Rust supplies canonical manifest | P3 |
 | pipeline/unreal_artifacts.py | 62 | Packages Unreal artifacts | Fence as adapter | Unreal packaging adapter | P3 |
 | pipeline/tool_provenance.py | 43 | Records tool versions and hashes | Reclaim | Rust provenance/receipt records; Python may collect raw versions | P1 |

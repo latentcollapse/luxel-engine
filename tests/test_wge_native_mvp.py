@@ -92,6 +92,8 @@ def _commands() -> NativeMvpCommands:
             "wge-project-ledger",
             "-p",
             "wge-asset-contract",
+            "-p",
+            "wge-native-graphics-contract",
         ],
         cwd=ROOT / "world_core",
         text=True,
@@ -107,6 +109,10 @@ def _commands() -> NativeMvpCommands:
         str(TARGET / "wge-project-ledger"),
         "julia",
         str(TARGET / "wge-asset-contract"),
+        str(TARGET / "wge-native-graphics-contract"),
+        str(ROOT / "terrain_lab"),
+        str(ROOT / "graphics_lab"),
+        str(ROOT / "graphics_lab" / "bin" / "wge_graphics_worker.jl"),
     )
 
 
@@ -382,6 +388,9 @@ def _fresh_native_input(root: Path) -> Path:
         "gameplay-binding",
         "reference-capture",
         "visual-evidence",
+        "graphics-scene-packet",
+        "graphics-frame-receipt",
+        "visual-quality-evidence",
     ]
     failure_evidence = {
         "validator_id": "wge.validator.visual-reference/v1",
@@ -730,12 +739,16 @@ class NativeMvpIntegrationTest(unittest.TestCase):
             report = first.certification_report
             self.assertEqual(report["status"], "native_mvp_certified")
             self.assertEqual(report["project_id"], "cedar-saddle-native-mvp")
-            self.assertEqual(set(report["deferred_gates"]), {"unity_import", "unity_build", "unity_playthrough"})
-            # The report retains the ten promotable/deferred receipts; the
+            self.assertEqual(set(report["deferred_gates"]), set())
+            # The report retains the eight promotable receipts; the
             # rejected before-repair visual receipt remains in the request as
             # diagnostic evidence and is intentionally not counted as a
             # promoted receipt.
-            self.assertEqual(len(report["receipts"]), 10)
+            self.assertEqual(len(report["receipts"]), 8)
+            quality_receipt = next(
+                item for item in report["receipts"] if item["gate_id"] == "visual_quality"
+            )
+            self.assertEqual(quality_receipt["status"], "pass")
             rigging_decision = next(item for item in report["receipts"] if item["gate_id"] == "rigging")
             self.assertEqual(
                 rigging_decision["validator_id"],

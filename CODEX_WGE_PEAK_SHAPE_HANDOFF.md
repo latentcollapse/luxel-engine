@@ -1,8 +1,8 @@
 # WGE Peak-Shape Handoff
 
 Date: 2026-09-28
-Scope: WGE engine quality and model-native authoring; Unity execution and
-comparison deferred.
+Scope: WGE engine quality and model-native authoring through the native WGE
+runtime.
 
 ## Current truth
 
@@ -22,9 +22,9 @@ promotable receipt and recompiles the packaged spec before promotion.
 
 The supplied GLB remains a permanent negative control and is rejected. The
 known-good rigging input is a structural/provider control; arbitrary
-mesh-to-character generation, production-quality skinning/retargeting, and
-Unity import/build/playthrough remain explicit scope gates rather than implied
-passes. No Unity editor or Unity+MCP benchmark is required for this checkpoint.
+mesh-to-character generation and production-quality skinning/retargeting remain
+explicit scope gates rather than implied passes. External-editor/runtime
+comparison is not part of the WGE certification scope.
 
 ## Verified failure points
 
@@ -121,8 +121,8 @@ future slices require them.
    before and after the rebuild.
 5. Deterministic visual evidence, snapshot manifests, safe archive reopening,
    and independent authority revalidation are acceptance gates.
-6. Unity import/build/playthrough and conventional Unity comparison remain
-   deferred; do not start them as part of this checkpoint.
+6. Rigging-dependent evidence remains explicitly deferred until the character
+   research and materialization policy are complete.
 
 ## External decisions / blockers
 
@@ -130,9 +130,8 @@ future slices require them.
 - A production-quality character provider and explicit skinning/retargeting
   acceptance policy are still needed for a future character-content slice. The
   supplied cube-like GLB cannot satisfy that requirement.
-- Unity licensing and a connected UnityMCP Editor are only required if the
-  deferred target-runtime phase is later resumed.
-- Do not fabricate Unity or subjective visual-quality benchmark numbers.
+- No external editor, runtime, or comparison harness is required for this
+  checkpoint. Do not fabricate subjective visual-quality numbers.
 
 ## Evidence at hand
 
@@ -146,4 +145,4 @@ future slices require them.
   --all-targets -- -D warnings`: passed.
 - `julia --project=. test/runtests.jl`: passed, 8/8 numerical/hydrology checks.
 - Kepler read-only adversarial audit: green; no remaining blocker in the native
-  MVP scope. Unity was not run.
+  MVP scope.

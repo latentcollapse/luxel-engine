@@ -5,19 +5,24 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use wge_certification_authority::schema::{
     AssetReceiptPayload, AssetUse, DeferredReceiptPayload, GameplayReceiptPayload,
-    RepairReceiptPayload, VisualReceiptPayload, WorldReceiptPayload,
+    NativeVisualQualityReceiptPayload, RepairReceiptPayload, VisualReceiptPayload,
+    WorldReceiptPayload,
 };
 use wge_certification_authority::{
-    ArtifactBytes, CandidateContext, DEFERRED_GATES, EvidenceBinding, ReceiptEnvelope,
-    ReceiptStatus, SUPPLIED_BAD_GLB_SHA256, ValidatorRegistry, candidate_identity,
-    candidate_identity_bytes, engine_neutral_gate_profile, native_repair_evidence_reference,
-    native_repair_receipt_bytes, repair_validator_registry, sha256_prefixed, validate_receipt,
-    validate_request,
+    ArtifactBytes, CandidateContext, DEFERRED_GATES, EvidenceBinding, GateDisposition,
+    NATIVE_GRAPHICS_FRAME_RECEIPT_KIND, NATIVE_GRAPHICS_PACKET_KIND,
+    NATIVE_GRAPHICS_RENDERER_ATTESTATION_KIND, NATIVE_RGBA8_CAPTURE_KIND,
+    NATIVE_VISUAL_QUALITY_EVIDENCE_KIND, NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA, ReceiptEnvelope,
+    ReceiptStatus, SUPPLIED_BAD_GLB_SHA256, ValidationRequest, ValidatorRegistry,
+    candidate_identity, candidate_identity_bytes, engine_neutral_gate_profile,
+    native_mvp_gate_profile, native_repair_evidence_reference, native_repair_receipt_bytes,
+    repair_validator_registry, sha256_prefixed, validate_receipt, validate_request,
 };
 use wge_intake_repair_contract as intake;
+use wge_native_graphics_contract as graphics;
 use wge_reference_runtime::{GameplayWorldBinding, WorldBuild, build_from_layout_path};
 
 const WORLD_ID: &str = "runtime-world";
@@ -26,7 +31,13 @@ const LAYOUT_ID: &str = "authored-layout";
 const CAPTURE_ID: &str = "reference-capture";
 const VISUAL_ID: &str = "visual-evidence";
 const GAMEPLAY_ID: &str = "gameplay-binding";
+const GAMEPLAY_KIT_ID: &str = "gameplay-kit";
 const MANIFEST_ID: &str = "project-manifest";
+const NATIVE_PACKET_ID: &str = "native-graphics-packet";
+const NATIVE_FRAME_RECEIPT_ID: &str = "native-graphics-frame-receipt";
+const NATIVE_ATTESTATION_ID: &str = "native-graphics-renderer-attestation";
+const NATIVE_CAPTURE_ID: &str = "native-rgba8-capture";
+const NATIVE_QUALITY_ID: &str = "native-visual-quality-evidence";
 
 static RIVERWATCH: OnceLock<WorldBuild> = OnceLock::new();
 
@@ -112,12 +123,230 @@ fn runtime_candidate(snapshot_id: &str) -> CandidateContext {
     );
     put(
         &mut candidate,
+        GAMEPLAY_KIT_ID,
+        "gameplay_kit",
+        json_bytes(&build.gameplay_kit),
+    );
+    put(
+        &mut candidate,
         MANIFEST_ID,
         "project_manifest",
         b"wge runtime authority integration test candidate v1\n".to_vec(),
     );
     refresh_candidate_identity(&mut candidate);
     candidate
+}
+
+fn renderer_attestation(
+    frame: &graphics::GraphicsFrameReceipt,
+) -> graphics::GraphicsRendererAttestation {
+    let ready = graphics::GraphicsReady {
+        schema_version: graphics::READY_SCHEMA.into(),
+        backend_id: graphics::LAVA_BACKEND_ID.into(),
+        adapter_revision: graphics::ADAPTER_REVISION.into(),
+        lava_revision: graphics::LAVA_REVISION.into(),
+        julia_version: "1.12.6-test".into(),
+        vulkan_api_version: "1.3-test".into(),
+        device_name: "runtime-authority-test-device".into(),
+        device_uuid: frame.body.device_uuid.clone(),
+        features: graphics::GraphicsFeatures {
+            offscreen_raster: true,
+            depth_attachment: true,
+            texture_sampling: true,
+            readback: true,
+            hardware_ray_tracing: true,
+            gpu_timestamps: true,
+        },
+    };
+    let worker_ready_message = json!({
+        "schema": graphics::WORKER_SCHEMA,
+        "kind": "ready",
+        "script_sha256": &frame.body.worker_script_sha256,
+        "lava_revision": graphics::LAVA_REVISION,
+        "adapter_revision": graphics::ADAPTER_REVISION,
+    });
+    let source_digests = BTreeMap::from([
+        (
+            "graphics_contract".into(),
+            graphics::sha256_prefixed(b"graphics contract"),
+        ),
+        (
+            "lava_adapter".into(),
+            graphics::sha256_prefixed(b"lava adapter"),
+        ),
+        ("manifest".into(), graphics::sha256_prefixed(b"manifest")),
+        ("project".into(), graphics::sha256_prefixed(b"project")),
+        (
+            "worker_script".into(),
+            frame.body.worker_script_sha256.clone(),
+        ),
+    ]);
+    let source_identity_sha256 = graphics::sha256_prefixed(
+        &graphics::canonical_json(&source_digests).expect("source digest manifest serializes"),
+    );
+    let renderer_identity_sha256 = graphics::sha256_prefixed(
+        &graphics::canonical_json(&json!({
+            "capabilities": &ready,
+            "worker_ready": &worker_ready_message,
+            "sources": &source_digests,
+        }))
+        .expect("renderer identity serializes"),
+    );
+    graphics::seal_renderer_attestation(graphics::GraphicsRendererAttestationBody {
+        schema_version: graphics::RENDERER_ATTESTATION_SCHEMA.into(),
+        backend_id: graphics::LAVA_BACKEND_ID.into(),
+        adapter_revision: graphics::ADAPTER_REVISION.into(),
+        lava_revision: graphics::LAVA_REVISION.into(),
+        worker_ready_message,
+        ready,
+        source_digests,
+        source_identity_sha256,
+        renderer_identity_sha256,
+    })
+    .expect("synthetic renderer attestation validates")
+}
+
+fn add_native_quality_artifacts(candidate: &mut CandidateContext) {
+    let lowered = graphics::lower_reference_world(&runtime_build().world)
+        .expect("runtime world lowers to a native graphics packet");
+    let mut packet_body = lowered.body;
+    packet_body.overlays.clear();
+    let packet = graphics::seal_scene_packet(packet_body)
+        .expect("native packet fixture is valid after removing overlays");
+    let width = packet.body.capture.width_px as usize;
+    let height = packet.body.capture.height_px as usize;
+    let palette = [
+        [34u8, 63u8, 39u8],
+        [77, 89, 45],
+        [121, 112, 67],
+        [47, 92, 105],
+        [91, 58, 48],
+        [106, 119, 81],
+        [55, 70, 105],
+        [125, 87, 59],
+    ];
+    let mut capture = Vec::with_capacity(width * height * 4);
+    for y in 0..height {
+        for x in 0..width {
+            let tile = ((x / 10) + 3 * (y / 10)) % palette.len();
+            let ridge = (x % 5 < 2) ^ (y % 5 < 2);
+            let mut rgb = palette[tile];
+            for channel in &mut rgb {
+                *channel = if ridge {
+                    channel.saturating_add(16)
+                } else {
+                    channel.saturating_sub(9)
+                };
+            }
+            capture.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+        }
+    }
+    let measurements = graphics::measure_frame_capture(&packet, &capture)
+        .expect("structured fixture capture satisfies the native minimum measurements");
+    let frame_body = graphics::GraphicsFrameReceiptBody {
+        schema_version: graphics::FRAME_RECEIPT_SCHEMA.into(),
+        packet_sha256: packet.packet_sha256.clone(),
+        capture_id: packet.body.capture.capture_id.clone(),
+        backend_id: graphics::LAVA_BACKEND_ID.into(),
+        adapter_revision: graphics::ADAPTER_REVISION.into(),
+        lava_revision: graphics::LAVA_REVISION.into(),
+        device_uuid: "runtime-authority-test-device".into(),
+        worker_script_sha256: graphics::sha256_prefixed(b"test worker"),
+        renderer_identity_sha256: graphics::sha256_prefixed(b"test renderer"),
+        status: graphics::FrameStatus::Passed,
+        format: packet.body.capture.format,
+        width_px: packet.body.capture.width_px,
+        height_px: packet.body.capture.height_px,
+        capture_sha256: Some(graphics::sha256_prefixed(&capture)),
+        measurements,
+        telemetry: graphics::GraphicsTelemetry {
+            upload_bytes: 0,
+            readback_bytes: capture.len(),
+            draw_calls: 1,
+            dispatch_calls: 0,
+            pipeline_compilations: 0,
+            instance_count: 0,
+            visible_instance_count: 0,
+            culled_instance_count: 0,
+            background_visible_instance_count: 0,
+            background_culled_instance_count: 0,
+            landmark_visible_instance_count: 0,
+            landmark_culled_instance_count: 0,
+            gameplay_critical_visible_instance_count: 0,
+            gameplay_critical_culled_instance_count: 0,
+            terrain_vertex_count: packet.body.terrain.resolution.pow(2),
+            mesh_vertex_count: 0,
+            frame_time_us: 1,
+            gpu_frame_time_us: None,
+            pass_timings: graphics::GraphicsPassTimings {
+                prepare_us: 0,
+                scene_raster_us: 0,
+                resolve_us: 0,
+                overlay_us: 0,
+                flush_readback_us: 0,
+                gpu_prepare_us: None,
+                gpu_scene_raster_us: None,
+                gpu_resolve_us: None,
+                gpu_overlay_us: None,
+            },
+        },
+        detail: "synthetic authority test capture".into(),
+    };
+    let mut frame = graphics::GraphicsFrameReceipt {
+        receipt_sha256: graphics::sha256_prefixed(
+            &graphics::canonical_json(&frame_body).expect("frame receipt serializes"),
+        ),
+        body: frame_body,
+    };
+    let provisional_attestation = renderer_attestation(&frame);
+    frame.body.renderer_identity_sha256 = provisional_attestation.body.renderer_identity_sha256;
+    frame.receipt_sha256 = graphics::sha256_prefixed(
+        &graphics::canonical_json(&frame.body).expect("frame receipt serializes"),
+    );
+    let attestation = renderer_attestation(&frame);
+    let quality = graphics::assess_visual_quality(
+        &packet,
+        &frame,
+        &capture,
+        &graphics::VisualQualityProfile::terrain_reference_v1(
+            packet.body.capture.width_px,
+            packet.body.capture.height_px,
+        ),
+    );
+    assert_eq!(quality.body.outcome, graphics::QualityOutcome::Good);
+    graphics::validate_visual_quality_evidence(&quality, &packet, &frame, &capture)
+        .expect("fixture visual-quality evidence revalidates");
+
+    put(
+        candidate,
+        NATIVE_PACKET_ID,
+        NATIVE_GRAPHICS_PACKET_KIND,
+        json_bytes(&packet),
+    );
+    put(
+        candidate,
+        NATIVE_FRAME_RECEIPT_ID,
+        NATIVE_GRAPHICS_FRAME_RECEIPT_KIND,
+        json_bytes(&frame),
+    );
+    put(
+        candidate,
+        NATIVE_ATTESTATION_ID,
+        NATIVE_GRAPHICS_RENDERER_ATTESTATION_KIND,
+        json_bytes(&attestation),
+    );
+    put(
+        candidate,
+        NATIVE_CAPTURE_ID,
+        NATIVE_RGBA8_CAPTURE_KIND,
+        capture,
+    );
+    put(
+        candidate,
+        NATIVE_QUALITY_ID,
+        NATIVE_VISUAL_QUALITY_EVIDENCE_KIND,
+        json_bytes(&quality),
+    );
 }
 
 fn refresh_candidate_identity(candidate: &mut CandidateContext) {
@@ -210,18 +439,57 @@ fn visual_receipt(candidate: &CandidateContext, registry: &ValidatorRegistry) ->
     )
 }
 
+fn visual_quality_receipt(
+    candidate: &CandidateContext,
+    registry: &ValidatorRegistry,
+) -> ReceiptEnvelope {
+    let (_, receipt_schema) = gate_fields(registry, "visual_quality");
+    assert_eq!(receipt_schema, NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA);
+    receipt(
+        candidate,
+        registry,
+        "visual_quality",
+        ReceiptStatus::Pass,
+        &[
+            WORLD_ID,
+            NATIVE_PACKET_ID,
+            NATIVE_FRAME_RECEIPT_ID,
+            NATIVE_ATTESTATION_ID,
+            NATIVE_CAPTURE_ID,
+            NATIVE_QUALITY_ID,
+        ],
+        serde_json::to_value(NativeVisualQualityReceiptPayload {
+            world_artifact_id: WORLD_ID.into(),
+            packet_artifact_id: NATIVE_PACKET_ID.into(),
+            frame_receipt_artifact_id: NATIVE_FRAME_RECEIPT_ID.into(),
+            renderer_attestation_artifact_id: NATIVE_ATTESTATION_ID.into(),
+            capture_artifact_id: NATIVE_CAPTURE_ID.into(),
+            visual_quality_evidence_artifact_id: NATIVE_QUALITY_ID.into(),
+        })
+        .unwrap(),
+    )
+}
+
 fn gameplay_receipt(candidate: &CandidateContext, registry: &ValidatorRegistry) -> ReceiptEnvelope {
     receipt(
         candidate,
         registry,
         "gameplay",
         ReceiptStatus::Pass,
-        &[WORLD_ID, TRAVERSAL_ID, CAPTURE_ID, VISUAL_ID, GAMEPLAY_ID],
+        &[
+            WORLD_ID,
+            TRAVERSAL_ID,
+            CAPTURE_ID,
+            VISUAL_ID,
+            GAMEPLAY_KIT_ID,
+            GAMEPLAY_ID,
+        ],
         serde_json::to_value(GameplayReceiptPayload {
             world_artifact_id: WORLD_ID.into(),
             traversal_artifact_id: TRAVERSAL_ID.into(),
             capture_artifact_id: CAPTURE_ID.into(),
             visual_evidence_artifact_id: VISUAL_ID.into(),
+            gameplay_kit_artifact_id: GAMEPLAY_KIT_ID.into(),
             gameplay_binding_artifact_id: GAMEPLAY_ID.into(),
         })
         .unwrap(),
@@ -577,6 +845,172 @@ fn status_only_receipt_stays_rejected_after_outer_identity_is_resealed() {
 }
 
 #[test]
+fn registered_validator_id_requires_its_exact_receipt_schema() {
+    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let candidate = runtime_candidate("registered-id-schema-binding");
+    let valid = world_receipt(&candidate, &registry);
+    assert_eq!(
+        validate_receipt(&valid, &candidate, &registry)
+            .unwrap()
+            .status,
+        ReceiptStatus::Pass
+    );
+
+    let mut unknown_id = valid.clone();
+    unknown_id.validator_id = "wge.validator.world-traversal/v999".into();
+    unknown_id.seal().unwrap();
+    let error = validate_receipt(&unknown_id, &candidate, &registry).unwrap_err();
+    assert!(error.detail.contains("not registered"), "{error}");
+
+    let mut wrong_schema = valid;
+    wrong_schema.receipt_schema = "wge.world-receipt/v999".into();
+    wrong_schema.seal().unwrap();
+    let error = validate_receipt(&wrong_schema, &candidate, &registry).unwrap_err();
+    assert!(error.detail.contains("another gate or schema"), "{error}");
+}
+
+#[test]
+fn pass_shaped_payload_cannot_replace_typed_world_evidence() {
+    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let candidate = runtime_candidate("pass-shaped-payload");
+    let mut forged = world_receipt(&candidate, &registry);
+    forged.payload = serde_json::json!({
+        "status": "pass",
+        "producer": "wge-certification-authority",
+    });
+    forged.seal().unwrap();
+
+    let error = validate_receipt(&forged, &candidate, &registry).unwrap_err();
+    assert!(error.detail.contains("world receipt payload"), "{error}");
+}
+
+#[test]
+fn unknown_omitted_extra_and_duplicate_evidence_bindings_are_rejected() {
+    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let candidate = runtime_candidate("evidence-set-adversarial-controls");
+    let valid = world_receipt(&candidate, &registry);
+    assert_eq!(
+        validate_receipt(&valid, &candidate, &registry)
+            .unwrap()
+            .status,
+        ReceiptStatus::Pass
+    );
+
+    let mut unknown = valid.clone();
+    unknown.evidence.push(EvidenceBinding {
+        artifact_id: "not-in-candidate".into(),
+        kind: "world_artifact".into(),
+        sha256: sha256_prefixed(b"unknown evidence"),
+    });
+    unknown.seal().unwrap();
+    let error = validate_receipt(&unknown, &candidate, &registry).unwrap_err();
+    assert!(error.detail.contains("absent from candidate"), "{error}");
+
+    let mut omitted = valid.clone();
+    omitted
+        .evidence
+        .retain(|binding| binding.artifact_id != LAYOUT_ID);
+    omitted.seal().unwrap();
+    let error = validate_receipt(&omitted, &candidate, &registry).unwrap_err();
+    assert!(error.detail.contains("does not bind required"), "{error}");
+
+    let mut extra_candidate_content = candidate.clone();
+    put(
+        &mut extra_candidate_content,
+        "unclaimed-debug-evidence",
+        "debug_claim",
+        b"producer claim".to_vec(),
+    );
+    refresh_candidate_identity(&mut extra_candidate_content);
+    let mut extra = world_receipt(&extra_candidate_content, &registry);
+    let artifact = &extra_candidate_content.artifacts["unclaimed-debug-evidence"];
+    extra.evidence.push(EvidenceBinding {
+        artifact_id: "unclaimed-debug-evidence".into(),
+        kind: artifact.kind.clone(),
+        sha256: sha256_prefixed(&artifact.bytes),
+    });
+    extra.seal().unwrap();
+    let error = validate_receipt(&extra, &extra_candidate_content, &registry).unwrap_err();
+    assert!(error.detail.contains("evidence set differs"), "{error}");
+
+    let mut duplicate = valid;
+    duplicate.evidence.push(duplicate.evidence[0].clone());
+    duplicate.seal().unwrap();
+    let error = validate_receipt(&duplicate, &candidate, &registry).unwrap_err();
+    assert!(error.detail.contains("unique and sorted"), "{error}");
+
+    let mut conflict = world_receipt(&candidate, &registry);
+    let mut contradictory_binding = conflict.evidence[0].clone();
+    contradictory_binding.sha256 = sha256_prefixed(b"conflicting digest");
+    conflict.evidence.push(contradictory_binding);
+    conflict.seal().unwrap();
+    let error = validate_receipt(&conflict, &candidate, &registry).unwrap_err();
+    assert!(error.detail.contains("unique and sorted"), "{error}");
+}
+
+#[test]
+fn engine_neutral_rigging_cannot_be_promoted() {
+    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let candidate = runtime_candidate("deferred-gates-stay-deferred");
+    for gate in DEFERRED_GATES {
+        let payload = DeferredReceiptPayload {
+            reason_code: "deferred_by_scope".into(),
+            deferral_scope: gate.into(),
+            detail: "explicitly deferred by engine-neutral certification scope".into(),
+        };
+        let valid = receipt(
+            &candidate,
+            &registry,
+            gate,
+            ReceiptStatus::Indeterminate,
+            &[MANIFEST_ID],
+            serde_json::to_value(&payload).unwrap(),
+        );
+        assert_eq!(
+            validate_receipt(&valid, &candidate, &registry)
+                .unwrap()
+                .status,
+            ReceiptStatus::Indeterminate,
+            "{gate} must remain indeterminate in the engine-neutral registry"
+        );
+
+        let mut promoted = valid;
+        promoted.status = ReceiptStatus::Pass;
+        promoted.seal().unwrap();
+        let error = validate_receipt(&promoted, &candidate, &registry).unwrap_err();
+        assert!(error.detail.contains("cannot accept"), "{gate}: {error}");
+
+        let mut gates = engine_neutral_gate_profile();
+        gates
+            .iter_mut()
+            .find(|requirement| requirement.gate_id == gate)
+            .unwrap()
+            .disposition = GateDisposition::RequiredPass;
+        let request = ValidationRequest {
+            current_snapshot_id: candidate.snapshot_id.clone(),
+            candidates: vec![candidate.clone()],
+            gates,
+            receipts: vec![world_receipt(&candidate, &registry)],
+        };
+        let error = validate_request(&request, &registry).unwrap_err();
+        assert!(
+            error.detail.contains("gate profile must exactly match"),
+            "{gate}: {error}"
+        );
+    }
+
+    let native_profile = native_mvp_gate_profile();
+    let request = ValidationRequest {
+        current_snapshot_id: candidate.snapshot_id.clone(),
+        candidates: vec![candidate.clone()],
+        gates: native_profile,
+        receipts: vec![world_receipt(&candidate, &registry)],
+    };
+    let error = validate_request(&request, &registry).unwrap_err();
+    assert!(error.detail.contains("unknown validator"), "{error}");
+}
+
+#[test]
 fn semantic_gate_revalidates_provider_response_sources_and_typed_layout_provenance() {
     let registry = ValidatorRegistry::wge_engine_neutral_v1();
     let mut candidate = runtime_candidate("typed-intake-layout-binding");
@@ -675,18 +1109,18 @@ fn rehashed_receipt_with_stale_artifact_binding_is_rejected() {
 }
 
 #[test]
-fn a_resealed_deferred_gate_cannot_be_changed_to_pass() {
+fn a_resealed_rigging_deferral_cannot_be_changed_to_pass() {
     let registry = ValidatorRegistry::wge_engine_neutral_v1();
     let candidate = runtime_candidate("deferred-pass-control");
     let payload = DeferredReceiptPayload {
         reason_code: "deferred_by_scope".into(),
-        deferral_scope: "unity_build".into(),
-        detail: "Unity import/build/playthrough is deferred by the certification scope.".into(),
+        deferral_scope: "rigging".into(),
+        detail: "Rigging is deferred by the engine-neutral certification scope.".into(),
     };
     let mut deferred = receipt(
         &candidate,
         &registry,
-        "unity_build",
+        "rigging",
         ReceiptStatus::Indeterminate,
         &[MANIFEST_ID],
         serde_json::to_value(payload).unwrap(),
@@ -781,6 +1215,8 @@ fn typed_repair_gate_revalidates_raw_before_after_receipts_and_exact_artifact_de
 
     let registry = ValidatorRegistry::wge_engine_neutral_v1();
     let mut before = runtime_candidate("repair-before");
+    add_native_quality_artifacts(&mut before);
+    refresh_candidate_identity(&mut before);
     put(&mut before, "mesh-source", "static_mesh_source", bad_glb);
     put(&mut before, "mesh-package", "asset_package", b"{}".to_vec());
     let _before_semantic = semantic_receipt(&mut before, &registry);
@@ -988,6 +1424,7 @@ fn typed_repair_gate_revalidates_raw_before_after_receipts_and_exact_artifact_de
         gameplay_receipt(&after, &registry),
         after_asset,
         visual_receipt(&after, &registry),
+        visual_quality_receipt(&after, &registry),
         repair,
         before_asset,
     ];

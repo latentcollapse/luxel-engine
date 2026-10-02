@@ -1,0 +1,24 @@
+{
+  "schema_version": "wge.asset-runtime-request/v1",
+  "target": "native",
+  "asset_use": "static_mesh",
+  "expected_source_sha256": "9560590b27ca1b847cc4b96f7659e99acf5b8fb18622e80ef0b4c2ae7ffd068f",
+  "meters_per_unit": 1.0,
+  "vertical_axis": "y",
+  "rig": null,
+  "required_animations": [],
+  "required_sockets": [],
+  "collision": {
+    "shape": "box",
+    "center": [0.0, 1.469125271, 0.0],
+    "size": [2.52059126, 2.938250542, 2.26999998],
+    "axis": null
+  },
+  "lods": [
+    {
+      "level": 0,
+      "mesh_name": "chimney_mesh",
+      "switch_below_fraction": 1.0
+    }
+  ]
+}

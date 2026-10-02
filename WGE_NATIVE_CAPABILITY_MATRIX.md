@@ -1,6 +1,8 @@
 # WGE Native Graphics Capability Matrix
 
-Status: engine-neutral Lava checkpoint, 2026-09-28
+Status: engine-neutral Lava checkpoint; adapter-v6 adversarial audit, C2.5
+imported-asset inspection, and C2.7 authority-side mip conditioning closed,
+2026-09-30
 
 This matrix distinguishes implemented evidence from architectural intent and
 from capabilities that remain future work. “Green” means the capability is
@@ -13,10 +15,14 @@ complete for a commercial game.
 | Rust receipt promotion | green | Native supervisor independently validates packet, backend identity, capture, measurements, and telemetry |
 | Persistent Julia process | green | Typed worker protocol and persistent `LavaBackend` resource caches |
 | Pinned Lava/Vulkan device | green | Lava commit and device identity are bound into the native receipt |
-| Offscreen color/depth rendering | green | Real Lava framebuffer, depth attachment, readback, and deterministic PPM capture |
+| Offscreen color/depth rendering | green / color evidence only | Real Lava framebuffer with internal depth attachment and deterministic color readback; depth evidence is explicitly deferred |
 | sRGB texture handling | green | Typed RGBA8 upload, exact transfer conversion, and focused Julia tests |
 | Terrain geometry | green | Rust-owned world heightfield lowered to deterministic GPU mesh |
 | Authored mesh UV0 | green | Closed v6 packet channel; Rust cardinality/finite validation and typed Lava upload |
+| glTF texture-transform conditioning | green / bounded | Rust accepts one shared `KHR_texture_transform` over present material texture roles, lowers it into canonical UV0 before tangent generation, and rejects alternate UV sets or conflicting transforms |
+| Imported tangent carry-through | green | Conditioned tangent stream is preserved in the canonical `MeshPacket`, independently validated by Rust/Julia, and consumed by Lava; procedural packets use an explicit fallback |
+| Deterministic CPU mip-chain conditioning | green / authority-side | Rust v2 render packages generate and independently validate bounded RGBA8 chains with sRGB, normal-map, and linear/data policies; neutral projection and Julia parser preserve the levels and digest |
+| GPU mip residency / sampler LOD | absent / explicitly fenced | Current Lava adapter rejects multi-level payloads with a typed unsupported-capability result; no lower level is silently discarded |
 | Semantic objective landmark | green | Rust-lowered octagonal beacon with distinct albedo/emissive roles and landmark telemetry |
 | Close-range perspective inspection | green | Typed objective-close packet, real Lava capture, Rust promotion, and deterministic digest check |
 | Composed authored-world profile | green / quality-limited | Real Riverwatch instances plus named shrine through the native path; 40-instance 768x512 receipt is deterministic, while foliage/terrain fidelity remains a documented gap |
@@ -41,7 +47,9 @@ complete for a commercial game.
 | Bevy inspection oracle | green | Certified artifact revalidation, PNG provenance, and 22 viewer tests; Bevy is not semantic authority |
 | Engine-neutral provenance | green | World, spatial, packet, backend, material, capture, and measurement identities are bound by receipts |
 | Rigging/skinning/retargeting | deferred | Explicitly outside this checkpoint; supplied bad GLB remains a rejection control |
-| Unity integration | deferred | Explicitly outside this checkpoint |
+| Neutral GLB render conditioning | partial | Rust extracts/generates bounded mesh attributes, including canonical tangents, PBR roles, embedded RGBA8 textures, validated CPU mip chains, source/package digests, multi-part source-mesh inventory, and rejected/ready receipts; GPU mip residency and collision/LOD carry-through remain open |
+| Scene-to-render package identity binding | green | `SceneArtifact` binds a validated render package and source mesh to the source asset identity; Rust composition namespaces the exact projection set and preserves scene identity in the packet; the bound promotion path independently recomposes before Lava |
+| Real multi-part native asset capture/replay | green / quality-limited | Permanent assembled log-hut fixture passes native runtime preparation, tangent-aware render conditioning, projection, scene binding, close/context Lava capture, Rust promotion, worker restart, and warm-state deterministic replay for five meshes/five textures; production material/mip/LOD quality remains open |
 
 The matrix is intentionally conservative. “Partial” is not a pass-shaped
 substitute for a missing capability; it identifies exactly which contract is

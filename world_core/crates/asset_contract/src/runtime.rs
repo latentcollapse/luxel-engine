@@ -19,6 +19,9 @@ use super::{
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeTarget {
+    Native,
+    /// Compatibility-only target retained for historical fixtures. The active
+    /// WGE path uses `native`; it is never a runtime dependency of WGE.
     Unity,
 }
 
@@ -192,6 +195,10 @@ pub struct RuntimeAssetPackage {
     pub target: RuntimeTarget,
     pub asset_use: AssetUse,
     pub source_identity: AssetIdentity,
+    /// Every renderable mesh identity in the source package. LOD policy is a
+    /// separate selection policy; a multi-part static asset must not be
+    /// forced to misrepresent its parts as LOD levels.
+    pub mesh_ids: Vec<String>,
     pub transform: RuntimeTransform,
     pub rig: Option<RigSummary>,
     pub animations: Vec<AnimationSummary>,
@@ -310,12 +317,14 @@ pub fn prepare_asset(
 
     let package = if findings.is_empty() {
         let collision = collision.expect("a ready receipt has validated collision metadata");
+        let mesh_ids = runtime_mesh_ids(&document)?;
         let mut package = RuntimeAssetPackage {
             package_id: String::new(),
             schema_version: "wge.runtime-asset-package/v1".into(),
             target: request.target,
             asset_use: request.asset_use,
             source_identity: report.identity.clone(),
+            mesh_ids,
             transform: RuntimeTransform {
                 meters_per_unit: request.meters_per_unit,
                 vertical_axis: request.vertical_axis,
@@ -1829,7 +1838,7 @@ fn validate_lods(
         let matches = meshes
             .iter()
             .enumerate()
-            .filter(|(_, mesh)| mesh.get("name").and_then(Value::as_str) == Some(&lod.mesh_name))
+            .filter(|(mesh_index, mesh)| mesh_name(mesh, *mesh_index) == lod.mesh_name)
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
         if matches.len() != 1 {
@@ -1879,6 +1888,28 @@ fn validate_lods(
             }
         }
     }
+}
+
+fn mesh_name(mesh: &Value, mesh_index: usize) -> String {
+    mesh.get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("mesh_{mesh_index}"))
+}
+
+fn runtime_mesh_ids(document: &Value) -> Result<Vec<String>, AssetContractError> {
+    let meshes = super::array_or_empty(document, "meshes")?;
+    let mut ids = BTreeSet::new();
+    for (mesh_index, mesh) in meshes.iter().enumerate() {
+        let id = mesh_name(mesh, mesh_index);
+        if !ids.insert(id.clone()) {
+            return Err(AssetContractError::Contract(format!(
+                "duplicate runtime mesh identity {id}"
+            )));
+        }
+    }
+    Ok(ids.into_iter().collect())
 }
 
 fn sorted_lods(lods: &[LodMetadata]) -> Vec<LodMetadata> {

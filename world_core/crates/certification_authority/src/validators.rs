@@ -2,11 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::*;
 use crate::{
-    AuthorityError, CandidateContext, ReceiptEnvelope, ReceiptStatus, ValidatedReceipt,
+    AuthorityError, CandidateContext, NATIVE_GRAPHICS_FRAME_RECEIPT_KIND,
+    NATIVE_GRAPHICS_PACKET_KIND, NATIVE_GRAPHICS_RENDERER_ATTESTATION_KIND,
+    NATIVE_RGBA8_CAPTURE_KIND, NATIVE_VISUAL_QUALITY_EVIDENCE_KIND,
+    NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA, ReceiptEnvelope, ReceiptStatus, ValidatedReceipt,
     ValidatorKind, parse_artifact, sha256_prefixed,
 };
 use wge_asset_contract::runtime as asset_runtime;
 use wge_intake_repair_contract as intake;
+use wge_native_graphics_contract as native_graphics;
 use wge_reference_runtime as runtime;
 
 const WORLD_KIND: &str = "world_artifact";
@@ -14,6 +18,7 @@ const TRAVERSAL_KIND: &str = "traversal_evidence";
 const CAPTURE_KIND: &str = "reference_capture_ppm";
 const VISUAL_KIND: &str = "visual_evidence";
 const GAMEPLAY_BINDING_KIND: &str = "gameplay_world_binding";
+const GAMEPLAY_KIT_KIND: &str = "gameplay_kit";
 const INTAKE_KIND: &str = "semantic_intake";
 const PROVIDER_RESPONSE_KIND: &str = "provider_response";
 const SOURCE_BUNDLE_KIND: &str = "source_bundle";
@@ -45,6 +50,7 @@ pub(crate) fn validate(
         ValidatorKind::Asset => validate_asset(envelope, candidate),
         ValidatorKind::Rigging => validate_rigging(envelope, candidate),
         ValidatorKind::Visual => validate_visual(envelope, candidate),
+        ValidatorKind::VisualQuality => validate_visual_quality(envelope, candidate),
         ValidatorKind::Repair => validate_repair(envelope, candidate, candidates, validated),
         ValidatorKind::Deferred => validate_deferred(envelope, candidate),
     }
@@ -323,8 +329,17 @@ fn validate_gameplay(
         &payload.visual_evidence_artifact_id,
         &payload.gameplay_binding_artifact_id,
     )?;
+    let gameplay_kit_bytes = bound_artifact(
+        envelope,
+        candidate,
+        &payload.gameplay_kit_artifact_id,
+        GAMEPLAY_KIT_KIND,
+    )?;
+    let gameplay_kit: wge_gameplay_contract::ResolvedKit =
+        parse_artifact(gameplay_kit_bytes, "resolved gameplay kit")?;
     runtime::validate_gameplay_world_binding(&world, &traversal, capture, &visual, &binding)
         .map_err(runtime_error)?;
+    runtime::validate_gameplay_kit(&gameplay_kit).map_err(runtime_error)?;
     runtime::validate_general_gameplay_evidence(&world, &binding.body.general_gameplay)
         .map_err(runtime_error)?;
     let evidence = runtime_evidence_set(
@@ -333,6 +348,11 @@ fn validate_gameplay(
         &payload.capture_artifact_id,
         &payload.visual_evidence_artifact_id,
         Some(&payload.gameplay_binding_artifact_id),
+    );
+    let mut evidence = evidence;
+    evidence.insert(
+        payload.gameplay_kit_artifact_id.clone(),
+        GAMEPLAY_KIT_KIND.into(),
     );
     require_exact_evidence(envelope, &evidence)?;
     Ok(DomainVerdict {
@@ -407,6 +427,179 @@ fn validate_visual(
         } else {
             Some("reference_visual_gate_failed".into())
         },
+    })
+}
+
+fn validate_visual_quality(
+    envelope: &ReceiptEnvelope,
+    candidate: &CandidateContext,
+) -> Result<DomainVerdict, AuthorityError> {
+    let payload: NativeVisualQualityReceiptPayload =
+        parse_payload(envelope, "native visual-quality")?;
+    let world_bytes = bound_artifact(envelope, candidate, &payload.world_artifact_id, WORLD_KIND)?;
+    let packet_bytes = bound_artifact(
+        envelope,
+        candidate,
+        &payload.packet_artifact_id,
+        NATIVE_GRAPHICS_PACKET_KIND,
+    )?;
+    let frame_receipt_bytes = bound_artifact(
+        envelope,
+        candidate,
+        &payload.frame_receipt_artifact_id,
+        NATIVE_GRAPHICS_FRAME_RECEIPT_KIND,
+    )?;
+    let renderer_attestation_bytes = bound_artifact(
+        envelope,
+        candidate,
+        &payload.renderer_attestation_artifact_id,
+        NATIVE_GRAPHICS_RENDERER_ATTESTATION_KIND,
+    )?;
+    let capture_bytes = bound_artifact(
+        envelope,
+        candidate,
+        &payload.capture_artifact_id,
+        NATIVE_RGBA8_CAPTURE_KIND,
+    )?;
+    let quality_bytes = bound_artifact(
+        envelope,
+        candidate,
+        &payload.visual_quality_evidence_artifact_id,
+        NATIVE_VISUAL_QUALITY_EVIDENCE_KIND,
+    )?;
+    if envelope.receipt_schema != NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA {
+        return Err(AuthorityError::new(
+            "unregistered",
+            "native visual-quality receipt schema differs from the registered contract",
+        ));
+    }
+
+    let world: runtime::WorldArtifact = parse_artifact(world_bytes, "native visual world")?;
+    runtime::validate_world_artifact(&world).map_err(runtime_error)?;
+    let packet: native_graphics::GraphicsScenePacket =
+        parse_artifact(packet_bytes, "native graphics scene packet")?;
+    native_graphics::validate_scene_packet(&packet).map_err(native_graphics_error)?;
+    if packet.body.world_artifact_id != world.artifact_id
+        || packet.body.world_artifact_sha256 != world.artifact_sha256
+        || packet.body.spatial_fields_sha256 != world.body.fields.spatial_sha256
+    {
+        return Err(AuthorityError::new(
+            "provenance",
+            "native graphics packet is detached from the bound typed world or spatial fields",
+        ));
+    }
+    let frame_receipt: native_graphics::GraphicsFrameReceipt =
+        parse_artifact(frame_receipt_bytes, "native graphics frame receipt")?;
+    let renderer_attestation: native_graphics::GraphicsRendererAttestation = parse_artifact(
+        renderer_attestation_bytes,
+        "native graphics renderer attestation",
+    )?;
+    native_graphics::validate_renderer_attestation(&renderer_attestation, &frame_receipt)
+        .map_err(native_graphics_error)?;
+    let evidence: native_graphics::VisualQualityEvidence =
+        parse_artifact(quality_bytes, "native visual-quality evidence")?;
+    native_graphics::validate_visual_quality_evidence(
+        &evidence,
+        &packet,
+        &frame_receipt,
+        capture_bytes,
+    )
+    .map_err(native_graphics_error)?;
+
+    require_exact_evidence(
+        envelope,
+        &BTreeMap::from([
+            (payload.world_artifact_id.clone(), WORLD_KIND.to_owned()),
+            (
+                payload.packet_artifact_id.clone(),
+                NATIVE_GRAPHICS_PACKET_KIND.to_owned(),
+            ),
+            (
+                payload.frame_receipt_artifact_id.clone(),
+                NATIVE_GRAPHICS_FRAME_RECEIPT_KIND.to_owned(),
+            ),
+            (
+                payload.renderer_attestation_artifact_id.clone(),
+                NATIVE_GRAPHICS_RENDERER_ATTESTATION_KIND.to_owned(),
+            ),
+            (
+                payload.capture_artifact_id.clone(),
+                NATIVE_RGBA8_CAPTURE_KIND.to_owned(),
+            ),
+            (
+                payload.visual_quality_evidence_artifact_id.clone(),
+                NATIVE_VISUAL_QUALITY_EVIDENCE_KIND.to_owned(),
+            ),
+        ]),
+    )?;
+
+    let (status, detail, failure_code) = match evidence.body.outcome {
+        native_graphics::QualityOutcome::Good => (
+            ReceiptStatus::Pass,
+            format!(
+                "native visual-quality profile {} independently remeasured Good",
+                evidence.body.profile.profile_id
+            ),
+            None,
+        ),
+        native_graphics::QualityOutcome::Bad => (
+            ReceiptStatus::Fail,
+            format!(
+                "native visual-quality profile {} independently remeasured Bad: {}",
+                evidence.body.profile.profile_id,
+                evidence
+                    .body
+                    .reasons
+                    .iter()
+                    .map(|reason| format!("{:?}", reason.code))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Some("native_visual_quality_failed".into()),
+        ),
+        native_graphics::QualityOutcome::Failed => (
+            ReceiptStatus::Fail,
+            format!(
+                "native visual-quality assessment deterministically Failed: {}",
+                evidence
+                    .body
+                    .reasons
+                    .iter()
+                    .map(|reason| format!("{:?}", reason.code))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Some("native_visual_quality_assessment_failed".into()),
+        ),
+        native_graphics::QualityOutcome::Indeterminate => (
+            ReceiptStatus::Indeterminate,
+            format!(
+                "native visual-quality assessment remains Indeterminate: {}",
+                evidence
+                    .body
+                    .reasons
+                    .iter()
+                    .map(|reason| format!("{:?}", reason.code))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            None,
+        ),
+    };
+    let coverage = evidence
+        .body
+        .measurements
+        .as_ref()
+        .map_or(0.0, |measurements| {
+            f64::from(measurements.region_coverage_bp) / 10_000.0
+        });
+    Ok(DomainVerdict {
+        status,
+        detail,
+        measured_artifact_id: payload.visual_quality_evidence_artifact_id,
+        metric_id: intake::MetricId::TechnicalVisualQuality,
+        metric_value: coverage,
+        failure_code,
     })
 }
 
@@ -759,10 +952,15 @@ fn validate_repair(
             "repair delta changed_artifacts must exactly equal the before/after content artifact change set",
         ));
     }
-    if actual_changes.len() > 8 {
+    // A native visual-quality repair carries the packet, promoted frame,
+    // capture, and independently remeasured evidence alongside the ordinary
+    // world/runtime bundle. Keep the bound finite while allowing that typed
+    // verification bundle to participate in the before/after delta.
+    const MAX_REPAIR_ARTIFACT_CHANGES: usize = 12;
+    if actual_changes.len() > MAX_REPAIR_ARTIFACT_CHANGES {
         return Err(AuthorityError::new(
             "policy",
-            "repair change count exceeds the certification hard limit of eight artifacts",
+            "repair change count exceeds the certification hard limit of twelve artifacts",
         ));
     }
     if actual_changes.iter().any(|id| {
@@ -874,7 +1072,7 @@ fn validate_deferred(
     if envelope.status != ReceiptStatus::Indeterminate {
         return Err(AuthorityError::new(
             "policy",
-            "deferred rigging/Unity gates cannot be promoted to pass or fail",
+            "deferred rigging evidence cannot be promoted to pass or fail",
         ));
     }
     let payload: DeferredReceiptPayload = parse_payload(envelope, "deferred")?;
@@ -1032,6 +1230,11 @@ fn require_exact_evidence(
 fn runtime_error(error: runtime::ReferenceRuntimeError) -> AuthorityError {
     AuthorityError::new("contract", error.to_string())
 }
+
+fn native_graphics_error(error: native_graphics::GraphicsContractError) -> AuthorityError {
+    AuthorityError::new("contract", error.to_string())
+}
+
 fn contract_error(error: intake::ContractError) -> AuthorityError {
     AuthorityError::new("contract", error.to_string())
 }

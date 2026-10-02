@@ -42,6 +42,8 @@ def native_commands() -> NativeCommands:
             "wge-reference-runtime",
             "-p",
             "wge-certification-authority",
+            "-p",
+            "wge-native-graphics-contract",
         ],
         cwd=ROOT / "world_core",
         text=True,
@@ -56,6 +58,12 @@ def native_commands() -> NativeCommands:
         str(target / "wge-reference-runtime"),
         str(target / "wge-certification-authority"),
         "julia",
+        None,
+        None,
+        str(target / "wge-native-graphics-contract"),
+        str(ROOT / "terrain_lab"),
+        str(ROOT / "graphics_lab"),
+        str(ROOT / "graphics_lab" / "bin" / "wge_graphics_worker.jl"),
     )
 
 
@@ -243,6 +251,9 @@ def make_input(root: Path) -> Path:
         "gameplay-binding",
         "reference-capture",
         "visual-evidence",
+        "graphics-scene-packet",
+        "graphics-frame-receipt",
+        "visual-quality-evidence",
     ]
     failure_evidence = {
         "validator_id": "wge.validator.visual-reference/v1",
@@ -299,11 +310,16 @@ class WgeEngineNeutralIntegrationTests(unittest.TestCase):
             self.assertEqual(report["status"], "engine_neutral_certified")
             self.assertEqual(
                 set(report["deferred_gates"]),
-                {"rigging", "unity_import", "unity_build", "unity_playthrough"},
+                {"rigging"},
             )
-            self.assertEqual(len(report["receipts"]), 10)
+            self.assertEqual(len(report["receipts"]), 8)
+            quality_receipt = next(
+                item for item in report["receipts"] if item["gate_id"] == "visual_quality"
+            )
+            self.assertEqual(quality_receipt["status"], "pass")
             self.assertTrue((result.handoff_snapshot / "handoff-manifest.json").is_file())
             self.assertTrue((result.output_dir / "negative_controls" / BAD_GLB.name).is_file())
+            self.assertTrue((result.current_bundle / "native-quality/native_capture.ppm").is_file())
             self.assertEqual(digest(BAD_GLB.read_bytes()), BAD_GLB_SHA256)
             summary = json.loads(
                 (result.output_dir / "native-stage-summary.json").read_text(encoding="utf-8")

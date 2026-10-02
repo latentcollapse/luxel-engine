@@ -30,6 +30,13 @@ OPERATIONS = (
     "inspect_current",
     "inspect_artifact",
     "inspect_failures",
+    "capability_list",
+    "capability_explain",
+    "facade_list",
+    "facade_explain",
+    "style_compile",
+    "project_plan",
+    "construction_validate",
     "propose_work",
     "apply_work_order",
     "build_candidate",
@@ -76,6 +83,17 @@ def _safe_id(value: Any, label: str) -> str:
         raise AgentSurfaceError(f"{label} must be a non-empty string")
     if value in {".", ".."} or any(character in value for character in "/\\"):
         raise AgentSurfaceError(f"{label} is not a bounded identifier")
+    return value
+
+
+def _safe_registry_id(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise AgentSurfaceError(f"{label} must be a non-empty registry identifier")
+    if value in {".", ".."} or not all(
+        character.isascii() and (character.isalnum() or character in "._:/-")
+        for character in value
+    ):
+        raise AgentSurfaceError(f"{label} is not a bounded registry identifier")
     return value
 
 
@@ -127,12 +145,10 @@ class LocalAgentSurface:
             "semantic_authority": "wge-control-plane",
             "operations": list(OPERATIONS),
             "native_operations": list(OPERATIONS),
+            "capability_registry": "wge.capability-registry/v1",
             "deferred_operations": [],
             "deferred_gates": [
                 "rigging",
-                "unity_import",
-                "unity_build",
-                "unity_playthrough",
             ],
             "limits": {
                 "max_request_bytes": MAX_REQUEST_BYTES,
@@ -200,6 +216,36 @@ class LocalAgentSurface:
         candidate: str | None,
     ) -> list[str]:
         binary = str(self.config.control_plane)
+        if operation == "capability_list":
+            command = [binary, "capabilities"]
+            for parameter, flag in (("class", "--class"), ("status", "--status")):
+                if parameter in params:
+                    value = _safe_id(params.get(parameter), parameter)
+                    command.extend([flag, value])
+            return command
+        if operation == "capability_explain":
+            capability = _safe_registry_id(params.get("capability"), "capability")
+            return [binary, "capability-explain", capability]
+        if operation == "facade_list":
+            command = [binary, "facade"]
+            if "status" in params:
+                value = _safe_id(params.get("status"), "status")
+                command.extend(["--status", value])
+            return command
+        if operation == "facade_explain":
+            operation_id = _safe_registry_id(params.get("operation_id"), "operation_id")
+            return [binary, "facade-explain", operation_id]
+        if operation == "style_compile":
+            profile = _resource(root, params.get("profile"), "profile")
+            return [binary, "style-lower", str(profile)]
+        if operation == "project_plan":
+            draft = _resource(root, params.get("draft"), "draft")
+            style_plan = _resource(root, params.get("style_plan"), "style_plan")
+            return [binary, "project-plan", str(draft), str(style_plan)]
+        if operation == "construction_validate":
+            plan = _resource(root, params.get("plan"), "plan")
+            style_plan = _resource(root, params.get("style_plan"), "style_plan")
+            return [binary, "construction-validate", str(plan), str(style_plan)]
         if operation == "inspect_project":
             return [binary, "inspect-project", str(root)]
         if operation == "inspect_current":
@@ -310,6 +356,13 @@ class LocalAgentSurface:
         """
 
         descriptions = {
+            "capability_list": "List Rust-registered WGE capabilities and their status, schemas, and boundaries.",
+            "capability_explain": "Explain one Rust-registered WGE capability without exposing backend choreography.",
+            "facade_list": "List the model-native WGE semantic vocabulary, implementation status, and legal next steps.",
+            "facade_explain": "Explain one semantic facade operation and whether its callable transport exists.",
+            "style_compile": "Validate and lower a typed StyleProfile into a backend-neutral Rust StylePlan.",
+            "project_plan": "Resolve a typed construction draft against the Rust capability and validator registries.",
+            "construction_validate": "Revalidate a construction plan against current Rust registries and its bound StylePlan.",
             "inspect_project": "Inspect the native WGE project transaction and current pointer.",
             "inspect_current": "Inspect the currently certified native snapshot.",
             "inspect_artifact": "Revalidate and inspect one candidate artifact.",
@@ -336,6 +389,30 @@ class LocalAgentSurface:
                 }
             }
             required = ["root"]
+            if operation in {"capability_list", "capability_explain", "facade_list", "facade_explain"}:
+                required = []
+            if operation == "capability_list":
+                properties["class"] = {"type": "string"}
+                properties["status"] = {"type": "string"}
+            if operation == "capability_explain":
+                properties["capability"] = {"type": "string"}
+                required.append("capability")
+            if operation == "facade_list":
+                properties["status"] = {"type": "string"}
+            if operation == "facade_explain":
+                properties["operation_id"] = {"type": "string"}
+                required.append("operation_id")
+            if operation == "style_compile":
+                properties["profile"] = {"type": "string"}
+                required.append("profile")
+            if operation == "project_plan":
+                properties["draft"] = {"type": "string"}
+                properties["style_plan"] = {"type": "string"}
+                required.extend(["draft", "style_plan"])
+            if operation == "construction_validate":
+                properties["plan"] = {"type": "string"}
+                properties["style_plan"] = {"type": "string"}
+                required.extend(["plan", "style_plan"])
             if operation in {
                 "inspect_artifact",
                 "inspect_failures",

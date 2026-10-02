@@ -6,8 +6,12 @@ use std::time::Instant;
 
 use serde::Serialize;
 use wge_native_graphics_contract::{
-    GraphicsWorkerSupervisor, lower_dense_benchmark_packet, lower_objective_close_packet,
-    lower_reference_world, lower_showcase_packet, lower_world_showcase_packet,
+    Campaign2View, GraphicsWorkerSupervisor, QualityOutcome, VisualQualityProfile,
+    assess_campaign2_visual_evidence, assess_visual_quality,
+    deterministic_certification_frame_receipt, lower_campaign2_packet,
+    lower_dense_benchmark_packet, lower_objective_close_packet, lower_reference_world,
+    lower_showcase_packet, lower_world_showcase_packet, sha256_prefixed,
+    validate_campaign2_visual_evidence,
 };
 use wge_reference_runtime::build_from_layout_path;
 
@@ -84,6 +88,25 @@ struct BenchmarkReport {
     warm_capture_sha256: String,
     deterministic_capture: bool,
 }
+
+#[derive(Clone, Debug, Serialize)]
+struct CaptureManifest {
+    schema: &'static str,
+    exporter: &'static str,
+    capture_path: String,
+    ppm_sha256: String,
+    raw_rgba_sha256: String,
+    receipt_sha256: String,
+    packet_sha256: String,
+    capture_id: String,
+    camera_id: String,
+    width_px: u32,
+    height_px: u32,
+    format: &'static str,
+}
+
+const CAPTURE_MANIFEST_SCHEMA: &str = "wge.native-graphics-capture-manifest/v1";
+const CAPTURE_EXPORTER: &str = "wge-native-graphics-contract-cli/v1";
 
 fn main() -> ExitCode {
     match run() {
@@ -205,21 +228,359 @@ fn run() -> Result<(), String> {
                 .map_err(|error| error.to_string())?;
             supervisor.capabilities().map_err(|error| error.to_string())?;
             let promoted = supervisor
-                .render_and_promote(&packet)
+                .render_and_promote(&packet, &world.world)
                 .map_err(|error| error.to_string())?;
-            fs::write(
-                &output,
-                rgba8_to_ppm(
-                    &promoted.capture_bytes,
-                    promoted.frame.width_px,
-                    promoted.frame.height_px,
-                )?,
-            )
+            if let Some(parent) = output.parent()
+                && !parent.as_os_str().is_empty()
+            {
+                fs::create_dir_all(parent).map_err(|error| {
+                    format!("cannot create capture directory {}: {error}", parent.display())
+                })?;
+            }
+            let ppm = rgba8_to_ppm(
+                &promoted.capture_bytes,
+                promoted.frame.width_px,
+                promoted.frame.height_px,
+            )?;
+            fs::write(&output, &ppm)
                 .map_err(|error| format!("cannot write capture {}: {error}", output.display()))?;
+            let manifest = CaptureManifest {
+                schema: CAPTURE_MANIFEST_SCHEMA,
+                exporter: CAPTURE_EXPORTER,
+                capture_path: output.display().to_string(),
+                ppm_sha256: sha256_prefixed(&ppm),
+                raw_rgba_sha256: promoted.frame.capture_sha256.clone(),
+                receipt_sha256: promoted.receipt.receipt_sha256.clone(),
+                packet_sha256: promoted.frame.packet_sha256.clone(),
+                capture_id: promoted.frame.capture_id.clone(),
+                camera_id: packet.body.capture.camera_id.clone(),
+                width_px: promoted.frame.width_px,
+                height_px: promoted.frame.height_px,
+                format: "image/x-portable-pixmap; magic=P6",
+            };
+            let manifest_path = output.with_extension("manifest.json");
+            let manifest_bytes = serde_json::to_vec_pretty(&manifest)
+                .map_err(|error| format!("cannot serialize capture manifest: {error}"))?;
+            fs::write(&manifest_path, manifest_bytes).map_err(|error| {
+                format!("cannot write capture manifest {}: {error}", manifest_path.display())
+            })?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&promoted.receipt).map_err(|error| error.to_string())?
             );
+            Ok(())
+        }
+        Some("render-quality-layout") => {
+            let layout = canonical_path(
+                PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "render-quality-layout requires LAYOUT PATH".to_owned())?,
+                ),
+                "layout",
+            )?;
+            let julia = PathBuf::from(
+                arguments
+                    .next()
+                    .ok_or_else(|| "render-quality-layout requires JULIA PATH".to_owned())?,
+            );
+            let terrain_lab = canonical_path(
+                PathBuf::from(arguments.next().ok_or_else(|| {
+                    "render-quality-layout requires TERRAIN LAB PATH".to_owned()
+                })?),
+                "terrain lab",
+            )?;
+            let graphics_project = canonical_path(
+                PathBuf::from(arguments.next().ok_or_else(|| {
+                    "render-quality-layout requires GRAPHICS PROJECT PATH".to_owned()
+                })?),
+                "graphics project",
+            )?;
+            let worker = canonical_path(
+                PathBuf::from(arguments.next().ok_or_else(|| {
+                    "render-quality-layout requires GRAPHICS WORKER PATH".to_owned()
+                })?),
+                "graphics worker",
+            )?;
+            let output_dir = PathBuf::from(arguments.next().ok_or_else(|| {
+                "render-quality-layout requires OUTPUT DIRECTORY".to_owned()
+            })?);
+            if arguments.next().is_some() {
+                return Err("render-quality-layout accepts exactly LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR".into());
+            }
+
+            let world = build_from_layout_path(&layout, &julia, &terrain_lab)
+                .map_err(|error| error.to_string())?;
+            // The quality command deliberately renders the canonical WGE
+            // world-showcase composition. It remains bound to the authored
+            // world artifact and spatial fields, while providing enough
+            // authored geometry/material structure for the technical visual
+            // floor to measure a real scene rather than a diagnostic flat
+            // overview. This is WGE machinery, not a comparison fixture.
+            let reference_packet =
+                lower_reference_world(&world.world).map_err(|error| error.to_string())?;
+            let packet = lower_world_showcase_packet(&reference_packet)
+                .map_err(|error| error.to_string())?;
+            let mut supervisor = GraphicsWorkerSupervisor::start(&julia, &graphics_project, &worker)
+                .map_err(|error| error.to_string())?;
+            supervisor.capabilities().map_err(|error| error.to_string())?;
+            let promoted = supervisor
+                .render_and_promote(&packet, &world.world)
+                .map_err(|error| error.to_string())?;
+            let certification_receipt = deterministic_certification_frame_receipt(
+                &packet,
+                &promoted.receipt,
+                &promoted.capture_bytes,
+            )
+            .map_err(|error| error.to_string())?;
+            let profile = VisualQualityProfile::terrain_reference_v1(
+                packet.body.capture.width_px,
+                packet.body.capture.height_px,
+            );
+            let evidence = assess_visual_quality(
+                &packet,
+                &certification_receipt,
+                &promoted.capture_bytes,
+                &profile,
+            );
+
+            fs::create_dir_all(&output_dir).map_err(|error| {
+                format!(
+                    "cannot create visual-quality artifact directory {}: {error}",
+                    output_dir.display()
+                )
+            })?;
+            write_json_artifact(&output_dir.join("world_artifact.json"), &world.world)?;
+            write_json_artifact(&output_dir.join("graphics_scene_packet.json"), &packet)?;
+            write_json_artifact(
+                &output_dir.join("graphics_frame_receipt.json"),
+                &certification_receipt,
+            )?;
+            write_json_artifact(
+                &output_dir.join("graphics_renderer_attestation.json"),
+                &promoted.renderer_attestation,
+            )?;
+            fs::write(
+                output_dir.join("native_capture.rgba"),
+                &promoted.capture_bytes,
+            )
+            .map_err(|error| format!("cannot write native RGBA capture: {error}"))?;
+            let ppm = rgba8_to_ppm(
+                &promoted.capture_bytes,
+                promoted.frame.width_px,
+                promoted.frame.height_px,
+            )?;
+            fs::write(output_dir.join("native_capture.ppm"), &ppm)
+                .map_err(|error| format!("cannot write native PPM capture: {error}"))?;
+            write_json_artifact(
+                &output_dir.join("visual_quality_evidence.json"),
+                &evidence,
+            )?;
+            let outcome = serde_json::to_value(evidence.body.outcome)
+                .map_err(|error| format!("cannot serialize visual-quality outcome: {error}"))?;
+            let summary = serde_json::json!({
+                "schema_version": "wge.native-visual-quality-artifacts/v1",
+                "outcome": outcome,
+                "packet_sha256": packet.packet_sha256,
+                "frame_receipt_sha256": certification_receipt.receipt_sha256,
+                "renderer_attestation_sha256": promoted
+                    .renderer_attestation
+                    .attestation_sha256,
+                "capture_sha256": sha256_prefixed(&promoted.capture_bytes),
+                "capture_ppm_sha256": sha256_prefixed(&ppm),
+                "evidence_sha256": evidence.evidence_sha256,
+                "world_artifact_id": world.world.artifact_id,
+                "world_artifact_sha256": world.world.artifact_sha256,
+                "render_profile": "native-world-showcase-v1",
+                "packet_path": output_dir.join("graphics_scene_packet.json"),
+                "frame_receipt_path": output_dir.join("graphics_frame_receipt.json"),
+                "renderer_attestation_path":
+                    output_dir.join("graphics_renderer_attestation.json"),
+                "capture_path": output_dir.join("native_capture.rgba"),
+                "capture_ppm_path": output_dir.join("native_capture.ppm"),
+                "evidence_path": output_dir.join("visual_quality_evidence.json"),
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&summary)
+                    .map_err(|error| format!("cannot serialize visual-quality summary: {error}"))?
+            );
+            Ok(())
+        }
+        Some("render-campaign2-layout") => {
+            let layout = canonical_path(
+                PathBuf::from(
+                    arguments
+                        .next()
+                        .ok_or_else(|| "render-campaign2-layout requires LAYOUT PATH".to_owned())?,
+                ),
+                "layout",
+            )?;
+            let julia = PathBuf::from(arguments.next().ok_or_else(|| {
+                "render-campaign2-layout requires JULIA PATH".to_owned()
+            })?);
+            let terrain_lab = canonical_path(
+                PathBuf::from(arguments.next().ok_or_else(|| {
+                    "render-campaign2-layout requires TERRAIN LAB PATH".to_owned()
+                })?),
+                "terrain lab",
+            )?;
+            let graphics_project = canonical_path(
+                PathBuf::from(arguments.next().ok_or_else(|| {
+                    "render-campaign2-layout requires GRAPHICS PROJECT PATH".to_owned()
+                })?),
+                "graphics project",
+            )?;
+            let worker = canonical_path(
+                PathBuf::from(arguments.next().ok_or_else(|| {
+                    "render-campaign2-layout requires WORKER PATH".to_owned()
+                })?),
+                "graphics worker",
+            )?;
+            let output_dir = PathBuf::from(arguments.next().ok_or_else(|| {
+                "render-campaign2-layout requires OUTPUT DIRECTORY".to_owned()
+            })?);
+            if arguments.next().is_some() {
+                return Err("render-campaign2-layout accepts exactly LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR".into());
+            }
+
+            let world = build_from_layout_path(&layout, &julia, &terrain_lab)
+                .map_err(|error| error.to_string())?;
+            let reference_packet =
+                lower_reference_world(&world.world).map_err(|error| error.to_string())?;
+            let mut supervisor = GraphicsWorkerSupervisor::start(&julia, &graphics_project, &worker)
+                .map_err(|error| error.to_string())?;
+            supervisor.capabilities().map_err(|error| error.to_string())?;
+            fs::create_dir_all(&output_dir).map_err(|error| {
+                format!(
+                    "cannot create Campaign 2 artifact directory {}: {error}",
+                    output_dir.display()
+                )
+            })?;
+
+            let view_specs = [
+                ("close", Campaign2View::Close),
+                ("medium", Campaign2View::Medium),
+                ("wide", Campaign2View::Wide),
+            ];
+            let mut view_summaries = Vec::with_capacity(view_specs.len());
+            let mut failed_views = Vec::new();
+            for (view_name, view) in view_specs {
+                let packet = lower_campaign2_packet(&reference_packet, view)
+                    .map_err(|error| format!("Campaign 2 {view_name} lowering failed: {error}"))?;
+                let promoted = supervisor
+                    .render_and_promote(&packet, &world.world)
+                    .map_err(|error| format!("Campaign 2 {view_name} render failed: {error}"))?;
+                let certification_receipt = deterministic_certification_frame_receipt(
+                    &packet,
+                    &promoted.receipt,
+                    &promoted.capture_bytes,
+                )
+                .map_err(|error| {
+                    format!("Campaign 2 {view_name} certification projection failed: {error}")
+                })?;
+                let profile = VisualQualityProfile::campaign2_authored_frame_v1(
+                    packet.body.capture.width_px,
+                    packet.body.capture.height_px,
+                );
+                let evidence = assess_visual_quality(
+                    &packet,
+                    &certification_receipt,
+                    &promoted.capture_bytes,
+                    &profile,
+                );
+                let view_role = match view {
+                    Campaign2View::Close => "close-material-hero",
+                    Campaign2View::Medium => "medium-terrain-environment",
+                    Campaign2View::Wide => "wide-world-composition",
+                };
+                let vector_evidence = assess_campaign2_visual_evidence(
+                    &packet,
+                    &certification_receipt,
+                    &promoted.receipt,
+                    &evidence,
+                    &promoted.capture_bytes,
+                    view_role,
+                );
+                validate_campaign2_visual_evidence(
+                    &vector_evidence,
+                    &packet,
+                    &certification_receipt,
+                    &promoted.receipt,
+                    &evidence,
+                    &promoted.capture_bytes,
+                )
+                .map_err(|error| {
+                    format!("Campaign 2 {view_name} vector evidence failed revalidation: {error}")
+                })?;
+                let view_dir = output_dir.join(view_name);
+                fs::create_dir_all(&view_dir).map_err(|error| {
+                    format!("cannot create Campaign 2 {view_name} directory: {error}")
+                })?;
+                write_json_artifact(&view_dir.join("world_artifact.json"), &world.world)?;
+                write_json_artifact(&view_dir.join("graphics_scene_packet.json"), &packet)?;
+                write_json_artifact(
+                    &view_dir.join("graphics_frame_receipt.json"),
+                    &certification_receipt,
+                )?;
+                write_json_artifact(
+                    &view_dir.join("graphics_renderer_attestation.json"),
+                    &promoted.renderer_attestation,
+                )?;
+                fs::write(view_dir.join("native_capture.rgba"), &promoted.capture_bytes)
+                    .map_err(|error| format!("cannot write Campaign 2 {view_name} RGBA: {error}"))?;
+                let ppm = rgba8_to_ppm(
+                    &promoted.capture_bytes,
+                    promoted.frame.width_px,
+                    promoted.frame.height_px,
+                )?;
+                fs::write(view_dir.join("native_capture.ppm"), &ppm)
+                    .map_err(|error| format!("cannot write Campaign 2 {view_name} PPM: {error}"))?;
+                write_json_artifact(&view_dir.join("visual_quality_evidence.json"), &evidence)?;
+                write_json_artifact(
+                    &view_dir.join("campaign2_visual_evidence.json"),
+                    &vector_evidence,
+                )?;
+                let passed = evidence.body.outcome == QualityOutcome::Good;
+                if !passed {
+                    failed_views.push(format!(
+                        "{view_name}: {:?}",
+                        evidence.body.reasons
+                    ));
+                }
+                view_summaries.push(serde_json::json!({
+                    "view": view_name,
+                    "camera_id": packet.body.camera.camera_id,
+                    "packet_sha256": packet.packet_sha256,
+                    "frame_receipt_sha256": certification_receipt.receipt_sha256,
+                    "capture_sha256": sha256_prefixed(&promoted.capture_bytes),
+                    "capture_ppm_sha256": sha256_prefixed(&ppm),
+                    "evidence_sha256": evidence.evidence_sha256,
+                    "campaign2_visual_evidence_sha256": vector_evidence.evidence_sha256,
+                    "quality_outcome": evidence.body.outcome,
+                    "measurements": evidence.body.measurements,
+                    "visual_vector": vector_evidence.body.measurements,
+                    "output_dir": view_dir,
+                }));
+            }
+            let summary = serde_json::json!({
+                "schema_version": "wge.native-graphics-campaign2/v1",
+                "campaign": "WGE GRAPHICS CAMPAIGN 2 — THE AUTHORED FRAME",
+                "world_artifact_id": world.world.artifact_id,
+                "world_artifact_sha256": world.world.artifact_sha256,
+                "views": view_summaries,
+                "outcome": if failed_views.is_empty() { "good" } else { "bad" },
+                "failed_views": failed_views,
+            });
+            write_json_artifact(&output_dir.join("campaign2_summary.json"), &summary)?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&summary)
+                    .map_err(|error| format!("cannot serialize Campaign 2 summary: {error}"))?
+            );
+            if summary["outcome"] != "good" {
+                return Err("Campaign 2 visual-quality gate failed for one or more views".into());
+            }
             Ok(())
         }
         Some("benchmark-layout") | Some("benchmark-dense-layout") => {
@@ -308,11 +669,11 @@ fn run() -> Result<(), String> {
             let mut supervisor = GraphicsWorkerSupervisor::start(&julia, &graphics_project, &worker)
                 .map_err(|error| error.to_string())?;
             supervisor.capabilities().map_err(|error| error.to_string())?;
-            let (cold, cold_capture) = measure_frame(&mut supervisor, &packet)?;
+            let (cold, cold_capture) = measure_frame(&mut supervisor, &packet, &world.world)?;
             let mut warm_samples = Vec::with_capacity(warm_frames);
             let mut warm_captures = Vec::with_capacity(warm_frames);
             for _ in 0..warm_frames {
-                let (sample, capture) = measure_frame(&mut supervisor, &packet)?;
+                let (sample, capture) = measure_frame(&mut supervisor, &packet, &world.world)?;
                 warm_samples.push(sample);
                 warm_captures.push(capture);
             }
@@ -359,18 +720,25 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         _ => {
-            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-world-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]\n       wge-native-graphics-contract benchmark-dense-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES] DENSE_BACKGROUND_INSTANCES".into())
+            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-world-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-quality-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       wge-native-graphics-contract render-campaign2-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]\n       wge-native-graphics-contract benchmark-dense-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES] DENSE_BACKGROUND_INSTANCES".into())
         }
     }
+}
+
+fn write_json_artifact<T: Serialize>(path: &PathBuf, value: &T) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(value)
+        .map_err(|error| format!("cannot serialize {}: {error}", path.display()))?;
+    fs::write(path, bytes).map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
 fn measure_frame(
     supervisor: &mut GraphicsWorkerSupervisor,
     packet: &wge_native_graphics_contract::GraphicsScenePacket,
+    world: &wge_reference_runtime::WorldArtifact,
 ) -> Result<(BenchmarkSample, String), String> {
     let started = Instant::now();
     let promoted = supervisor
-        .render_and_promote(packet)
+        .render_and_promote(packet, world)
         .map_err(|error| error.to_string())?;
     let telemetry = &promoted.receipt.body.telemetry;
     let sample = BenchmarkSample {
