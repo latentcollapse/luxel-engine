@@ -22,6 +22,12 @@ Raycore = {url = "https://github.com/JuliaGeometry/Raycore.jl", rev = "d93743b3a
 Vulkan = {url = "https://github.com/JuliaGPU/Vulkan.jl", rev = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"}
 VulkanCore = {url = "https://github.com/JuliaGPU/VulkanCore.jl", rev = "1d02829e8fa92da430d879db4dd7bf564a872035"}
 
+[extras]
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test"]
+
 [compat]
 JSON3 = "1"
 Lava = "0.1"

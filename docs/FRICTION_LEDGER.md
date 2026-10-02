@@ -228,6 +228,31 @@ tests:
 decision: keep
 ```
 
+### FR-0014 — Julia test gate silently requires an explicit test target on Julia 1.12
+
+```yaml
+friction_id: FR-0014
+status: verified
+first_seen: 2026-10-02
+last_seen: 2026-10-02
+campaign: pre-demo audit
+operation: `Pkg.test()` for the graphics_lab Julia package
+symptom: "`Pkg.test(test_args=[\"lava_adapter\"])` aborted with `ArgumentError: Package Test not found in current path.`; Project.toml declared no [extras]/[targets], and Julia 1.12 no longer loads stdlibs like Test implicitly in the temporary test environment"
+repeated_behavior: every test invocation failed at environment resolution before any test ran; the C3-closure "runtests.jl exit 0" claim was not reproducible on the current toolchain
+responsible_layer: contract (package environment definition)
+workaround: none needed — declare `[extras]` Test and `[targets] test = ["Test"]` in graphics_lab/Project.toml
+proposed_improvement: run `Pkg.test()` as part of every Julia campaign exit gate on the pinned toolchain, not only during the slice that added the tests
+expected_leverage: reliability
+authority_impact: none (environment declaration only; no source or schema change)
+before_metrics:
+  julia_gate: "exit 1 before any test executes (Package Test not found)"
+after_metrics:
+  julia_gate: "exit 0; lava_adapter suite 26/26 passed"
+tests:
+  - julia --project=. -e 'using Pkg; Pkg.test(test_args=["lava_adapter"])'
+decision: keep
+```
+
 ## Evidence rules
 
 1. A candidate is not a defect until a run reproduces it or the design review establishes a contract violation.
