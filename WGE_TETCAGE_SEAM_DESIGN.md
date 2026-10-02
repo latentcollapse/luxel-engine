@@ -97,6 +97,11 @@ P-1  Post-reboot health: GPU kernel compiles again (F-I.4 clears). Run Spiral I 
      (budget one debug cycle) -> results/spiral_i_comparators.csv fills the
      crossover surface. GATE: negative envelope known per (class, N); policy
      defaults for direct_field vs cage_parametric are measured, not guessed.
+     STATUS 2026-10-02: health PASS (F-I.4 closed by the 04:49 reboot; probe
+     reconstructed as /tmp/p1_health.jl). Spiral I v4 hit the budgeted
+     first-run kernel bug — in-kernel BoundsError at blob, no CSV rows;
+     registered as F-I.5 with the -g2 debug plan. Crossover CSV pending on the
+     v4 kernel fix; no pins affected.
 P0   Vulkan compute parity port (spiral-G methodology): deform!/reconstruct! as one
      GLSL compute dispatch; oracle = TetDeform CPU path; gate max ≤ 0.5 px vs the
      analytic model, expected ~ulp; CSV evidence + sha pin. GATE: parity + wall
