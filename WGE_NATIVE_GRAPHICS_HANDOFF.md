@@ -32,7 +32,7 @@ static-asset inspection slice, not a claim of production visual quality.
 
 - Scene packet: `wge.graphics-scene-packet/v6`.
 - Frame receipt: `wge.graphics-frame-receipt/v1`.
-- Adapter: `wge.lava-adapter/v6`.
+- Adapter: `wge.lava-adapter/v7`.
 - Lava: `11c7e31bdf62408d22bf379e9e59510f69d2103e`.
 - Vulkan.jl: `03b4ca2351477ccbb8ee378f512da50f7eec7bac`.
 - VulkanCore.jl: `1d02829e8fa92da430d879db4dd7bf564a872035`.

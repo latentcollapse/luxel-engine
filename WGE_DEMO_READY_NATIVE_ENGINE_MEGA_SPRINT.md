@@ -436,15 +436,31 @@ Rust independently validates level dimensions, byte lengths, chain count, and
 content identity, including tamper rejection.
 
 The neutral graphics projection and Julia packet parser preserve the chain as
-`rgba8_mip_chain`, with a digest over concatenated decoded levels. The current
-Lava adapter explicitly rejects multi-level payloads with a typed
-unsupported-capability result until GPU residency/upload and sampler LOD are
-implemented. No lower level is silently discarded, and no new GPU evidence is
-claimed in this contract slice. The C2.5 native replay remains the backend
+`rgba8_mip_chain`, with a digest over concatenated decoded levels. At C2.7
+closure the Lava adapter explicitly rejected multi-level payloads with a typed
+unsupported-capability result; C2.8 below lifted that rejection when GPU
+residency landed. No lower level is silently discarded. The C2.5 native replay remains the backend
 regression control.
 
 The checkpoint handoff is
 [`WGE_C2_7_MIP_CHAIN_HANDOFF.md`](WGE_C2_7_MIP_CHAIN_HANDOFF.md).
+
+#### C2.8 — GPU mip residency and sampler LOD
+
+Status: **implemented and green**. The adapter seam is now
+`wge.lava-adapter/v7` on both sides. The Lava adapter builds one Vulkan image
+per texture with the full mip chain, a whole-chain view, and a sampler whose
+`maxLod` spans the uploaded levels, and every frame reports
+`texture_residency` telemetry mirroring the Rust `expected_texture_residency`
+computation exactly. A multi-level packet requires residency telemetry and
+fails closed on mismatch; single-level textures clamp LOD to zero, so the C2.5
+warm-state replay remains the byte-identical backend regression control. All
+native-graphics integration tests, the Julia adapter suite, and the contract
+suites were re-run green after the upload-path fixes registered in the C2.8
+handoff.
+
+The handoff is
+[`WGE_C2_8_GPU_MIP_RESIDENCY_HANDOFF.md`](WGE_C2_8_GPU_MIP_RESIDENCY_HANDOFF.md).
 
 ### Exit gate
 

@@ -36,8 +36,9 @@ The permanent assembled log-hut fixture now completes the native imported-asset
 conditioning, scene binding, close-camera lowering, Julia/Lava capture, Rust
 promotion, worker restart, and warm-state deterministic replay path. Imported
 tangents are canonical in the graphics packet. The historical C2.5 GPU
-payload was single-level; C2.7 now provides the versioned authority-side
-chain representation while GPU residency remains open. The close/context
+payload was single-level; C2.7 provides the versioned authority-side chain
+representation and C2.8 closes GPU residency with a sampler LOD span. The
+close/context
 captures and their receipts are preserved in
 `/home/mattc/Pictures/WGE/c2.5-imported-asset/`.
 
@@ -71,11 +72,12 @@ independently validated.
 
 The neutral graphics projection carries the chain as a versioned
 `rgba8_mip_chain` payload, and Julia validates the same dimensions and digest.
-The current Lava adapter rejects multi-level payloads with an explicit typed
-unsupported-capability result until GPU residency/upload and sampler LOD are
-implemented. This is an intentional seam, not a silent one-level fallback.
-The C2.5 imported-asset GPU replay remains the backend regression control;
-C2.7 adds no new GPU claim.
+At C2.7 closure the Lava adapter rejected multi-level payloads with an explicit
+typed unsupported-capability result — an intentional seam, not a silent
+one-level fallback. C2.8 has since closed that seam with full GPU residency
+and a sampler LOD span validated against the Rust residency-telemetry
+expectation. The C2.5 imported-asset GPU replay remains the backend regression
+control and is byte-identical because single-level textures clamp LOD to zero.
 
 ## Measured or directly observed gaps
 
@@ -93,9 +95,10 @@ C2.7 adds no new GPU claim.
    no renderer change was retained. See `docs/CAMPAIGN1_VISUAL_AXIS_DESIGN.md`.
 2. The canonical material contract now has digest-bound albedo, normal,
    roughness, occlusion, and emissive roles plus scalar metallic/roughness and
-   clearcoat controls. Rust and the neutral packet represent a validated
-   multi-level RGBA8 chain, but GPU residency/sampler LOD is not yet
-   implemented; alpha, transmission, and material-graph identity remain open.
+   clearcoat controls.Rust and the neutral packet represent a validated
+multi-level RGBA8 chain, and C2.8 now residents that chain on the GPU with a
+sampler LOD span; alpha, transmission, and material-graph identity remain
+open.
 3. Lighting uses one directional shadow map with fixed resolution and PCF.
    Cascades, contact shadows, richer soft-shadow filtering, many-light clustering,
    prefiltered image-based lighting, reflection probes, and robust atmospheric
@@ -163,11 +166,11 @@ current WGE scope.
 ## Priority order for closing gaps
 
 1. Improve the permanent imported-asset capture from a technically certified
-   static inspection into a genuinely authored material view: GPU mip
-   residency/sampler LOD, alpha policy, collision/LOD carry-through, and a cleaner
-   camera/composition. Tangent-aware shading, texture-transform conditioning,
-   and the close-camera replay are green; the supplied bad GLB remains a
-   rejection control and is not promoted.
+   static inspection into a genuinely authored material view: alpha policy,
+   collision/LOD carry-through, and a cleaner camera/composition. Tangent-aware
+   shading, texture-transform conditioning, GPU mip residency/sampler LOD
+   (closed by C2.8), and the close-camera replay are green; the supplied bad
+   GLB remains a rejection control and is not promoted.
 2. Replace the synthetic stress population with a denser authored scene or
    camera-cut profile, and separate instrumented timing from uninstrumented
    production timing before optimizing cold startup or choosing a frame budget.

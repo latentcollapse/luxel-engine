@@ -77,6 +77,10 @@ device/profile cannot provide the requested residency. Alpha execution,
 collision/LOD carry-through, and broader material quality remain separate
 frontiers.
 
+C2.8 is now closed: GPU mip residency, a sampler LOD span, and residency
+telemetry are green on `wge.lava-adapter/v7` — see
+[`WGE_C2_8_GPU_MIP_RESIDENCY_HANDOFF.md`](WGE_C2_8_GPU_MIP_RESIDENCY_HANDOFF.md).
+
 The supplied malformed GLB remains a permanent rejection control. Rigging,
 Unity, TetCageRT promotion, and unrelated post-MVP breadth remain out of
 scope.
