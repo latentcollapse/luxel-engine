@@ -45,6 +45,7 @@ const MAX_REFERENCE_FOG_DENSITY: f64 = 0.006;
 pub mod asset_projection;
 pub mod live;
 pub mod scene_composition;
+pub mod session;
 pub mod supervisor;
 pub mod visual_quality;
 pub mod window;

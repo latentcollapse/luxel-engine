@@ -3359,26 +3359,22 @@ function render_scene(
     end
 end
 
-function _render_scene(
-    packet::WGEGraphics.GraphicsScenePacket,
+"""
+Record the camera-dependent scene passes (sky, terrain, mesh instances) into an
+HDR scene framebuffer. Shared verbatim by the offscreen capture path and the
+presented window path so the two paths cannot drift.
+"""
+function _record_scene_passes!(
     state::LavaBackend,
-    gpu_timing_slot::Union{Nothing,Int},
+    packet::WGEGraphics.GraphicsScenePacket,
+    camera_frame::CameraFrame,
+    lighting::DirectionalLighting,
+    environment_lighting::EnvironmentLighting,
+    material::WGEGraphics.MaterialPacket,
+    texture_enabled::Float32,
+    scene_framebuffer::Lava.LavaFramebuffer,
+    scene_target::Lava.OffscreenTarget,
 )
-    started_ns = time_ns()
-    upload_bytes_start = state.upload_bytes
-    draw_calls_start = state.draw_calls
-    readback_bytes_start = state.readback_bytes
-    pipeline_compilations_start = state.pipeline_compilations
-    width, height = _validate_dimensions(packet.width_px, packet.height_px)
-    material = _terrain_material(packet)
-    for material_intent in packet.materials
-        _validate_material(material_intent)
-    end
-    environment_lighting = _environment_lighting(packet.environment)
-    texture_enabled = _material_texture_enabled(material)
-    camera_frame = _camera_frame(packet.camera)
-    lighting = _lighting(packet)
-
     prepare_started_ns = time_ns()
     prepare_gpu_timing_slot = _begin_gpu_pass_timing(state, GPU_PASS_TIMING_LABELS.prepare)
     resources = _terrain_resources!(state, packet)
@@ -3386,13 +3382,8 @@ function _render_scene(
     texture_resources = _material_texture_resources!(state, packet, shadow_resources, material)
     visibility = _mesh_visibility(packet, camera_frame)
     mesh_resources = _mesh_resources!(state, packet, camera_frame, visibility)
-    overlay_resources = _overlay_resources!(state, packet, camera_frame)
     _end_gpu_pass_timing!(state, prepare_gpu_timing_slot)
     prepare_time_us = _elapsed_us(prepare_started_ns)
-    render_width = 2 * width
-    render_height = 2 * height
-    scene_framebuffer = _framebuffer!(state, render_width, render_height, true, :scene_hdr)
-    scene_target = OffscreenTarget(scene_framebuffer)
     terrain_vertices = 6 * (packet.terrain.resolution - 1)^2
 
     scene_raster_started_ns = time_ns()
@@ -3533,6 +3524,32 @@ function _render_scene(
     _transition_color_to_sampled!(state, scene_framebuffer)
     _end_gpu_pass_timing!(state, scene_raster_gpu_timing_slot)
     scene_raster_time_us = _elapsed_us(scene_raster_started_ns)
+    return (
+        terrain_vertices=terrain_vertices,
+        mesh_vertex_count=mesh_resources === nothing ? 0 : mesh_resources.vertex_count,
+        visibility=visibility,
+        prepare_time_us=prepare_time_us,
+        scene_raster_time_us=scene_raster_time_us,
+    )
+end
+
+"""
+Shared composite tail for both render paths: resolve the supersampled HDR scene
+framebuffer into the capture framebuffer, then draw the overlay on top. The
+presented-window path records exactly these draws, so what the window presents
+is the certified composite by construction rather than a second approximation
+of it.
+"""
+function _composite_capture!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    scene_framebuffer::Lava.LavaFramebuffer,
+    overlay_resources::Union{Nothing,OverlayResources},
+    width::Int,
+    height::Int,
+)
+    render_width = 2 * width
+    render_height = 2 * height
 
     resolve_started_ns = time_ns()
     resolve_gpu_timing_slot = _begin_gpu_pass_timing(state, GPU_PASS_TIMING_LABELS.resolve)
@@ -3581,6 +3598,64 @@ function _render_scene(
     _end_gpu_pass_timing!(state, overlay_gpu_timing_slot)
     overlay_time_us = _elapsed_us(overlay_started_ns)
 
+    return (
+        capture_framebuffer=capture_framebuffer,
+        resolve_time_us=resolve_time_us,
+        overlay_time_us=overlay_time_us,
+    )
+end
+
+function _render_scene(
+    packet::WGEGraphics.GraphicsScenePacket,
+    state::LavaBackend,
+    gpu_timing_slot::Union{Nothing,Int},
+)
+    started_ns = time_ns()
+    upload_bytes_start = state.upload_bytes
+    draw_calls_start = state.draw_calls
+    readback_bytes_start = state.readback_bytes
+    pipeline_compilations_start = state.pipeline_compilations
+    width, height = _validate_dimensions(packet.width_px, packet.height_px)
+    material = _terrain_material(packet)
+    for material_intent in packet.materials
+        _validate_material(material_intent)
+    end
+    environment_lighting = _environment_lighting(packet.environment)
+    texture_enabled = _material_texture_enabled(material)
+    camera_frame = _camera_frame(packet.camera)
+    lighting = _lighting(packet)
+
+    render_width = 2 * width
+    render_height = 2 * height
+    scene_framebuffer = _framebuffer!(state, render_width, render_height, true, :scene_hdr)
+    scene_target = OffscreenTarget(scene_framebuffer)
+    scene = _record_scene_passes!(
+        state,
+        packet,
+        camera_frame,
+        lighting,
+        environment_lighting,
+        material,
+        texture_enabled,
+        scene_framebuffer,
+        scene_target,
+    )
+
+    overlay_resources = _overlay_resources!(state, packet, camera_frame)
+    composite = _composite_capture!(
+        state,
+        packet,
+        scene_framebuffer,
+        overlay_resources,
+        width,
+        height,
+    )
+    capture_framebuffer = composite.capture_framebuffer
+    prepare_time_us = scene.prepare_time_us
+    scene_raster_time_us = scene.scene_raster_time_us
+    resolve_time_us = composite.resolve_time_us
+    overlay_time_us = composite.overlay_time_us
+
     flush_readback_started_ns = time_ns()
     _end_gpu_frame_timing!(state, gpu_timing_slot)
     pixels = readback_framebuffer(capture_framebuffer)
@@ -3625,17 +3700,17 @@ function _render_scene(
             draw_calls=Int(state.draw_calls - draw_calls_start),
             dispatch_calls=0,
             pipeline_compilations=Int(state.pipeline_compilations - pipeline_compilations_start),
-            instance_count=visibility.instance_count,
-            visible_instance_count=visibility.visible_instance_count,
-            culled_instance_count=visibility.culled_instance_count,
-            background_visible_instance_count=visibility.background_visible_count,
-            background_culled_instance_count=visibility.background_culled_count,
-            landmark_visible_instance_count=visibility.landmark_visible_count,
-            landmark_culled_instance_count=visibility.landmark_culled_count,
-            gameplay_critical_visible_instance_count=visibility.gameplay_critical_visible_count,
-            gameplay_critical_culled_instance_count=visibility.gameplay_critical_culled_count,
-            terrain_vertex_count=terrain_vertices,
-            mesh_vertex_count=mesh_resources === nothing ? 0 : mesh_resources.vertex_count,
+            instance_count=scene.visibility.instance_count,
+            visible_instance_count=scene.visibility.visible_instance_count,
+            culled_instance_count=scene.visibility.culled_instance_count,
+            background_visible_instance_count=scene.visibility.background_visible_count,
+            background_culled_instance_count=scene.visibility.background_culled_count,
+            landmark_visible_instance_count=scene.visibility.landmark_visible_count,
+            landmark_culled_instance_count=scene.visibility.landmark_culled_count,
+            gameplay_critical_visible_instance_count=scene.visibility.gameplay_critical_visible_count,
+            gameplay_critical_culled_instance_count=scene.visibility.gameplay_critical_culled_count,
+            terrain_vertex_count=scene.terrain_vertices,
+            mesh_vertex_count=scene.mesh_vertex_count,
             texture_residency=_packet_residency_summary(packet),
             frame_time_us=_elapsed_us(started_ns),
             gpu_frame_time_us=gpu_frame_time_us,
@@ -3652,6 +3727,267 @@ function _render_scene(
             ),
         ),
     )
+end
+
+"""
+A persistent presented-session window. The GLFW window, Vulkan surface, and
+swapchain are owned by Lava's pinned revision; the adapter owns the session
+lifetime and never destroys swapchain resources manually. Rendering reuses the
+same scene passes as the offscreen path; only the final resolve target and the
+present differ.
+"""
+mutable struct WindowSession
+    window::Lava.RenderWindow
+    presented_frames::UInt64
+    # Window-sized RGBA buffer holding the certified composite for the present
+    # blit. Allocated lazily at the camera extent so the blit source and the
+    # window are always the same size.
+    present_pixels::Union{Nothing,Lava.LavaArray{Vec4f,1}}
+    present_width::Int
+    present_height::Int
+end
+
+const WINDOW_SESSION_REF = Ref{Union{Nothing,WindowSession}}(nothing)
+
+"""Open the persistent presented-session window on the shared device context."""
+function open_window_session(
+    state::LavaBackend,
+    width_px::Integer,
+    height_px::Integer;
+    vsync::Bool=true,
+)
+    WINDOW_SESSION_REF[] === nothing ||
+        throw(AdapterError("window_open_conflict", "a window session is already open"))
+    width, height = _validate_dimensions(width_px, height_px)
+    window = Lava.RenderWindow(
+        width,
+        height;
+        title="WGE native session",
+        vsync=vsync,
+        ctx=state.context,
+    )
+    session = WindowSession(window, UInt64(0), nothing, 0, 0)
+    WINDOW_SESSION_REF[] = session
+    win_width, win_height = size(window)
+    return (
+        window_width_px=Int(win_width),
+        window_height_px=Int(win_height),
+        vsync=vsync,
+    )
+end
+
+"""Close the persistent window session. Closing an already-closed session is
+reported honestly rather than treated as a fault."""
+function close_window_session!(state::LavaBackend)
+    session = WINDOW_SESSION_REF[]
+    session === nothing && return (closed=false, presented_frames=UInt64(0))
+    WINDOW_SESSION_REF[] = nothing
+    Lava.close(session.window)
+    return (closed=true, presented_frames=session.presented_frames)
+end
+
+function _window_session(state::LavaBackend)::WindowSession
+    session = WINDOW_SESSION_REF[]
+    session === nothing &&
+        throw(AdapterError("window_not_open", "no window session is open"))
+    return session
+end
+
+function _window_target(
+    session::WindowSession,
+    width::Int,
+    height::Int,
+)::Lava.WindowTarget
+    win_width, win_height = size(session.window)
+    (win_width, win_height) == (width, height) || throw(AdapterError(
+        "window_extent_mismatch",
+        "camera extent ($width, $height) does not match the window ($win_width, $win_height)",
+    ))
+    return Lava.WindowTarget(session.window)
+end
+
+"""Convert a swapchain readback (BGRA8, sRGB-encoded) into contract RGBA8 row
+order, mirroring the offscreen capture's row orientation. Reserved for the
+C3.4 presented-frame evidence slice; Lava's mid-frame readback flushes the
+active batch, so a presented-frame capture cannot share the frame's batch."""
+function _window_capture_bytes(pixels::Matrix{NTuple{4,UInt8}})::Vector{UInt8}
+    bytes = Vector{UInt8}(undef, 4 * length(pixels))
+    offset = 0
+    # Lava readback is indexed as (x, y); the contract stores rows top-to-bottom.
+    for row in axes(pixels, 2), column in axes(pixels, 1)
+        bgra = pixels[column, row]
+        bytes[offset+1] = bgra[3]
+        bytes[offset+2] = bgra[2]
+        bytes[offset+3] = bgra[1]
+        bytes[offset+4] = bgra[4]
+        offset += 4
+    end
+    return bytes
+end
+
+"""Lazily allocate (or resize) the persistent present buffer for the session."""
+function _present_pixels!(session::WindowSession, width::Int, height::Int)
+    if session.present_pixels === nothing ||
+       session.present_width != width ||
+       session.present_height != height
+        session.present_pixels = Lava.LavaArray{Vec4f,1}(undef, (width * height,))
+        session.present_width = width
+        session.present_height = height
+    end
+    return session.present_pixels
+end
+
+"""
+Rebuild a capture readback into the flat layout `Lava.blit!` expects: pixel
+`(x, y)` at linear index `x * height + y + 1`. Vulkan packs image copies row by
+row, so the readback's column-major flattening is the transpose of the blit
+layout; the conversion is exact (no resampling) and keeps the presented frame
+faithful to the certified capture.
+"""
+function _present_pixel_data(
+    pixels::AbstractMatrix{<:NTuple{4,<:Real}},
+    width::Int,
+    height::Int,
+)::Vector{Vec4f}
+    data = Vector{Vec4f}(undef, width * height)
+    for column in 0:(width-1)
+        base = column * height
+        for row in 1:height
+            pixel = pixels[column+1, row]
+            data[base+row] = Vec4f(
+                clamp(Float32(pixel[1]), 0.0f0, 1.0f0),
+                clamp(Float32(pixel[2]), 0.0f0, 1.0f0),
+                clamp(Float32(pixel[3]), 0.0f0, 1.0f0),
+                clamp(Float32(pixel[4]), 0.0f0, 1.0f0),
+            )
+        end
+    end
+    return data
+end
+
+"""Render `frame_count` presented frames of the packet scene through the open
+window session. `camera_override` re-aims the Rust-owned camera for every frame
+without changing the packet identity or invalidating GPU resource caches.
+Presented frames carry no capture: Tier-A evidence is independently promoted
+from the offscreen path over the same packet, so the presented loop never
+carries un-promoted evidence and never reads back mid-batch."""
+function render_window_frames!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    camera_override::Union{Nothing,WGEGraphics.CameraPacket},
+    frame_count::Integer,
+)
+    session = _window_session(state)
+    frame_count >= 1 ||
+        throw(AdapterError("invalid_request", "frame_count must be at least one"))
+    material = _terrain_material(packet)
+    for material_intent in packet.materials
+        _validate_material(material_intent)
+    end
+    lighting = _lighting(packet)
+    environment_lighting = _environment_lighting(packet.environment)
+    texture_enabled = _material_texture_enabled(material)
+    frame_times_us = Int[]
+    presented = 0
+    for frame_index in 1:Int(frame_count)
+        frame_started_ns = time_ns()
+        Lava.GLFW.PollEvents()
+        # `Lava.checkopen` is a throwing assertion, not a predicate; the loop
+        # stop condition is `Base.isopen` (handle alive and no close request).
+        if !isopen(session.window)
+            frame_index == 1 && throw(AdapterError(
+                "window_closed",
+                "the presented window was closed before any frame was presented",
+            ))
+            break
+        end
+        active_camera = camera_override === nothing ? packet.camera : camera_override
+        width, height = _validate_dimensions(active_camera.width_px, active_camera.height_px)
+        window_target = _window_target(session, width, height)
+        camera_frame = _camera_frame(active_camera)
+
+        Lava.acquire_next_image!(session.window)
+        render_width = 2 * width
+        render_height = 2 * height
+        scene_framebuffer = _framebuffer!(state, render_width, render_height, true, :scene_hdr)
+        scene_target = OffscreenTarget(scene_framebuffer)
+        _record_scene_passes!(
+            state,
+            packet,
+            camera_frame,
+            lighting,
+            environment_lighting,
+            material,
+            texture_enabled,
+            scene_framebuffer,
+            scene_target,
+        )
+        overlay_resources = _overlay_resources!(state, packet, camera_frame)
+        composite = _composite_capture!(
+            state,
+            packet,
+            scene_framebuffer,
+            overlay_resources,
+            width,
+            height,
+        )
+
+        # A window draw cannot use descriptor sets (Lava's `WindowTarget`
+        # `draw!` has no depth attachment and no descriptor kwargs), so the
+        # composite reaches the swapchain through Lava's own fullscreen blit of
+        # a window-sized RGBA buffer. `readback_framebuffer` flushes the scene
+        # batch, which carries no swapchain writes; the upload opens the next
+        # batch and `present_frame!` submits it with the acquire-semaphore wait,
+        # so the mid-frame readback hazard does not apply to this ordering.
+        pixels = readback_framebuffer(composite.capture_framebuffer)
+        present_array = _present_pixels!(session, width, height)
+        Lava.upload!(present_array, _present_pixel_data(pixels, width, height))
+        Lava.blit!(state.queue, window_target, present_array; clear=false)
+        state.draw_calls += 1
+
+        Lava.present_frame!(state.queue, session.window)
+        session.presented_frames += UInt64(1)
+        presented += 1
+        push!(frame_times_us, Int(_elapsed_us(frame_started_ns)))
+    end
+    return (
+        frames_presented=presented,
+        frame_times_us=frame_times_us,
+        window_presented_frames=Int(session.presented_frames),
+    )
+end
+
+"""Self-contained presented-frame capability probe: three tiny diagnostic
+triangle presents through the same window path the session uses. No packet, no
+capture, no certification claim."""
+function render_window_probe_frame(state::LavaBackend; vsync::Bool=false)
+    window = Lava.RenderWindow(
+        96,
+        64;
+        title="WGE window probe",
+        vsync=vsync,
+        ctx=state.context,
+    )
+    try
+        bq = state.queue
+        pipeline = GraphicsPipeline(
+            ;
+            vertex=_probe_vertex,
+            fragment=_probe_fragment,
+            cull=NoCull(),
+            depth=DepthOff(),
+        )
+        target = Lava.WindowTarget(window)
+        for _ in 1:3
+            Lava.acquire_next_image!(window)
+            draw!(bq, pipeline, target, 3; clear_color=(0.02f0, 0.03f0, 0.05f0, 1.0f0))
+            Lava.present_frame!(bq, window)
+            state.draw_calls += 1
+        end
+        return (presents_requested=3, frame_slots=length(window.in_flight))
+    finally
+        Lava.close(window)
+    end
 end
 
 end

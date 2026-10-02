@@ -22,8 +22,8 @@ use crate::{
     lower_campaign2_packet, lower_dense_benchmark_packet, lower_objective_close_packet,
     lower_reference_world, lower_showcase_packet, lower_world_showcase_packet,
     measure_frame_capture, seal_frame_receipt_with_capture, seal_renderer_attestation,
-    sha256_prefixed, validate_native_visual_gate, validate_ready, validate_scene_packet,
-    validate_texture_residency_telemetry,
+    seal_scene_packet, sha256_prefixed, validate_native_visual_gate, validate_ready,
+    validate_scene_packet, validate_texture_residency_telemetry,
 };
 use wge_reference_runtime::{WorldArtifact, validate_world_artifact};
 
@@ -38,42 +38,42 @@ pub struct GraphicsWorkerError {
 }
 
 impl GraphicsWorkerError {
-    fn io(message: impl Into<String>) -> Self {
+    pub(crate) fn io(message: impl Into<String>) -> Self {
         Self {
             code: "worker_io",
             message: message.into(),
         }
     }
 
-    fn timeout(message: impl Into<String>) -> Self {
+    pub(crate) fn timeout(message: impl Into<String>) -> Self {
         Self {
             code: "worker_timeout",
             message: message.into(),
         }
     }
 
-    fn restart_required(message: impl Into<String>) -> Self {
+    pub(crate) fn restart_required(message: impl Into<String>) -> Self {
         Self {
             code: "worker_restart_required",
             message: message.into(),
         }
     }
 
-    fn protocol(message: impl Into<String>) -> Self {
+    pub(crate) fn protocol(message: impl Into<String>) -> Self {
         Self {
             code: "worker_protocol",
             message: message.into(),
         }
     }
 
-    fn provenance(message: impl Into<String>) -> Self {
+    pub(crate) fn provenance(message: impl Into<String>) -> Self {
         Self {
             code: "provenance",
             message: message.into(),
         }
     }
 
-    fn contract(error: GraphicsContractError) -> Self {
+    pub(crate) fn contract(error: GraphicsContractError) -> Self {
         Self {
             code: error.code,
             message: error.message,
@@ -736,8 +736,24 @@ fn validate_authorized_world_projection(
                 .map_err(GraphicsWorkerError::contract)?,
         );
     }
-    if authorized.iter().any(|candidate| candidate == packet) {
-        return Ok(());
+    for candidate in &authorized {
+        if candidate == packet {
+            return Ok(());
+        }
+        // Cameras are presentation parameters, not scene identity: an exact
+        // authorized projection whose only difference is the camera is accepted
+        // when the camera was produced and validated by Rust authority (the
+        // packet revalidates fully, including camera basis and bounds). This is
+        // the same seam C2.5 opened for Rust-owned bound-scene cameras.
+        if candidate.body.camera != packet.body.camera {
+            let mut body = candidate.body.clone();
+            body.camera = packet.body.camera.clone();
+            if let Ok(camera_variant) = seal_scene_packet(body)
+                && &camera_variant == packet
+            {
+                return Ok(());
+            }
+        }
     }
     Err(GraphicsWorkerError::provenance(
         "scene packet is not an authorized projection of the validated world artifact",

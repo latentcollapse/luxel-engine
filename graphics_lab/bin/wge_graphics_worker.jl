@@ -101,6 +101,76 @@ function handle(payload::AbstractString)::String
                 )
             frame = LavaAdapter.render_scene(packet)
             return JSON3.write((schema=WORKER_SCHEMA, kind="frame_rendered", frame=frame))
+        elseif operation == "open_window"
+            allowed = Set(("op", "width_px", "height_px", "vsync"))
+            request_keys = Set(String(key) for key in keys(value))
+            request_keys ⊆ allowed ||
+                return failure("malformed_request", "open_window request fields are closed")
+            width = _request_dimension(value, "width_px", 1280)
+            height = _request_dimension(value, "height_px", 720)
+            width === nothing && return failure("malformed_request", "width_px must be a positive integer")
+            height === nothing && return failure("malformed_request", "height_px must be a positive integer")
+            vsync = haskey(value, "vsync") ? value["vsync"] : true
+            vsync isa Bool || return failure("malformed_request", "vsync must be a boolean")
+            state = LavaAdapter.backend()
+            opened = LavaAdapter.open_window_session(state, width, height; vsync=vsync)
+            return JSON3.write((
+                schema=WORKER_SCHEMA,
+                kind="window_opened",
+                window_width_px=opened.window_width_px,
+                window_height_px=opened.window_height_px,
+                vsync=opened.vsync,
+            ))
+        elseif operation == "render_window"
+            allowed = Set(("op", "packet", "camera_override", "frame_count", "expected_packet_sha256"))
+            request_keys = Set(String(key) for key in keys(value))
+            request_keys ⊆ allowed ||
+                return failure("malformed_request", "render_window request fields are closed")
+            packet = validate_scene_packet(value["packet"])
+            expected_packet_sha256 = WGEGraphics._string(
+                value["expected_packet_sha256"],
+                "expected_packet_sha256",
+            )
+            expected_packet_sha256 == packet.packet_sha256 ||
+                return failure(
+                    "provenance",
+                    "Rust packet identity does not match the worker packet",
+                )
+            camera_override = nothing
+            if haskey(value, "camera_override") && value["camera_override"] isa JSON3.Object
+                camera_override = WGEGraphics._parse_camera(value["camera_override"])
+            end
+            frame_count_raw = get(value, "frame_count", nothing)
+            frame_count_raw isa Integer ||
+                return failure("malformed_request", "frame_count must be a positive integer")
+            frame_count = Int(frame_count_raw)
+            1 <= frame_count <= 1024 ||
+                return failure("malformed_request", "frame_count must be in 1..1024")
+            state = LavaAdapter.backend()
+            result = LavaAdapter.render_window_frames!(
+                state,
+                packet,
+                camera_override,
+                frame_count,
+            )
+            return JSON3.write((
+                schema=WORKER_SCHEMA,
+                kind="window_frames_presented",
+                frames_presented=result.frames_presented,
+                frame_times_us=result.frame_times_us,
+                window_presented_frames=result.window_presented_frames,
+            ))
+        elseif operation == "close_window"
+            Set(String(key) for key in keys(value)) == Set(("op",)) ||
+                return failure("malformed_request", "close_window request fields are closed")
+            state = LavaAdapter.backend()
+            closed = LavaAdapter.close_window_session!(state)
+            return JSON3.write((
+                schema=WORKER_SCHEMA,
+                kind="window_closed",
+                closed=closed.closed,
+                presented_frames=Int(closed.presented_frames),
+            ))
         elseif operation == "probe_capabilities"
             Set(String(key) for key in keys(value)) == Set(("op",)) ||
                 return failure("malformed_request", "probe_capabilities request fields are closed")
