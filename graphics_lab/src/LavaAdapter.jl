@@ -17,7 +17,7 @@ export AdapterError,
     render_texture_probe,
     render_scene
 
-const ADAPTER_REVISION = "wge.lava-adapter/v6"
+const ADAPTER_REVISION = "wge.lava-adapter/v7"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 const VULKAN_REVISION = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"
 const VULKAN_CORE_REVISION = "1d02829e8fa92da430d879db4dd7bf564a872035"
@@ -84,7 +84,7 @@ struct MeshVisibility
 end
 
 struct TextureProbeResources
-    texture::Lava.LavaTexture2D{NTuple{4,Float32}}
+    texture::Lava.LavaTexture2D
     sampler::Lava.LavaSampler
     bindings::Lava.TextureBindings
 end
@@ -92,13 +92,14 @@ end
 struct MaterialTextureResources
     cache_key::String
     material_id::String
-    albedo_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
-    normal_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
-    roughness_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
-    occlusion_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
-    emissive_texture::Lava.LavaTexture2D{NTuple{4,Float32}}
+    albedo_texture::Lava.LavaTexture2D
+    normal_texture::Lava.LavaTexture2D
+    roughness_texture::Lava.LavaTexture2D
+    occlusion_texture::Lava.LavaTexture2D
+    emissive_texture::Lava.LavaTexture2D
     sampler::Lava.LavaSampler
     bindings::Lava.TextureBindings
+    max_sampler_lod::UInt32
 end
 
 struct DirectionalLighting
@@ -1602,6 +1603,258 @@ function _decode_texture_channel(::Val{:data}, channel::Float32)::Float32
     return channel
 end
 
+"""Validate a packet texture payload into explicit CPU upload levels: the base
+level plus any authority-conditioned mip levels, each decoded to the adapter's
+proven RGBA32F sample format. Packet-level byte framing is revalidated before
+decoding; the adapter never trusts packet framing."""
+function _texture_levels(payload)
+    width = UInt32(payload.width)
+    height = UInt32(payload.height)
+    width > 0 && height > 0 ||
+        throw(AdapterError("malformed_texture", "texture dimensions must be positive"))
+    color_space = payload.color_space
+    levels = Vector{Matrix{NTuple{4,Float32}}}()
+    push!(levels, _texture_matrix(payload.bytes, width, height, color_space))
+    for mip in get(payload, :mips, ())
+        width = max(width ÷ 2, UInt32(1))
+        height = max(height ÷ 2, UInt32(1))
+        expected = 4 * Int(width) * Int(height)
+        length(mip.bytes) == expected ||
+            throw(AdapterError(
+                "malformed_texture",
+                "mip level payload is $expected bytes, received $(length(mip.bytes))",
+            ))
+        push!(levels, _texture_matrix(mip.bytes, width, height, color_space))
+    end
+    return levels
+end
+
+"""Create a Vulkan image with one mip level per validated CPU level, copy each
+level through a single shared staging buffer, and return the resident texture.
+The view spans every level so sampler LOD range 0..levels-1 is backed by real
+data. Levels are RGBA32F — the adapter's proven sample format — until a
+narrower-format seam is validated. Image, memory, and view are owned by the
+texture; the pinned Lava rev owns destruction through finalizers, so nothing
+is destroyed manually."""
+function _lava_texture2d!(
+    state::LavaBackend,
+    levels::Vector{Matrix{NTuple{4,Float32}}};
+    filter::Symbol=:linear,
+    wrap::Symbol=:clamp,
+)
+    isempty(levels) &&
+        throw(AdapterError("malformed_texture", "texture needs at least one level"))
+    base = levels[1]
+    base_height, base_width = size(base)
+    base_width > 0 && base_height > 0 ||
+        throw(AdapterError("malformed_texture", "texture dimensions must be positive"))
+    level_count = UInt32(length(levels))
+    format = Vulkan.FORMAT_R32G32B32A32_SFLOAT
+    dev = state.context.device
+
+    image = Vulkan.Image(
+        dev,
+        Vulkan.IMAGE_TYPE_2D,
+        format,
+        Vulkan.Extent3D(UInt32(base_width), UInt32(base_height), UInt32(1)),
+        level_count,
+        UInt32(1),
+        Vulkan.SAMPLE_COUNT_1_BIT,
+        Vulkan.IMAGE_TILING_OPTIMAL,
+        Vulkan.IMAGE_USAGE_SAMPLED_BIT | Vulkan.IMAGE_USAGE_TRANSFER_DST_BIT,
+        Vulkan.SHARING_MODE_EXCLUSIVE,
+        UInt32[],
+        Vulkan.IMAGE_LAYOUT_UNDEFINED,
+    )
+    memory = Lava.alloc_image_memory(state.context, image)
+    view = Vulkan.ImageView(
+        dev,
+        image,
+        Vulkan.IMAGE_VIEW_TYPE_2D,
+        format,
+        Vulkan.ComponentMapping(
+            Vulkan.COMPONENT_SWIZZLE_IDENTITY,
+            Vulkan.COMPONENT_SWIZZLE_IDENTITY,
+            Vulkan.COMPONENT_SWIZZLE_IDENTITY,
+            Vulkan.COMPONENT_SWIZZLE_IDENTITY,
+        ),
+        Vulkan.ImageSubresourceRange(
+            Vulkan.IMAGE_ASPECT_COLOR_BIT,
+            UInt32(0),
+            level_count,
+            UInt32(0),
+            UInt32(1),
+        ),
+    )
+    texture = Lava.LavaTexture2D{NTuple{4,Float32}}(
+        image,
+        memory,
+        view,
+        base_width,
+        base_height,
+        format,
+        state.context,
+    )
+
+    bq = state.context.default_bq
+    cmd = Lava.ensure_active_batch!(bq).cmd_buf
+    level_bytes = [16 * size(level, 2) * size(level, 1) for level in levels]
+    # Exclusive prefix: level i lives at [offsets[i], offsets[i] + level_bytes[i]).
+    # Julia's accumulate folds `init` into the first element, so accumulate(+,
+    # bytes; init=0) yields the inclusive prefix [b1, b1+b2, ...] and level 1
+    # would land past the end of the staging buffer.
+    offsets = pushfirst!(accumulate(+, level_bytes), 0)
+    staging_buf, _, mapped_ptr, _ = Lava.get_staging(bq, offsets[end])
+    for (index, level) in enumerate(levels)
+        write_ptr = Ptr{UInt8}(mapped_ptr) + offsets[index]
+        # A Julia column-major Matrix{NTuple{4,Float32}} is already an
+        # interleaved RGBA32F buffer, so its pointer is the upload payload.
+        # The matrix must be GC-preserved across the raw copy; a temporary
+        # view whose pointer is the last use would be collectible mid-copy.
+        # unsafe_copyto! requires both pointers to share an element type, so
+        # the staging slice is reinterpreted to the matrix's own element type
+        # and the copy length is in 16-byte RGBA elements (staging offsets are
+        # 16-byte multiples, so alignment holds).
+        GC.@preserve level unsafe_copyto!(
+            Ptr{NTuple{4,Float32}}(write_ptr), pointer(level), length(level)
+        )
+    end
+
+    Lava.transition_image!(
+        cmd,
+        image,
+        Vulkan.IMAGE_LAYOUT_UNDEFINED,
+        Vulkan.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        Vulkan.PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        Vulkan.PIPELINE_STAGE_TRANSFER_BIT,
+        Vulkan.AccessFlag(0),
+        Vulkan.ACCESS_TRANSFER_WRITE_BIT,
+    )
+    regions = [
+        Vulkan.BufferImageCopy(
+            UInt64(offsets[index]),
+            UInt32(0),
+            UInt32(0),
+            Vulkan.ImageSubresourceLayers(
+                Vulkan.IMAGE_ASPECT_COLOR_BIT,
+                UInt32(index - 1),
+                UInt32(0),
+                UInt32(1),
+            ),
+            Vulkan.Offset3D(0, 0, 0),
+            Vulkan.Extent3D(
+                UInt32(size(level, 2)),
+                UInt32(size(level, 1)),
+                UInt32(1),
+            ),
+        )
+        for (index, level) in enumerate(levels)
+    ]
+    Vulkan.cmd_copy_buffer_to_image(
+        cmd,
+        staging_buf,
+        image,
+        Vulkan.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        regions,
+    )
+    Lava.transition_image!(
+        cmd,
+        image,
+        Vulkan.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        Vulkan.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        Vulkan.PIPELINE_STAGE_TRANSFER_BIT,
+        Vulkan.PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        Vulkan.ACCESS_TRANSFER_WRITE_BIT,
+        Vulkan.ACCESS_SHADER_READ_BIT,
+    )
+    Lava.pin!(Lava.ensure_active_batch!(bq), texture)
+    Lava.flush!(bq, dev)
+    return texture
+end
+
+"""Build a sampler whose LOD range spans the resident mip chain. The pinned
+Lava revision hardcodes min/max LOD to zero, so the handle is constructed here
+from the same argument order as LavaSampler; max_lod = 0 reproduces it."""
+function _lod_sampler!(
+    state::LavaBackend,
+    max_lod::UInt32;
+    filter::Symbol=:linear,
+    wrap::Symbol=:clamp,
+)
+    vk_filter = filter == :linear ? Vulkan.FILTER_LINEAR :
+                filter == :nearest ? Vulkan.FILTER_NEAREST :
+                throw(AdapterError("unsupported_texture", "unknown texture filter $filter"))
+    vk_wrap = wrap == :clamp ? Vulkan.SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE :
+              wrap == :repeat ? Vulkan.SAMPLER_ADDRESS_MODE_REPEAT :
+              wrap == :mirror ? Vulkan.SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT :
+              throw(AdapterError("unsupported_texture", "unknown texture wrap $wrap"))
+    handle = Vulkan.Sampler(
+        state.context.device,
+        vk_filter,
+        vk_filter,
+        Vulkan.SAMPLER_MIPMAP_MODE_LINEAR,
+        vk_wrap,
+        vk_wrap,
+        vk_wrap,
+        0.0f0,
+        false,
+        0.0f0,
+        false,
+        Vulkan.COMPARE_OP_ALWAYS,
+        0.0f0,
+        Float32(max_lod),
+        Vulkan.BORDER_COLOR_FLOAT_TRANSPARENT_BLACK,
+        false,
+    )
+    return Lava.LavaSampler(handle, filter, wrap, 0.0f0, state.context)
+end
+
+"""Assemble the residency telemetry shape for a frame receipt, mirroring the
+Rust contract's independent expectation exactly: distinct source texture ids
+referenced by any material in the packet, summed mip level counts and decoded
+payload bytes, and the widest sampler LOD span. Adapter-owned default textures
+are excluded. Nothing is reported when no source textures are referenced."""
+function _packet_residency_summary(packet::WGEGraphics.GraphicsScenePacket)
+    referenced = Set{String}()
+    for material in packet.materials
+        union!(referenced, material.texture_ids)
+        for texture_id in (
+            material.normal_texture_id,
+            material.roughness_texture_id,
+            material.occlusion_texture_id,
+            material.emissive_texture_id,
+        )
+            texture_id === nothing || push!(referenced, texture_id)
+        end
+    end
+    isempty(referenced) && return nothing
+    texture_count = 0
+    mip_levels = 0
+    payload_bytes = 0
+    max_sampler_lod = 0
+    for texture in packet.textures
+        texture.texture_id in referenced || continue
+        texture.payload === nothing && throw(AdapterError(
+            "unsupported_texture",
+            "referenced texture $(texture.texture_id) has no inline payload for native residency",
+        ))
+        texture_count += 1
+        mip_levels += Int(texture.mip_levels)
+        payload_bytes += length(texture.payload)
+        for mip in texture.mip_chain
+            payload_bytes += length(mip.bytes)
+        end
+        max_sampler_lod = max(max_sampler_lod, Int(texture.mip_levels) - 1)
+    end
+    texture_count > 0 || return nothing
+    return (
+        texture_count=texture_count,
+        mip_levels=mip_levels,
+        payload_bytes=payload_bytes,
+        max_sampler_lod=max_sampler_lod,
+    )
+end
+
 function _texture_matrix(
     bytes::Vector{UInt8},
     width::UInt32,
@@ -1708,16 +1961,12 @@ function _texture_payload(
         ))
     texture.payload === nothing &&
         throw(AdapterError("unsupported_texture", "native path requires inline texture payloads"))
-    isempty(texture.mip_chain) ||
-        throw(AdapterError(
-            "unsupported_texture",
-            "multi-level texture payloads require the native residency uploader",
-        ))
     return (
         bytes=texture.payload::Vector{UInt8},
         width=texture.width_px,
         height=texture.height_px,
         color_space=texture.color_space,
+        mips=texture.mip_chain,
     )
 end
 
@@ -1743,12 +1992,15 @@ function _material_texture_resources!(
         role -> _texture_payload(packet, _material_texture_id(material, role), role),
         roles,
     )
-    matrices = map(
-        payload -> _texture_matrix(payload.bytes, payload.width, payload.height, payload.color_space),
-        payloads,
+    levels = map(_texture_levels, payloads)
+    textures = map(
+        texture_levels -> _lava_texture2d!(state, texture_levels; filter=:linear, wrap=:clamp),
+        levels,
     )
-    textures = map(data -> Lava.LavaTexture2D(data; ctx=state.context, filter=:linear, wrap=:clamp), matrices)
-    sampler = Lava.LavaSampler(ctx=state.context, filter=:linear, wrap=:clamp)
+    max_sampler_lod = UInt32(maximum(
+        maximum(length(texture_levels) - 1, init=0) for texture_levels in levels
+    ))
+    sampler = _lod_sampler!(state, max_sampler_lod; filter=:linear, wrap=:clamp)
     bindings = Lava.bind_textures([
         textures[1] * sampler,
         textures[2] * sampler,
@@ -1757,6 +2009,11 @@ function _material_texture_resources!(
         textures[5] * sampler,
         shadow.texture * shadow.sampler,
     ])
+    for texture_levels in levels
+        state.upload_bytes += UInt64(sum(
+            16 * size(level, 2) * size(level, 1) for level in texture_levels; init=0
+        ))
+    end
     created = MaterialTextureResources(
         packet.content_sha256,
         material.material_id,
@@ -1767,9 +2024,9 @@ function _material_texture_resources!(
         textures[5],
         sampler,
         bindings,
+        max_sampler_lod,
     )
     cache[material.material_id] = created
-    state.upload_bytes += UInt64(sum(length(payload.bytes) for payload in payloads))
     return created
 end
 
@@ -3379,6 +3636,7 @@ function _render_scene(
             gameplay_critical_culled_instance_count=visibility.gameplay_critical_culled_count,
             terrain_vertex_count=terrain_vertices,
             mesh_vertex_count=mesh_resources === nothing ? 0 : mesh_resources.vertex_count,
+            texture_residency=_packet_residency_summary(packet),
             frame_time_us=_elapsed_us(started_ns),
             gpu_frame_time_us=gpu_frame_time_us,
             pass_timings=(

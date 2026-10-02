@@ -393,7 +393,7 @@ mod tests {
         GraphicsReady {
             schema_version: READY_SCHEMA.into(),
             backend_id: "lava-vulkan".into(),
-            adapter_revision: "wge.lava-adapter/v6".into(),
+            adapter_revision: "wge.lava-adapter/v7".into(),
             lava_revision: "test-revision".into(),
             julia_version: "1.11.0".into(),
             vulkan_api_version: "1.3".into(),
