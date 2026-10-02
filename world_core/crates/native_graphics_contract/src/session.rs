@@ -320,6 +320,34 @@ impl PresentedGraphicsSession {
         supervisor: &mut GraphicsWorkerSupervisor,
         frame_count: u32,
     ) -> Result<WindowFrameReport, GraphicsWorkerError> {
+        self.present_frames_internal(supervisor, frame_count, false)
+            .map(|(report, _)| report)
+    }
+
+    /// Present frames while the worker samples raw HID state once per frame.
+    /// The returned samples are device-raw; only the input-session layer
+    /// derives semantics from them. Sample ordering matches frame order.
+    pub fn present_frames_with_input(
+        &mut self,
+        supervisor: &mut GraphicsWorkerSupervisor,
+        frame_count: u32,
+    ) -> Result<(WindowFrameReport, Vec<crate::input_session::InputSample>), GraphicsWorkerError>
+    {
+        self.present_frames_internal(supervisor, frame_count, true)
+    }
+
+    fn present_frames_internal(
+        &mut self,
+        supervisor: &mut GraphicsWorkerSupervisor,
+        frame_count: u32,
+        collect_input: bool,
+    ) -> Result<
+        (
+            WindowFrameReport,
+            Vec<crate::input_session::InputSample>,
+        ),
+        GraphicsWorkerError,
+    > {
         if !self.window_open {
             return Err(GraphicsWorkerError::protocol(
                 "presented window is not open; open it before presenting frames",
@@ -338,6 +366,9 @@ impl PresentedGraphicsSession {
             "frame_count": frame_count,
             "expected_packet_sha256": self.base_packet.packet_sha256,
         });
+        if collect_input {
+            request["report_input"] = json!(true);
+        }
         if !unchanged_camera {
             request["camera_override"] =
                 serde_json::to_value(&camera_override).map_err(|error| {
@@ -377,7 +408,23 @@ impl PresentedGraphicsSession {
         self.frames_presented += u64::from(report.frames_presented);
         self.window_presented_frames = report.window_presented_frames;
         self.tick = self.tick.saturating_add(u64::from(report.frames_presented));
-        Ok(report)
+        let input_samples = if collect_input {
+            match response.get("input_samples") {
+                Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
+                    GraphicsWorkerError::protocol(format!(
+                        "worker input samples are not typed: {error}"
+                    ))
+                })?,
+                None => {
+                    return Err(GraphicsWorkerError::protocol(
+                        "input collection was requested but the response carries none",
+                    ));
+                }
+            }
+        } else {
+            Vec::new()
+        };
+        Ok((report, input_samples))
     }
 
     /// Revalidate a world artifact against the session's bound world identity.

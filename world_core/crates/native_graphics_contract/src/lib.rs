@@ -43,6 +43,7 @@ const REFERENCE_FOG_WEIGHT_AT_CAMERA: f64 = 0.16;
 const MAX_REFERENCE_FOG_DENSITY: f64 = 0.006;
 
 pub mod asset_projection;
+pub mod input_session;
 pub mod live;
 pub mod scene_composition;
 pub mod session;
@@ -55,6 +56,12 @@ pub use asset_projection::{
     GraphicsAssetTexture, project_render_asset, validate_graphics_asset_projection,
 };
 pub use scene_composition::{compose_bound_scene, compose_bound_scene_with_camera};
+
+pub use input_session::{
+    INPUT_FRAME_SCHEMA, INPUT_SAMPLE_SCHEMA, INPUT_SIM_TICK_DT_MS, INPUT_TRACE_SCHEMA,
+    InputDrivenSession, InputFrame, InputSample, TraceStep, camera_intent,
+    ds3_map, frame_from_gamepad, frame_from_keyboard, frame_from_sample, trace_digest,
+};
 
 pub use live::{
     GraphicsSessionMode, LiveCaptureOutput, LiveGraphicsError, LiveGraphicsSession,

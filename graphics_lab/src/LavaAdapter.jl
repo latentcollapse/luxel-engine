@@ -3749,6 +3749,54 @@ end
 
 const WINDOW_SESSION_REF = Ref{Union{Nothing,WindowSession}}(nothing)
 
+"""Sample raw HID state for the presented window: held keys (plus the
+reserved negative mouse-button codes), normalized cursor position while
+focused, and joystick-1 axes/buttons. Device-raw by contract — semantic
+meaning (sprint, guard, look) is applied only by Rust's input-session layer,
+so the worker never derives gameplay state."""
+function _sample_window_input(window::Lava.RenderWindow)
+    glfw_window = window.handle
+    keys = Int[]
+    cursor = nothing
+    if GLFW.GetWindowAttrib(glfw_window, GLFW.FOCUSED)
+        for key in (
+            GLFW.KEY_W,
+            GLFW.KEY_A,
+            GLFW.KEY_S,
+            GLFW.KEY_D,
+            GLFW.KEY_LEFT_SHIFT,
+            GLFW.KEY_SPACE,
+            GLFW.KEY_E,
+            GLFW.KEY_LEFT_CONTROL,
+        )
+            GLFW.GetKey(glfw_window, key) && push!(keys, Int(key))
+        end
+        GLFW.GetMouseButton(glfw_window, GLFW.MOUSE_BUTTON_LEFT) && push!(keys, -1)
+        GLFW.GetMouseButton(glfw_window, GLFW.MOUSE_BUTTON_RIGHT) && push!(keys, -2)
+        win_width, win_height = GLFW.GetWindowSize(glfw_window)
+        if win_width > 0 && win_height > 0
+            x, y = GLFW.GetCursorPos(glfw_window)
+            cursor = [Float64(x / win_width), Float64(y / win_height)]
+        end
+    end
+    axes_vec = Float32[]
+    buttons_vec = Bool[]
+    if GLFW.JoystickPresent(GLFW.Joystick(0))
+        stick_axes = GLFW.GetJoystickAxes(GLFW.Joystick(0))
+        stick_axes === nothing || append!(axes_vec, Float32.(collect(stick_axes)))
+        stick_buttons = GLFW.GetJoystickButtons(GLFW.Joystick(0))
+        stick_buttons === nothing || append!(buttons_vec, Bool.(collect(stick_buttons)))
+    end
+    return (
+        schema_version="wge.input-sample/v1",
+        timestamp_ms=Float64(time_ns() / 1e6),
+        held_keys=keys,
+        cursor=cursor,
+        gamepad_axes=axes_vec,
+        gamepad_buttons=buttons_vec,
+    )
+end
+
 """Open the persistent presented-session window on the shared device context."""
 function open_window_session(
     state::LavaBackend,
@@ -3876,6 +3924,7 @@ function render_window_frames!(
     packet::WGEGraphics.GraphicsScenePacket,
     camera_override::Union{Nothing,WGEGraphics.CameraPacket},
     frame_count::Integer,
+    report_input::Bool=false,
 )
     session = _window_session(state)
     frame_count >= 1 ||
@@ -3888,10 +3937,12 @@ function render_window_frames!(
     environment_lighting = _environment_lighting(packet.environment)
     texture_enabled = _material_texture_enabled(material)
     frame_times_us = Int[]
+    input_samples = report_input ? Any[] : nothing
     presented = 0
     for frame_index in 1:Int(frame_count)
         frame_started_ns = time_ns()
         Lava.GLFW.PollEvents()
+        report_input && push!(input_samples, _sample_window_input(session.window))
         # `Lava.checkopen` is a throwing assertion, not a predicate; the loop
         # stop condition is `Base.isopen` (handle alive and no close request).
         if !isopen(session.window)
@@ -3954,6 +4005,7 @@ function render_window_frames!(
         frames_presented=presented,
         frame_times_us=frame_times_us,
         window_presented_frames=Int(session.presented_frames),
+        input_samples=input_samples,
     )
 end
 

@@ -122,10 +122,13 @@ function handle(payload::AbstractString)::String
                 vsync=opened.vsync,
             ))
         elseif operation == "render_window"
-            allowed = Set(("op", "packet", "camera_override", "frame_count", "expected_packet_sha256"))
+            allowed = Set(("op", "packet", "camera_override", "frame_count", "expected_packet_sha256", "report_input"))
             request_keys = Set(String(key) for key in keys(value))
             request_keys ⊆ allowed ||
                 return failure("malformed_request", "render_window request fields are closed")
+            report_input = haskey(value, "report_input") ? value["report_input"] : false
+            report_input isa Bool ||
+                return failure("malformed_request", "report_input must be a boolean")
             packet = validate_scene_packet(value["packet"])
             expected_packet_sha256 = WGEGraphics._string(
                 value["expected_packet_sha256"],
@@ -152,14 +155,19 @@ function handle(payload::AbstractString)::String
                 packet,
                 camera_override,
                 frame_count,
+                report_input,
             )
-            return JSON3.write((
+            response = (
                 schema=WORKER_SCHEMA,
                 kind="window_frames_presented",
                 frames_presented=result.frames_presented,
                 frame_times_us=result.frame_times_us,
                 window_presented_frames=result.window_presented_frames,
-            ))
+            )
+            if report_input
+                response = merge(response, (input_samples=result.input_samples,))
+            end
+            return JSON3.write(response)
         elseif operation == "close_window"
             Set(String(key) for key in keys(value)) == Set(("op",)) ||
                 return failure("malformed_request", "close_window request fields are closed")
