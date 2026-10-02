@@ -2,7 +2,7 @@
 
 julia_version = "1.12.6"
 manifest_format = "2.0"
-project_hash = "3d0ac67c54982c7aa476ca43749959e0d236aca8"
+project_hash = "ff67cba38fd2d7540efabbaeb93bc5f1f9d5aa20"
 
 [[deps.AcceleratedKernels]]
 deps = ["ArgCheck", "GPUArraysCore", "KernelAbstractions", "Markdown", "UnsafeAtomics"]
@@ -789,7 +789,7 @@ uuid = "8d446b21-f3ad-5576-a034-752265b9b6f9"
 version = "1.4.321+0"
 
 [[deps.WGEGraphics]]
-deps = ["ConstructionBase", "GeometryBasics", "JSON3", "Lava", "Raycore", "SHA", "Vulkan", "VulkanCore"]
+deps = ["Base64", "ConstructionBase", "GeometryBasics", "JSON3", "Lava", "Raycore", "SHA", "Vulkan", "VulkanCore"]
 path = "."
 uuid = "8d7c4a7e-7f0f-4d31-9b80-2d63df2a5b31"
 version = "0.1.0"
