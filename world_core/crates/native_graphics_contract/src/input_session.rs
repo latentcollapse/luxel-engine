@@ -20,7 +20,7 @@ use wge_reference_runtime::{
 };
 
 use crate::{
-    GraphicsCamera, GraphicsWorkerError, GraphicsWorkerSupervisor,
+    GraphicsWorkerError, GraphicsWorkerSupervisor,
     session::{PresentedGraphicsSession, WindowFrameReport},
 };
 
@@ -261,7 +261,7 @@ pub fn frame_from_gamepad(frame: &mut InputFrame, sample: &InputSample, batch_se
         if magnitude <= GAMEPAD_DEADZONE {
             0.0
         } else {
-            (value.signum() * (magnitude - GAMEPAD_DEADZONE) / (1.0 - GAMEPAD_DEADZONE))
+            value.signum() * (magnitude - GAMEPAD_DEADZONE) / (1.0 - GAMEPAD_DEADZONE)
         }
     };
     let button = |index: usize| -> bool { buttons.get(index).copied().unwrap_or(false) };

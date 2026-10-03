@@ -5330,6 +5330,7 @@ name = "wge-native-graphics-contract"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "image",
  "serde",
  "serde_json",
  "sha2",

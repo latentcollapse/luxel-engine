@@ -1,0 +1,140 @@
+{
+  "schema_version": "wge.terrain-layer-set-manifest/v1",
+  "set_id": "converge0-meadow",
+  "provider": "polyhaven.com",
+  "license": "CC0-1.0",
+  "cache_dir": "artifacts/terrain_layers/converge0-meadow",
+  "note": "Layer 0 is the base. Each later layer is painted over the result with weight = product of its present coverage terms. slope = 1 - n.y in basis points; a ramp [a, b] with a > b falls instead of rising. Thresholds are measured, not guessed (N4-1 ledger): converge0 terrain slope p90 ~0.05, p99.5 ~0.10, so rock ramps over the steepest decile; dirt covers the top ~18% of macro noise (p82 = 0.773).",
+  "texture_sizes_px": {
+    "albedo": 1024,
+    "normal_gl": 512,
+    "roughness": 256,
+    "ao": 256
+  },
+  "layers": [
+    {
+      "layer_id": "ground",
+      "source_asset": "forrest_ground_01",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "dimensions_mm": [
+        2000,
+        2000
+      ],
+      "normal_scale_milli": 1000,
+      "maps": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forrest_ground_01/forrest_ground_01_diff_1k.jpg",
+          "bytes": 833711,
+          "sha256": "sha256:3dd6875cb3908e022a3c45ebbffa5e84c670ff2691fbbb6dc9ea4bff88523800"
+        },
+        "normal_gl": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forrest_ground_01/forrest_ground_01_nor_gl_1k.jpg",
+          "bytes": 1428763,
+          "sha256": "sha256:32528a7cdee962cc0b248ee4023a74d0df175737ea90e1eb425122351e0bdab4"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forrest_ground_01/forrest_ground_01_rough_1k.jpg",
+          "bytes": 257165,
+          "sha256": "sha256:30d8b56a03d7b12da16f58011b675662a40e58e1cdc768119a5f03968140058c"
+        },
+        "ao": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forrest_ground_01/forrest_ground_01_ao_1k.jpg",
+          "bytes": 660492,
+          "sha256": "sha256:a3632232fa080e28239d456526a3f0c83e0a404515581339b9d6633324dca6a4"
+        }
+      },
+      "coverage": null
+    },
+    {
+      "layer_id": "dirt",
+      "source_asset": "forest_ground_04",
+      "authors": [
+        "Rob Tuytel",
+        "Rico Cilliers"
+      ],
+      "dimensions_mm": [
+        3150,
+        3150
+      ],
+      "normal_scale_milli": 1000,
+      "maps": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_diff_1k.jpg",
+          "bytes": 1113899,
+          "sha256": "sha256:50a4dda30875020c64385261aa7e00e2155b592302fa6794165f58fae73cbd2c"
+        },
+        "normal_gl": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_nor_gl_1k.jpg",
+          "bytes": 1326812,
+          "sha256": "sha256:9c3a0200e02ce40edffbbf9f5f623ef08ea9b1b7812b556182ec978f88887151"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_rough_1k.jpg",
+          "bytes": 627507,
+          "sha256": "sha256:89d4d50395eb92824a64132c4bc8a5a09009071e0b325ab66dc3104c7a3090ed"
+        },
+        "ao": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_ao_1k.jpg",
+          "bytes": 831864,
+          "sha256": "sha256:d948c7578a122fdb592d9fda5de01746a9f567e0f2981bc7f89d3358422d0ad1"
+        }
+      },
+      "coverage": {
+        "slope_bp": null,
+        "height_mm": null,
+        "macro": {
+          "threshold_bp": 7700,
+          "softness_bp": 1200
+        }
+      }
+    },
+    {
+      "layer_id": "rock",
+      "source_asset": "mossy_rock",
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "dimensions_mm": [
+        3000,
+        3000
+      ],
+      "normal_scale_milli": 1000,
+      "maps": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/mossy_rock/mossy_rock_diff_1k.jpg",
+          "bytes": 1124438,
+          "sha256": "sha256:4dbf37f1b0465c9c8914213163923be159716f5b97fb6946437b6c5e143ef540"
+        },
+        "normal_gl": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/mossy_rock/mossy_rock_nor_gl_1k.jpg",
+          "bytes": 995727,
+          "sha256": "sha256:232cdd6a9fdfd01bb8bb1f8f604c53dbca79fa0d3d7995edf85c9945757aa8df"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/mossy_rock/mossy_rock_rough_1k.jpg",
+          "bytes": 780918,
+          "sha256": "sha256:0a18bdeb08444b730170b0477f13940ce6cd4d82d06137df661f96d1e2a6a66e"
+        },
+        "ao": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/mossy_rock/mossy_rock_ao_1k.jpg",
+          "bytes": 533103,
+          "sha256": "sha256:00856838c04dfc778dd830d6e92d0f77effb8286c32d8068f2cf48a02a31cdaa"
+        }
+      },
+      "coverage": {
+        "slope_bp": [
+          450,
+          850
+        ],
+        "height_mm": null,
+        "macro": null
+      }
+    }
+  ],
+  "macro": {
+    "size_px": 256,
+    "seed": 1374839221
+  }
+}

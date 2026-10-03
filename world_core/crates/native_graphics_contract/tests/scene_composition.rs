@@ -161,6 +161,7 @@ fn body() -> GraphicsScenePacketBody {
             heights_m: BufferReference::inline_f32("heights", vec![0.0; 9]),
             slope_grade: BufferReference::inline_f32("slopes", vec![0.0; 9]),
             region_codes: BufferReference::inline_u8("regions", vec![1; 9]),
+            layers: None,
         },
         materials: vec![MaterialIntent {
             material_id: "terrain-material".into(),

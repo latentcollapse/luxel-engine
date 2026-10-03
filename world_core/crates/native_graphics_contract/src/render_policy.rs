@@ -179,11 +179,12 @@ pub struct TerrainSurfacePolicy {
     /// border texel across most of the field.
     pub wrap_repeat: bool,
     /// Macro-variation amplitude applied to albedo, basis points. Range [0, 5000].
-    /// NOTE: not yet executed by the renderer; the adapter refuses a non-zero
-    /// value rather than accepting it and ignoring it.
+    /// Executed on layered terrain (N-4): albedo × (1 + amplitude × (2m − 1))
+    /// for macro noise m. Packet validation refuses a non-zero value on a
+    /// terrain without layers, which has no macro texture to sample.
     pub macro_variation_bp: i32,
-    /// Macro-variation spatial frequency in milli-units per world metre.
-    /// NOTE: not yet executed by the renderer, for the same reason.
+    /// Macro noise frequency, milli-cycles per world metre (15 = one cycle per
+    /// ~67 m). Also the frequency layer coverage `macro_ramp` terms sample at.
     pub macro_frequency_milli: i32,
 }
 
@@ -495,6 +496,16 @@ pub fn validate_packet_render_policy(
 ) -> Result<(), GraphicsContractError> {
     if let Some(policy) = &body.render_policy {
         validate_render_policy(policy)?;
+        // Macro variation samples the layer set's macro noise texture; on a
+        // single-material terrain there is nothing to sample, so the axis
+        // would be decorative. Refuse rather than ignore.
+        if policy.terrain_surface.is_some_and(|terrain| terrain.macro_variation_bp > 0)
+            && body.terrain.layers.is_none()
+        {
+            return Err(GraphicsContractError::malformed(
+                "render policy terrain_surface.macro_variation_bp needs a layered terrain (terrain.layers)",
+            ));
+        }
     }
     Ok(())
 }

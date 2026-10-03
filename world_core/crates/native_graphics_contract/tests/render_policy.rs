@@ -483,7 +483,10 @@ fn a_full_policy_survives_serde_round_trip_and_revalidates() {
         terrain_surface: Some(TerrainSurfacePolicy {
             uv_repeat_scale_milli: 8000,
             wrap_repeat: true,
-            macro_variation_bp: 900,
+            // Macro variation needs a layered terrain (N-4); this body has a
+            // single-material terrain, so the round trip uses 0 and the refusal
+            // of a non-zero value is asserted below.
+            macro_variation_bp: 0,
             macro_frequency_milli: 55,
         }),
         sampler: Some(SamplerPolicy { anisotropy: 8 }),
@@ -501,6 +504,14 @@ fn a_full_policy_survives_serde_round_trip_and_revalidates() {
     });
     b.schema_version = SCENE_PACKET_SCHEMA.into();
     validate_render_policy(b.render_policy.as_ref().unwrap()).expect("full policy validates");
+    let mut decorative = b.clone();
+    if let Some(terrain) = decorative.render_policy.as_mut().unwrap().terrain_surface.as_mut() {
+        terrain.macro_variation_bp = 900;
+    }
+    assert!(
+        seal_scene_packet(decorative).is_err(),
+        "macro variation on an unlayered terrain would be a decorative axis"
+    );
     let packet = seal_scene_packet(b).expect("seals");
     validate_scene_packet(&packet).expect("validates end to end");
 

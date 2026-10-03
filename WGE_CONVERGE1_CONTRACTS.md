@@ -175,6 +175,13 @@ all four maps (≈ 213 MB) does not.
 
 ## 4. N-4 — Terrain surface content (from spiral EDGE-1)
 
+> **Status: IMPLEMENTED (spiral N4-1, 2026-10-03).** Acceptance (measured) met:
+> converge0 close/medium/wide = **761 / 658 / 369 bp** against the unchanged
+> 220 bp floor (all `good`; previously 295 / 148 / 123). Null and `full` render
+> byte-identical to before. Human acceptance items (twig scale, no visible
+> tile repetition) are open for review: `artifacts/parity/review-converge0-n4c/`.
+> Implementation summary at the end of this section.
+
 ### Evidence
 
 EDGE-1 investigated the CONVERGE-0 open item: the Campaign 2 edge-density
@@ -236,3 +243,43 @@ Findings:
 - **Acceptance (human, mandatory):** ground reads at the right scale (twig
   test) and shows no visible tile repetition in the wide view.
 - **Non-goals:** virtual texturing, runtime splat painting, displacement.
+
+
+### Implementation (N4-1)
+
+- **Schema:** `TerrainPacket.layers: Option<TerrainLayers>` (absent = byte-identical);
+  2–3 layers, per-layer `metres_per_repeat_milli` from the scan's measured size,
+  coverage = product of optional slope / height / macro ramps (a falling ramp is
+  `[a, b]` with `a > b`). Validation: mips mandatory, neutral layer-material factors
+  (the scans carry colour and roughness), CC0 only, ramps of nonzero width.
+- **Content route:** `tools/terrain_layers/converge0.json` pins 12 Poly Haven CC0
+  files (URL, byte size, sha256; md5 cross-checked against the provider's API).
+  `tools/fetch_terrain_layers.py` fetches them into the ignored artifacts tree.
+  `load_terrain_layer_set` re-verifies every digest, decodes, and builds
+  deterministic box-filtered mip chains (albedo averaged in linear light,
+  normals renormalised). The set is an explicit input to lowering and to
+  `GraphicsWorkerSupervisor::render_and_promote_with_terrain_layers`, which
+  re-derives the authorized packet with the same set — no lowering reads files.
+- **Renderer:** a separate layered terrain pipeline (the single-material terrain
+  and every mesh keep their shaders): 14 bindings, world-metric UVs, slope /
+  height / macro coverage, `macro_variation_bp` executed (refused on unlayered
+  terrain), and far-field resampling (albedo blended toward a 7.13× larger
+  scale over 25–90 m) because a 2–3 m tile repeats as a visible grid at 200 m.
+- **Tuning was measured, not guessed:** a first pass with guessed thresholds put
+  rock on 0.5% of the terrain (slope p90 is only ~0.05) and dirt on nearly all
+  of it (84% of the ground lies below the height cut). Thresholds now come from
+  the measured slope and macro-noise distributions.
+- **Defects found on the way:** packet mip chains crashed the worker (EDGE-1);
+  `_surface_sampler!` caches one sampler per spec with the first material's max
+  LOD, which would have stripped the layers' mips (the layered path builds its
+  own sampler; the latent cache issue is recorded, not changed); a converge0
+  render took 15 min in the debug binary (authorization now re-lowers only the
+  named view; `WGE_PARITY_BIN` selects a release binary, proven byte-identical
+  on the null arm: 190 s).
+
+### Residuals (not blocking, for review)
+
+- A faint diagonal pattern remains on the far-left ridge in the wide view.
+- The meadow reads olive/tan at distance; the base scan is litter-heavy. A
+  greener base set is a content choice, not machinery.
+- Tree crowns and props are untouched placeholders (CONVERGE-2).

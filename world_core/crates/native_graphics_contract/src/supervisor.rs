@@ -19,7 +19,8 @@ use crate::{
     GraphicsFrameReceipt, GraphicsFrameReceiptBody, GraphicsReady, GraphicsRendererAttestation,
     GraphicsRendererAttestationBody, GraphicsScenePacket, GraphicsTelemetry, LAVA_BACKEND_ID,
     LAVA_REVISION, MAX_DENSE_BENCHMARK_INSTANCES, canonical_json, compose_bound_scene_with_camera,
-    lower_campaign2_packet, lower_dense_benchmark_packet, lower_objective_close_packet,
+    lower_campaign2_packet, lower_campaign2_packet_with, lower_dense_benchmark_packet,
+    ParityContent, ParityPolicyCandidate, TerrainLayerSet, lower_objective_close_packet,
     lower_reference_world, lower_showcase_packet, lower_world_showcase_packet,
     measure_frame_capture, seal_frame_receipt_with_capture, seal_renderer_attestation,
     seal_scene_packet, sha256_prefixed, validate_native_visual_gate, validate_ready,
@@ -30,6 +31,12 @@ use wge_reference_runtime::{WorldArtifact, validate_world_artifact};
 pub const WORKER_SCHEMA: &str = "wge.graphics-worker/v1";
 const MAX_WORKER_FRAME_BYTES: usize = 64 * 1024 * 1024;
 const DEFAULT_WORKER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
+/// The ready handshake covers Julia package loading, which on a cold or
+/// invalidated depot includes precompiling Lava and its GPU stack (measured:
+/// Lava alone 38 s, the full chain over 120 s). Bounding startup by the
+/// per-request response timeout made a fresh depot look like a hung worker
+/// (CONVERGE-0 ledger, turn 5), so startup has its own, longer bound.
+const DEFAULT_WORKER_STARTUP_TIMEOUT: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct GraphicsWorkerError {
@@ -149,13 +156,32 @@ impl GraphicsWorkerSupervisor {
         project: impl AsRef<Path>,
         worker: impl AsRef<Path>,
     ) -> Result<Self, GraphicsWorkerError> {
-        Self::start_with_timeout(julia, project, worker, DEFAULT_WORKER_RESPONSE_TIMEOUT)
+        Self::start_with_timeouts(
+            julia,
+            project,
+            worker,
+            DEFAULT_WORKER_STARTUP_TIMEOUT,
+            DEFAULT_WORKER_RESPONSE_TIMEOUT,
+        )
     }
 
+    /// One bound for both the ready handshake and every response.
     pub fn start_with_timeout(
         julia: impl AsRef<Path>,
         project: impl AsRef<Path>,
         worker: impl AsRef<Path>,
+        response_timeout: Duration,
+    ) -> Result<Self, GraphicsWorkerError> {
+        Self::start_with_timeouts(julia, project, worker, response_timeout, response_timeout)
+    }
+
+    /// Separate bounds for the ready handshake (package load and precompile)
+    /// and for each request afterwards.
+    pub fn start_with_timeouts(
+        julia: impl AsRef<Path>,
+        project: impl AsRef<Path>,
+        worker: impl AsRef<Path>,
+        startup_timeout: Duration,
         response_timeout: Duration,
     ) -> Result<Self, GraphicsWorkerError> {
         let julia = julia.as_ref().to_owned();
@@ -210,7 +236,7 @@ impl GraphicsWorkerSupervisor {
             responses,
             reader: Some(reader),
             response_timeout,
-            startup_timeout: response_timeout,
+            startup_timeout,
             restart_required: false,
             source_identity_sha256: String::new(),
             ready_message: Value::Null,
@@ -219,7 +245,7 @@ impl GraphicsWorkerSupervisor {
             project,
             worker,
         };
-        let ready = supervisor.read_frame_json()?;
+        let ready = supervisor.read_frame_json_within(startup_timeout)?;
         supervisor.validate_worker_ready(&ready)?;
         supervisor.ready_message = ready;
         supervisor.source_identity_sha256 = supervisor.renderer_source_identity_sha256()?;
@@ -240,11 +266,12 @@ impl GraphicsWorkerSupervisor {
 
     pub fn restart(&mut self) -> Result<(), GraphicsWorkerError> {
         self.stop_child();
-        let mut replacement = Self::start_with_timeout(
+        let mut replacement = Self::start_with_timeouts(
             &self.julia,
             &self.project,
             &self.worker,
             self.startup_timeout,
+            self.response_timeout,
         )?;
         replacement.response_timeout = self.response_timeout;
         let old = std::mem::replace(self, replacement);
@@ -281,7 +308,24 @@ impl GraphicsWorkerSupervisor {
     ) -> Result<PromotedFrame, GraphicsWorkerError> {
         validate_scene_packet(packet).map_err(GraphicsWorkerError::contract)?;
         validate_world_artifact_binding(packet, world)?;
-        validate_authorized_world_projection(packet, world)?;
+        validate_authorized_world_projection(packet, world, None)?;
+        self.render_validated_and_promote(packet)
+    }
+
+    /// Render a packet whose terrain is surfaced by a verified layer set (N-4).
+    /// The set is an explicit input, like a bound scene's packages: the
+    /// supervisor re-derives the authorized projection WITH the same set and
+    /// requires an exact match, so layer content cannot be smuggled into a
+    /// packet the world does not authorize.
+    pub fn render_and_promote_with_terrain_layers(
+        &mut self,
+        packet: &GraphicsScenePacket,
+        world: &WorldArtifact,
+        terrain_layers: &TerrainLayerSet,
+    ) -> Result<PromotedFrame, GraphicsWorkerError> {
+        validate_scene_packet(packet).map_err(GraphicsWorkerError::contract)?;
+        validate_world_artifact_binding(packet, world)?;
+        validate_authorized_world_projection(packet, world, Some(terrain_layers))?;
         self.render_validated_and_promote(packet)
     }
 
@@ -300,7 +344,7 @@ impl GraphicsWorkerSupervisor {
         validate_scene_packet(authorization.base_packet).map_err(GraphicsWorkerError::contract)?;
         validate_world_artifact_binding(packet, world)?;
         validate_world_artifact_binding(authorization.base_packet, world)?;
-        validate_authorized_world_projection(authorization.base_packet, world)?;
+        validate_authorized_world_projection(authorization.base_packet, world, None)?;
         validate_scene_against_asset_receipts_and_render_assets(
             authorization.scene,
             authorization.asset_receipts,
@@ -680,13 +724,17 @@ impl GraphicsWorkerSupervisor {
     }
 
     fn read_frame_json(&mut self) -> Result<Value, GraphicsWorkerError> {
-        let payload = match self.responses.recv_timeout(self.response_timeout) {
+        self.read_frame_json_within(self.response_timeout)
+    }
+
+    fn read_frame_json_within(&mut self, timeout: Duration) -> Result<Value, GraphicsWorkerError> {
+        let payload = match self.responses.recv_timeout(timeout) {
             Ok(Ok(payload)) => payload,
             Ok(Err(error)) => return Err(GraphicsWorkerError::io(error)),
             Err(RecvTimeoutError::Timeout) => {
                 return Err(GraphicsWorkerError::timeout(format!(
                     "worker did not answer within {} ms",
-                    self.response_timeout.as_millis()
+                    timeout.as_millis()
                 )));
             }
             Err(RecvTimeoutError::Disconnected) => {
@@ -710,20 +758,43 @@ impl GraphicsWorkerSupervisor {
 fn validate_authorized_world_projection(
     packet: &GraphicsScenePacket,
     world: &WorldArtifact,
+    terrain_layers: Option<&TerrainLayerSet>,
 ) -> Result<(), GraphicsWorkerError> {
     let reference = lower_reference_world(world).map_err(GraphicsWorkerError::contract)?;
+    let campaign2 = |view| match terrain_layers {
+        None => lower_campaign2_packet(&reference, view),
+        Some(set) => {
+            let candidate = ParityPolicyCandidate::from_env();
+            let content = ParityContent::from_env(candidate)?;
+            lower_campaign2_packet_with(&reference, view, candidate, content, Some(set))
+        }
+    };
     let mut authorized = vec![
         reference.clone(),
         lower_objective_close_packet(&reference).map_err(GraphicsWorkerError::contract)?,
         lower_showcase_packet(&reference).map_err(GraphicsWorkerError::contract)?,
         lower_world_showcase_packet(&reference).map_err(GraphicsWorkerError::contract)?,
-        lower_campaign2_packet(&reference, Campaign2View::Close)
-            .map_err(GraphicsWorkerError::contract)?,
-        lower_campaign2_packet(&reference, Campaign2View::Medium)
-            .map_err(GraphicsWorkerError::contract)?,
-        lower_campaign2_packet(&reference, Campaign2View::Wide)
-            .map_err(GraphicsWorkerError::contract)?,
     ];
+    // A Campaign 2 packet names its view in its packet id. Re-lowering only that
+    // view (instead of all three) is the same exact-match check at a third of
+    // the cost; with an N-4 layer set each lowering clones and seals ~35 MB, so
+    // the difference is minutes per render. A packet whose id names no view
+    // still gets all three candidates, so nothing is authorized by the shortcut.
+    let named_view = [
+        (Campaign2View::Close, "-campaign2-close"),
+        (Campaign2View::Medium, "-campaign2-medium"),
+        (Campaign2View::Wide, "-campaign2-wide"),
+    ]
+    .into_iter()
+    .find(|(_, suffix)| packet.body.packet_id.ends_with(suffix))
+    .map(|(view, _)| view);
+    let views: Vec<Campaign2View> = match named_view {
+        Some(view) => vec![view],
+        None => vec![Campaign2View::Close, Campaign2View::Medium, Campaign2View::Wide],
+    };
+    for view in views {
+        authorized.push(campaign2(view).map_err(GraphicsWorkerError::contract)?);
+    }
     if let Some(added_instances) = packet
         .body
         .instances

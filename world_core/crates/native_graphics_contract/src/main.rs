@@ -8,7 +8,8 @@ use serde::Serialize;
 use wge_native_graphics_contract::{
     Campaign2View, GraphicsWorkerSupervisor, QualityOutcome, VisualQualityProfile,
     assess_campaign2_visual_evidence, assess_visual_quality,
-    deterministic_certification_frame_receipt, lower_campaign2_packet,
+    deterministic_certification_frame_receipt, load_terrain_layer_set,
+    lower_campaign2_packet_with, ParityContent, ParityPolicyCandidate,
     lower_dense_benchmark_packet, lower_objective_close_packet, lower_reference_world,
     lower_showcase_packet, lower_world_showcase_packet, sha256_prefixed,
     validate_campaign2_visual_evidence,
@@ -458,6 +459,26 @@ fn run() -> Result<(), String> {
                 )
             })?;
 
+            // N-4: converge0 surfaces its terrain with a scanned layer set. The
+            // manifest path is explicit (env), the files are digest-verified on
+            // load, and the same set is handed to the supervisor so it can
+            // re-derive the authorized packet.
+            let parity_candidate = ParityPolicyCandidate::from_env();
+            let parity_content = ParityContent::from_env(parity_candidate).map_err(|error| error.to_string())?;
+            let terrain_layers = if parity_content.converge0 {
+                let manifest = env::var("WGE_TERRAIN_LAYER_SET").map_err(|_| {
+                    "converge0 needs WGE_TERRAIN_LAYER_SET=<manifest>, e.g. tools/terrain_layers/converge0.json \
+                     (fetch the files first with tools/fetch_terrain_layers.py)"
+                        .to_owned()
+                })?;
+                let root = env::current_dir().map_err(|error| error.to_string())?;
+                Some(
+                    load_terrain_layer_set(&PathBuf::from(manifest), &root)
+                        .map_err(|error| format!("terrain layer set failed to load: {error}"))?,
+                )
+            } else {
+                None
+            };
             let view_specs = [
                 ("close", Campaign2View::Close),
                 ("medium", Campaign2View::Medium),
@@ -466,11 +487,19 @@ fn run() -> Result<(), String> {
             let mut view_summaries = Vec::with_capacity(view_specs.len());
             let mut failed_views = Vec::new();
             for (view_name, view) in view_specs {
-                let packet = lower_campaign2_packet(&reference_packet, view)
-                    .map_err(|error| format!("Campaign 2 {view_name} lowering failed: {error}"))?;
-                let promoted = supervisor
-                    .render_and_promote(&packet, &world.world)
-                    .map_err(|error| format!("Campaign 2 {view_name} render failed: {error}"))?;
+                let packet = lower_campaign2_packet_with(
+                    &reference_packet,
+                    view,
+                    parity_candidate,
+                    parity_content,
+                    terrain_layers.as_ref(),
+                )
+                .map_err(|error| format!("Campaign 2 {view_name} lowering failed: {error}"))?;
+                let promoted = match &terrain_layers {
+                    Some(set) => supervisor.render_and_promote_with_terrain_layers(&packet, &world.world, set),
+                    None => supervisor.render_and_promote(&packet, &world.world),
+                }
+                .map_err(|error| format!("Campaign 2 {view_name} render failed: {error}"))?;
                 let certification_receipt = deterministic_certification_frame_receipt(
                     &packet,
                     &promoted.receipt,

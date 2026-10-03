@@ -28,6 +28,30 @@ end
 
 Base.showerror(io::IO, error::ProtocolError) = print(io, error.code, ": ", error.detail)
 
+# N-4 layered terrain surface. Mirrors native_graphics_contract::terrain_layers;
+# a ramp (a, b) rises from a to b and falls when a > b.
+struct TerrainLayerCoverage
+    slope_bp::Union{Nothing,NTuple{2,Int32}}
+    height_mm::Union{Nothing,NTuple{2,Int32}}
+    macro_ramp::Union{Nothing,NTuple{2,Int32}}  # (threshold_bp, softness_bp)
+end
+
+struct TerrainLayerPacket
+    layer_id::String
+    material_id::String
+    metres_per_repeat_milli::UInt32
+    coverage::Union{Nothing,TerrainLayerCoverage}
+end
+
+struct TerrainLayersPacket
+    set_id::String
+    set_sha256::String
+    layers::Vector{TerrainLayerPacket}
+    macro_texture_id::String
+end
+
+const MAX_TERRAIN_LAYERS = 3
+
 struct TerrainPacket
     terrain_id::String
     width_m::Float32
@@ -37,7 +61,12 @@ struct TerrainPacket
     heights_m::Vector{Float32}
     slope_grade::Vector{Float32}
     region_codes::Vector{UInt8}
+    layers::Union{Nothing,TerrainLayersPacket}
 end
+
+# The eight-field form predates N-4: no layers, the single-material terrain.
+TerrainPacket(terrain_id, width_m, length_m, resolution, material_id, heights_m, slope_grade, region_codes) =
+    TerrainPacket(terrain_id, width_m, length_m, resolution, material_id, heights_m, slope_grade, region_codes, nothing)
 
 abstract type CameraProjection end
 
@@ -718,6 +747,7 @@ function _parse_terrain(value::JSON3.Object, materials::Vector{MaterialPacket}):
             "slope_grade",
             "region_codes",
         ),
+        ("layers",),
         "terrain",
     )
     resolution = _integer(value["resolution"], "terrain.resolution")
@@ -740,7 +770,72 @@ function _parse_terrain(value::JSON3.Object, materials::Vector{MaterialPacket}):
     regions = _parse_buffer(value["region_codes"], resolution * resolution, "terrain.region_codes", :u8)
     any(material.material_id == material_id for material in materials) ||
         throw(ProtocolError("provenance", "terrain references an unknown material"))
-    return TerrainPacket(terrain_id, width, length, resolution, material_id, heights, slope, regions)
+    layers = haskey(value, "layers") ? _parse_terrain_layers(value["layers"], materials) : nothing
+    return TerrainPacket(terrain_id, width, length, resolution, material_id, heights, slope, regions, layers)
+end
+
+function _parse_ramp(value, label::String, low::Integer, high::Integer)::Union{Nothing,NTuple{2,Int32}}
+    value === nothing && return nothing
+    ramp = (_bounded_bp(value[1], "$label[0]", low, high), _bounded_bp(value[2], "$label[1]", low, high))
+    length(value) == 2 && ramp[1] != ramp[2] ||
+        throw(ProtocolError("malformed_packet", "$label must be two distinct values"))
+    return ramp
+end
+
+"""Receiver-side check of the N-4 layer schema. A receiver must be able to
+refuse a packet it did not produce, so the structural rules are duplicated
+here rather than trusted from the producer."""
+function _parse_terrain_layers(value, materials::Vector{MaterialPacket})::TerrainLayersPacket
+    object = _object(value, "terrain.layers")
+    _exact_keys(object, ("set_id", "set_sha256", "layers", "macro_texture_id"), "terrain.layers")
+    entries = object["layers"]
+    2 <= length(entries) <= MAX_TERRAIN_LAYERS ||
+        throw(ProtocolError("malformed_packet", "terrain carries $(length(entries)) layers; expected 2..=$MAX_TERRAIN_LAYERS"))
+    layers = TerrainLayerPacket[]
+    for (index, entry) in enumerate(entries)
+        layer = _object(entry, "terrain.layers[]")
+        _exact_keys(layer, ("layer_id", "material_id", "metres_per_repeat_milli"), ("coverage",), "terrain layer")
+        material_id = _string(layer["material_id"], "terrain layer material_id")
+        any(material.material_id == material_id for material in materials) ||
+            throw(ProtocolError("provenance", "terrain layer references unknown material $material_id"))
+        metres = _bounded_bp(layer["metres_per_repeat_milli"], "terrain layer metres_per_repeat_milli", 100, 100_000)
+        coverage = if haskey(layer, "coverage")
+            index == 1 && throw(ProtocolError("malformed_packet", "terrain layer 0 is the base and cannot carry coverage"))
+            c = _object(layer["coverage"], "terrain layer coverage")
+            _exact_keys(c, (), ("slope_bp", "height_mm", "macro_ramp"), "terrain layer coverage")
+            macro_ramp = if haskey(c, "macro_ramp")
+                m = _object(c["macro_ramp"], "terrain layer macro_ramp")
+                _exact_keys(m, ("threshold_bp", "softness_bp"), "terrain layer macro_ramp")
+                (_bounded_bp(m["threshold_bp"], "macro_ramp.threshold_bp", 0, 10_000),
+                 _bounded_bp(m["softness_bp"], "macro_ramp.softness_bp", 1, 5_000))
+            else
+                nothing
+            end
+            parsed = TerrainLayerCoverage(
+                _parse_ramp(get(c, "slope_bp", nothing), "coverage.slope_bp", 0, 10_000),
+                _parse_ramp(get(c, "height_mm", nothing), "coverage.height_mm", -1_000_000_000, 1_000_000_000),
+                macro_ramp,
+            )
+            parsed.slope_bp === nothing && parsed.height_mm === nothing && parsed.macro_ramp === nothing &&
+                throw(ProtocolError("malformed_packet", "terrain layer coverage has no terms"))
+            parsed
+        else
+            index == 1 || throw(ProtocolError("malformed_packet", "terrain layer $index needs a coverage rule"))
+            nothing
+        end
+        push!(layers, TerrainLayerPacket(
+            _string(layer["layer_id"], "terrain layer_id"),
+            material_id,
+            UInt32(metres),
+            coverage,
+        ))
+    end
+    return TerrainLayersPacket(
+        _string(object["set_id"], "terrain.layers.set_id"),
+        _string(object["set_sha256"], "terrain.layers.set_sha256"),
+        layers,
+        _string(object["macro_texture_id"], "terrain.layers.macro_texture_id"),
+    )
 end
 
 function _parse_buffer(

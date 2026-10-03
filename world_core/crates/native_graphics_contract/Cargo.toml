@@ -12,6 +12,7 @@ base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 sha2 = "0.10"
+image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
 wge-reference-runtime = { path = "../reference_runtime" }
 wge-live-evidence-contract = { path = "../live_evidence_contract" }
 wge-asset-contract = { path = "../asset_contract" }

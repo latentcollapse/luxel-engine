@@ -545,3 +545,79 @@ end
     @test_throws LavaAdapter.AdapterError LavaAdapter._view_fitted_shadow_frame(
         camera, light_direction, right, up, 0.05f0)
 end
+
+# ---------------------------------------------------------------------------
+# N-4 layered terrain: schema, uniform lowering, and the macro policy rule.
+# ---------------------------------------------------------------------------
+
+@testset "terrain layer schema fails closed (N-4)" begin
+    materials = [
+        WGEGraphics.MaterialPacket(
+            id, (1.0f0, 1.0f0, 1.0f0, 1.0f0), 0.0f0, 1.0f0, 0.0f0, 0.5f0, :opaque,
+            String[], nothing, nothing, nothing, nothing, 1.0f0, 1.0f0, (0.0f0, 0.0f0, 0.0f0),
+        ) for id in ("ground-mat", "rock-mat")
+    ]
+    layer(id, material, coverage) = coverage === nothing ?
+        Dict("layer_id" => id, "material_id" => material, "metres_per_repeat_milli" => 2000) :
+        Dict("layer_id" => id, "material_id" => material, "metres_per_repeat_milli" => 3000, "coverage" => coverage)
+    doc(layers; extra=Dict()) = JSON3.read(JSON3.write(merge(Dict(
+        "set_id" => "s", "set_sha256" => "sha256:" * repeat("a", 64), "macro_texture_id" => "m", "layers" => layers,
+    ), extra)))
+    good = doc([layer("ground", "ground-mat", nothing), layer("rock", "rock-mat", Dict("slope_bp" => [450, 850]))])
+    parsed = WGEGraphics._parse_terrain_layers(good, materials)
+    @test length(parsed.layers) == 2
+    @test parsed.layers[2].coverage.slope_bp == (450, 850)
+    @test parsed.layers[2].coverage.height_mm === nothing
+    bad = [
+        doc([layer("ground", "ground-mat", nothing)]),                                          # one layer
+        doc([layer("ground", "ground-mat", Dict("slope_bp" => [1, 2])), layer("rock", "rock-mat", Dict("slope_bp" => [450, 850]))]),  # base covered
+        doc([layer("ground", "ground-mat", nothing), layer("rock", "rock-mat", Dict())]),      # empty coverage
+        doc([layer("ground", "ground-mat", nothing), layer("rock", "rock-mat", Dict("slope_bp" => [450, 450]))]),  # zero-width ramp
+        doc([layer("ground", "ground-mat", nothing), layer("rock", "missing-mat", Dict("slope_bp" => [450, 850]))]),  # unknown material
+        doc([layer("ground", "ground-mat", nothing), layer("rock", "rock-mat", Dict("slope_bp" => [450, 850]))]; extra=Dict("tint" => 1)),  # unknown key
+    ]
+    for case in bad
+        @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_terrain_layers(case, materials)
+    end
+end
+
+@testset "layered terrain uniforms encode absent terms and padding (N-4)" begin
+    ground = WGEGraphics.TerrainLayerPacket("ground", "g", UInt32(2000), nothing)
+    rock = WGEGraphics.TerrainLayerPacket(
+        "rock", "r", UInt32(3000), WGEGraphics.TerrainLayerCoverage((Int32(450), Int32(850)), nothing, nothing))
+    policy = WGEGraphics.TerrainSurfacePolicy(1000, true, 2000, 15)
+    u = LavaAdapter._terrain_layer_uniforms([ground, rock], Float32[1.0, 0.8], policy)
+    @test u[1][1] ≈ 0.5f0          # 1 / 2 m
+    @test u[3][1] ≈ 1.0f0 / 3.0f0  # 1 / 3 m
+    @test u[4][4] ≈ 0.8f0          # rock normal scale
+    @test u[7][1] ≈ 0.015f0 && u[7][2] ≈ 0.2f0
+    weight(a, b, slope, height, m) = LavaAdapter._layer_weight(a, b, Float32(slope), Float32(height), Float32(m))
+    # Rock: slope ramp only; height and macro terms absent => 1.
+    @test weight(u[3], u[4], 0.02, 15.0, 0.3) == 0.0f0
+    @test weight(u[3], u[4], 0.10, 15.0, 0.3) == 1.0f0
+    @test 0.0f0 < weight(u[3], u[4], 0.065, -1000.0, 0.99) < 1.0f0
+    # Two-layer set: the third slot is padding and must never paint.
+    for slope in (0.0, 0.5, 1.0)
+        @test weight(u[5], u[6], slope, 20.0, 0.5) == 0.0f0
+    end
+    # A falling ramp (a > b) is a valid "below" rule.
+    @test LavaAdapter._ramp(17.5f0, 14.5f0, 12.0f0) == 1.0f0
+    @test LavaAdapter._ramp(17.5f0, 14.5f0, 20.0f0) == 0.0f0
+end
+
+@testset "macro variation runs only on layered terrain (N-4)" begin
+    caps = LavaAdapter.GpuCapabilityProfile("NVIDIA GeForce RTX 5060", 16.0f0, true, true, 1.0f0, UInt32(64), true)
+    macro_policy = WGEGraphics.RenderPolicy(
+        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
+        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(1000, true, 2000, 15),
+        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(),
+    )
+    @test_throws LavaAdapter.AdapterError LavaAdapter._assert_render_policy_supported(macro_policy, caps)
+    @test LavaAdapter._assert_render_policy_supported(macro_policy, caps; layered_terrain=true) === nothing
+    clamped = WGEGraphics.RenderPolicy(
+        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
+        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(1000, false, 0, 40),
+        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(),
+    )
+    @test_throws LavaAdapter.AdapterError LavaAdapter._assert_render_policy_supported(clamped, caps; layered_terrain=true)
+end

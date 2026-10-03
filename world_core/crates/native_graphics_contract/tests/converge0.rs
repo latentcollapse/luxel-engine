@@ -9,9 +9,12 @@ use std::path::PathBuf;
 use wge_native_graphics_contract::material_maps::mean_linear_rgb;
 use wge_native_graphics_contract::{
     BufferPayload, Campaign2View, GraphicsScenePacket, ParityContent, ParityPolicyCandidate,
-    RenderPolicy, ShadowFitPolicy, SkyPolicy, lower_campaign2_packet_with, validate_render_policy,
-    world_void_fraction_bp, CONVERGE0_TERRAIN_SCALE,
+    RenderPolicy, ShadowFitPolicy, SkyPolicy, TerrainLayerSet, lower_campaign2_packet_with,
+    validate_render_policy, world_void_fraction_bp, CONVERGE0_TERRAIN_SCALE,
 };
+
+#[path = "support/synthetic_layers.rs"]
+mod synthetic_layers;
 
 const VIEWS: [Campaign2View; 3] = [Campaign2View::Close, Campaign2View::Medium, Campaign2View::Wide];
 
@@ -28,7 +31,10 @@ fn content(hero_materials: bool, converge0: bool) -> ParityContent {
 }
 
 fn lower(view: Campaign2View, candidate: ParityPolicyCandidate, flags: ParityContent) -> GraphicsScenePacket {
-    lower_campaign2_packet_with(&reference(), view, candidate, flags).expect("campaign2 lowers")
+    // converge0 is surfaced by a layer set (N-4); the synthetic one keeps these
+    // gates offline and independent of the fetched scans.
+    let set: Option<TerrainLayerSet> = flags.converge0.then(synthetic_layers::synthetic_set);
+    lower_campaign2_packet_with(&reference(), view, candidate, flags, set.as_ref()).expect("campaign2 lowers")
 }
 
 fn converge0(view: Campaign2View) -> GraphicsScenePacket {
@@ -64,7 +70,7 @@ fn content_flags_parse_and_fail_closed() {
         "converge0 content without its policy would sample metric UVs through a clamp sampler"
     );
     assert!(
-        lower_campaign2_packet_with(&reference(), Campaign2View::Close, P::Full, content(false, true)).is_err(),
+        lower_campaign2_packet_with(&reference(), Campaign2View::Close, P::Full, content(false, true), None).is_err(),
         "the env-free entry point must enforce the same coupling"
     );
 }

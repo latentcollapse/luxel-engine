@@ -99,6 +99,7 @@ fn packet(overlays: bool) -> GraphicsScenePacket {
             heights_m: BufferReference::inline_f32("height", vec![0.0; 9]),
             slope_grade: BufferReference::inline_f32("slope", vec![0.0; 9]),
             region_codes: BufferReference::inline_u8("regions", vec![1; 9]),
+            layers: None,
         },
         materials: vec![MaterialIntent {
             material_id: "quality-ground".into(),

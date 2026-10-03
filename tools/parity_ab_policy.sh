@@ -8,7 +8,14 @@ LOG="$2"
 POLICY="$3"
 mkdir -p "$OUT"
 export WGE_PARITY_RENDER_POLICY="$POLICY"
-exec world_core/target/debug/wge-native-graphics-contract render-campaign2-layout \
+# converge0 surfaces its terrain with the scanned N-4 layer set; the files must
+# be fetched first (python3 tools/fetch_terrain_layers.py tools/terrain_layers/converge0.json).
+if [ "$POLICY" = "converge0" ]; then
+  export WGE_TERRAIN_LAYER_SET="${WGE_TERRAIN_LAYER_SET:-tools/terrain_layers/converge0.json}"
+fi
+# WGE_PARITY_BIN selects the binary (e.g. a release build for long N-4 runs:
+# debug decodes and hashes the ~35 MB layered packets several times per view).
+exec "${WGE_PARITY_BIN:-world_core/target/debug/wge-native-graphics-contract}" render-campaign2-layout \
   world_core/crates/reference_runtime/examples/riverwatch.layout.json \
   /home/mattc/.juliaup/bin/julia terrain_lab graphics_lab \
   graphics_lab/bin/wge_graphics_worker.jl \

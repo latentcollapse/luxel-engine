@@ -130,7 +130,7 @@ fn tileable_value_noise(u: f32, v: f32, period: i32, seed: u32) -> f32 {
 
 /// Fractal sum. Every octave's period DOUBLES, so the whole stack keeps tiling
 /// on the base period.
-fn tileable_fbm(u: f32, v: f32, base_period: i32, octaves: u32, seed: u32) -> f32 {
+pub(crate) fn tileable_fbm(u: f32, v: f32, base_period: i32, octaves: u32, seed: u32) -> f32 {
     let mut total = 0.0;
     let mut amplitude = 0.5;
     let mut norm = 0.0;

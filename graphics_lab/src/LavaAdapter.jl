@@ -199,13 +199,25 @@ struct ResolveResources
     bindings::Lava.TextureBindings
 end
 
-mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
+"""GPU state for an N-4 layered terrain: one descriptor set of 14 bindings
+(three layers x albedo/normal/roughness/occlusion, the shadow map pinned at
+binding 5 where `_shadow_depth` reads it, and the macro noise at 13), a sampler
+built for the layers' own LOD range, and the lowered per-layer uniforms."""
+struct TerrainLayerResources
+    cache_key::String
+    bindings::Lava.TextureBindings
+    sampler::Lava.LavaSampler
+    uniforms::NTuple{7,Vec4f}
+end
+
+mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,TXP,DP,TSP,MSP,RP}
     context::C
     queue::Q
     probe_pipeline::PP
     sky_pipeline::SP
     sky_view_pipeline::SVP
     terrain_pipeline::TP
+    terrain_layered_pipeline::TLP
     overlay_pipeline::OP
     mesh_pipeline::MP
     texture_pipeline::TXP
@@ -219,6 +231,7 @@ mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
     mesh_resources::Union{Nothing,MeshResources}
     shadow_mesh_resources::Union{Nothing,MeshResources}
     shadow_resources::Union{Nothing,ShadowResources}
+    terrain_layer_resources::Union{Nothing,TerrainLayerResources}
     resolve_resources::Union{Nothing,ResolveResources}
     texture_resources::Union{Nothing,TextureProbeResources}
     material_texture_resources::Dict{Tuple{String,String,SamplerSpec},MaterialTextureResources}
@@ -231,6 +244,7 @@ mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
     gpu_timestamp_supported::Bool
     probe_compiled::Bool
     terrain_compiled::Bool
+    terrain_layered_compiled::Bool
     overlay_compiled::Bool
     sky_compiled::Bool
     sky_view_compiled::Bool
@@ -940,7 +954,9 @@ end
     return base_color
 end
 
-function _terrain_vertex(
+"""Every terrain vertex output (locations 0-17), shared by the single-material
+and the layered terrain pipelines so their geometry cannot drift apart."""
+@inline function _emit_terrain_vertex(
     heights::Lava.LavaDeviceArray{Float32,1},
     slopes::Lava.LavaDeviceArray{Float32,1},
     regions::Lava.LavaDeviceArray{UInt8,1},
@@ -1051,6 +1067,111 @@ function _terrain_vertex(
         _terrain_tangent(heights, resolution, sample_x, sample_z, width_m, length_m),
     )
     Lava.gfx_output(17, shadow)
+    return nothing
+end
+
+function _terrain_vertex(
+    heights::Lava.LavaDeviceArray{Float32,1},
+    slopes::Lava.LavaDeviceArray{Float32,1},
+    regions::Lava.LavaDeviceArray{UInt8,1},
+    resolution::Int32,
+    width_m::Float32,
+    length_m::Float32,
+    camera_position::Vec4f,
+    camera_right::Vec4f,
+    camera_up::Vec4f,
+    camera_forward::Vec4f,
+    camera_projection::Vec4f,
+    camera_mode::Float32,
+    light_position::Vec4f,
+    light_right::Vec4f,
+    light_up::Vec4f,
+    light_forward::Vec4f,
+    light_projection::Vec4f,
+    light_mode::Float32,
+    base_color::Vec4f,
+    metallic::Float32,
+    roughness::Float32,
+    clearcoat::Float32,
+    clearcoat_roughness::Float32,
+    normal_scale::Float32,
+    occlusion_strength::Float32,
+    light_direction::Vec4f,
+    light_color::Vec4f,
+    light_intensity::Float32,
+    environment_top::Vec4f,
+    environment_horizon::Vec4f,
+    environment_ground::Vec4f,
+    fog_color::Vec4f,
+    fog_density::Float32,
+    exposure::Float32,
+    texture_enabled::Float32,
+    emissive_factor::Vec4f,
+    shadow::Vec4f,
+    uv_repeat::Float32,
+)
+    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat)
+    return nothing
+end
+
+"""Layered terrain (N-4): the shared terrain outputs plus seven uniforms at
+locations 18-24 — two per layer (see `_terrain_layer_uniforms`) and the macro
+parameters. Fragment shaders here receive uniforms only through varyings."""
+function _terrain_layered_vertex(
+    heights::Lava.LavaDeviceArray{Float32,1},
+    slopes::Lava.LavaDeviceArray{Float32,1},
+    regions::Lava.LavaDeviceArray{UInt8,1},
+    resolution::Int32,
+    width_m::Float32,
+    length_m::Float32,
+    camera_position::Vec4f,
+    camera_right::Vec4f,
+    camera_up::Vec4f,
+    camera_forward::Vec4f,
+    camera_projection::Vec4f,
+    camera_mode::Float32,
+    light_position::Vec4f,
+    light_right::Vec4f,
+    light_up::Vec4f,
+    light_forward::Vec4f,
+    light_projection::Vec4f,
+    light_mode::Float32,
+    base_color::Vec4f,
+    metallic::Float32,
+    roughness::Float32,
+    clearcoat::Float32,
+    clearcoat_roughness::Float32,
+    normal_scale::Float32,
+    occlusion_strength::Float32,
+    light_direction::Vec4f,
+    light_color::Vec4f,
+    light_intensity::Float32,
+    environment_top::Vec4f,
+    environment_horizon::Vec4f,
+    environment_ground::Vec4f,
+    fog_color::Vec4f,
+    fog_density::Float32,
+    exposure::Float32,
+    texture_enabled::Float32,
+    emissive_factor::Vec4f,
+    shadow::Vec4f,
+    uv_repeat::Float32,
+    layer0_a::Vec4f,
+    layer0_b::Vec4f,
+    layer1_a::Vec4f,
+    layer1_b::Vec4f,
+    layer2_a::Vec4f,
+    layer2_b::Vec4f,
+    macro_parameters::Vec4f,
+)
+    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat)
+    Lava.gfx_output(18, layer0_a)
+    Lava.gfx_output(19, layer0_b)
+    Lava.gfx_output(20, layer1_a)
+    Lava.gfx_output(21, layer1_b)
+    Lava.gfx_output(22, layer2_a)
+    Lava.gfx_output(23, layer2_b)
+    Lava.gfx_output(24, macro_parameters)
     return nothing
 end
 
@@ -1451,7 +1572,8 @@ end
 
 function _assert_render_policy_supported(
     policy::WGEGraphics.RenderPolicy,
-    capabilities::GpuCapabilityProfile,
+    capabilities::GpuCapabilityProfile;
+    layered_terrain::Bool=false,
 )
     if policy.sampler.anisotropy > 1
         throw(AdapterError(
@@ -1460,11 +1582,17 @@ function _assert_render_policy_supported(
         ))
     end
     terrain = policy.terrain_surface
-    # Tiling and the repeat wrap are NOW EXECUTED (sprint F-4/F-5). Macro
-    # variation is still refused: it has no shader implementation, and accepting
-    # a non-zero amplitude would render identically to zero while a receipt
-    # implied otherwise.
-    if terrain.macro_variation_bp != 0
+    # Tiling and the repeat wrap are executed (sprint F-4/F-5). Macro variation
+    # is executed by the layered terrain shader (N-4) and ONLY there: on a
+    # single-material terrain there is no macro texture, so a non-zero amplitude
+    # would render identically to zero while a receipt implied otherwise.
+    if layered_terrain && !terrain.wrap_repeat
+        throw(AdapterError(
+            "unsupported_render_policy",
+            "layered terrain samples metric UVs and needs render_policy.terrain_surface.wrap_repeat",
+        ))
+    end
+    if terrain.macro_variation_bp != 0 && !layered_terrain
         throw(AdapterError(
             "unsupported_render_policy",
             "render_policy.terrain_surface.macro_variation_bp=" *
@@ -1824,6 +1952,180 @@ function _terrain_fragment()
     return nothing
 end
 
+# Layered-terrain far-field resampling (see `_terrain_layered_fragment`). A
+# renderer property of the layered shader, declared here rather than buried in
+# it: 7.13 is deliberately not a small rational so the two scales never align.
+const TERRAIN_FAR_REPEAT = 7.13f0
+const TERRAIN_FAR_BLEND_START_M = 25.0f0
+const TERRAIN_FAR_BLEND_END_M = 90.0f0
+
+@inline function _ramp(low::Float32, high::Float32, value::Float32)::Float32
+    t = clamp((value - low) / (high - low), 0.0f0, 1.0f0)
+    return t * t * (3.0f0 - 2.0f0 * t)
+end
+
+"""Coverage weight of one painted layer: the product of its slope, height, and
+macro-noise ramps (`_terrain_layer_uniforms` encodes an absent term as a ramp
+that is always 1, and a padding layer as a slope ramp that is always 0)."""
+@inline function _layer_weight(a::Vec4f, b::Vec4f, slope::Float32, height::Float32, macro_value::Float32)::Float32
+    return _ramp(a[2], a[3], slope) * _ramp(b[1], b[2], height) * _ramp(a[4] - b[3], a[4] + b[3], macro_value)
+end
+
+@inline function _tangent_space_normal(sample::Vec4f, scale::Float32)::Vec4f
+    return Vec4f(
+        (sample[1] * 2.0f0 - 1.0f0) * scale,
+        (sample[2] * 2.0f0 - 1.0f0) * scale,
+        max(sample[3] * 2.0f0 - 1.0f0, 0.05f0),
+        0.0f0,
+    )
+end
+
+@inline _mix(a::Float32, b::Float32, t::Float32)::Float32 = a + (b - a) * t
+
+@inline function _mix4(a::Vec4f, b::Vec4f, t::Float32)::Vec4f
+    return Vec4f(_mix(a[1], b[1], t), _mix(a[2], b[2], t), _mix(a[3], b[3], t), _mix(a[4], b[4], t))
+end
+
+"""Rotate a tangent-space normal into world space (the frame `_perturbed_normal`
+uses, kept separate so the single-material path stays byte-identical)."""
+@inline function _apply_tangent_normal(normal::Vec4f, tangent::Vec4f, tangent_space::Vec4f)::Vec4f
+    surface_normal = _normalize_vector(normal)
+    tangent_orthogonal = Vec4f(
+        tangent[1] - surface_normal[1] * _dot_vector(surface_normal, tangent),
+        tangent[2] - surface_normal[2] * _dot_vector(surface_normal, tangent),
+        tangent[3] - surface_normal[3] * _dot_vector(surface_normal, tangent),
+        0.0f0,
+    )
+    tangent_vector = _normalize_vector(tangent_orthogonal)
+    bitangent = _normalize_vector(_cross_vector(surface_normal, tangent_vector))
+    handedness = tangent[4] < 0.0f0 ? -1.0f0 : 1.0f0
+    return _normalize_vector(
+        Vec4f(
+            tangent_vector[1] * tangent_space[1] + handedness * bitangent[1] * tangent_space[2] + surface_normal[1] * tangent_space[3],
+            tangent_vector[2] * tangent_space[1] + handedness * bitangent[2] * tangent_space[2] + surface_normal[2] * tangent_space[3],
+            tangent_vector[3] * tangent_space[1] + handedness * bitangent[3] * tangent_space[2] + surface_normal[3] * tangent_space[3],
+            0.0f0,
+        ),
+    )
+end
+
+"""Layered terrain fragment (N-4).
+
+Every layer is sampled in WORLD metres — u = x / repeat, v = -z / repeat, the
+orientation the terrain tangent frame already uses — so tiling is physical and
+independent of the terrain extent. Layer 0 is the base; layers 1 and 2 are
+painted over it with `_layer_weight`. Albedo, roughness (G, glTF), occlusion
+(R), and tangent-space normals are blended with the same weights, then macro
+noise scales albedo by (1 + amplitude x (2m - 1)). The terrain material's base
+colour is deliberately NOT applied: layer materials are neutral and the scans
+carry the colour.
+"""
+function _terrain_layered_fragment()
+    normal = Lava.gfx_input(Vec4f, 1)
+    world_position = Lava.gfx_input(Vec4f, 2)
+    material = Lava.gfx_input(Vec4f, 4)
+    light_direction = Lava.gfx_input(Vec4f, 5)
+    light_color = Lava.gfx_input(Vec4f, 6)
+    lighting_parameters = Lava.gfx_input(Vec4f, 7)
+    environment_top = Lava.gfx_input(Vec4f, 8)
+    environment_horizon = Lava.gfx_input(Vec4f, 9)
+    environment_ground = Lava.gfx_input(Vec4f, 10)
+    fog_color = Lava.gfx_input(Vec4f, 11)
+    camera_position = Lava.gfx_input(Vec4f, 12)
+    light_space = Lava.gfx_input(Vec4f, 13)
+    surface_parameters = Lava.gfx_input(Vec4f, 15)
+    tangent = Lava.gfx_input(Vec4f, 16)
+    shadow = Lava.gfx_input(Vec4f, 17)
+    layer0_a = Lava.gfx_input(Vec4f, 18)
+    layer0_b = Lava.gfx_input(Vec4f, 19)
+    layer1_a = Lava.gfx_input(Vec4f, 20)
+    layer1_b = Lava.gfx_input(Vec4f, 21)
+    layer2_a = Lava.gfx_input(Vec4f, 22)
+    layer2_b = Lava.gfx_input(Vec4f, 23)
+    macro_parameters = Lava.gfx_input(Vec4f, 24)
+    u = world_position[1]
+    v = -world_position[3]
+    slope = 1.0f0 - clamp(_normalize_vector(normal)[2], 0.0f0, 1.0f0)
+    height = world_position[2]
+    macro_value = Lava.sample_texture_2d(UInt32(13), u * macro_parameters[1], v * macro_parameters[1], UInt32(0))
+    uv0 = Vec2f(u * layer0_a[1], v * layer0_a[1])
+    uv1 = Vec2f(u * layer1_a[1], v * layer1_a[1])
+    uv2 = Vec2f(u * layer2_a[1], v * layer2_a[1])
+    # Far-field resampling: past ~25 m a 2-3 m tile spans so few pixels that its
+    # own low-frequency structure repeats as a visible grid (N4-1 ledger), and
+    # mips cannot remove repetition larger than a pixel. Albedo is blended toward
+    # a second sample at TERRAIN_FAR_REPEAT x the tile size, so the period the
+    # eye can see grows by that factor where repetition would show.
+    distance = _distance_between(world_position, camera_position)
+    far = _ramp(TERRAIN_FAR_BLEND_START_M, TERRAIN_FAR_BLEND_END_M, distance)
+    far_scale = 1.0f0 / TERRAIN_FAR_REPEAT
+    albedo0 = _mix4(
+        _sample_texture(UInt32(0), uv0),
+        _sample_texture(UInt32(0), Vec2f(uv0[1] * far_scale, uv0[2] * far_scale)),
+        far,
+    )
+    normal0 = _sample_texture(UInt32(1), uv0)
+    rough0 = _sample_texture(UInt32(2), uv0)[2]
+    occlusion0 = _sample_texture(UInt32(3), uv0)[1]
+    albedo1 = _mix4(
+        _sample_texture(UInt32(4), uv1),
+        _sample_texture(UInt32(4), Vec2f(uv1[1] * far_scale, uv1[2] * far_scale)),
+        far,
+    )
+    normal1 = _sample_texture(UInt32(6), uv1)
+    rough1 = _sample_texture(UInt32(7), uv1)[2]
+    occlusion1 = _sample_texture(UInt32(8), uv1)[1]
+    albedo2 = _mix4(
+        _sample_texture(UInt32(9), uv2),
+        _sample_texture(UInt32(9), Vec2f(uv2[1] * far_scale, uv2[2] * far_scale)),
+        far,
+    )
+    normal2 = _sample_texture(UInt32(10), uv2)
+    rough2 = _sample_texture(UInt32(11), uv2)[2]
+    occlusion2 = _sample_texture(UInt32(12), uv2)[1]
+    weight1 = _layer_weight(layer1_a, layer1_b, slope, height, macro_value)
+    weight2 = _layer_weight(layer2_a, layer2_b, slope, height, macro_value)
+    albedo = _mix4(_mix4(albedo0, albedo1, weight1), albedo2, weight2)
+    tangent_space = _mix4(
+        _mix4(_tangent_space_normal(normal0, layer0_b[4]), _tangent_space_normal(normal1, layer1_b[4]), weight1),
+        _tangent_space_normal(normal2, layer2_b[4]),
+        weight2,
+    )
+    roughness_sample = _mix(_mix(rough0, rough1, weight1), rough2, weight2)
+    occlusion_sample = _mix(_mix(occlusion0, occlusion1, weight1), occlusion2, weight2)
+    macro_scale = 1.0f0 + macro_parameters[2] * (macro_value * 2.0f0 - 1.0f0)
+    surface_color = Vec4f(albedo[1] * macro_scale, albedo[2] * macro_scale, albedo[3] * macro_scale, 1.0f0)
+    view_direction = Vec4f(
+        camera_position[1] - world_position[1],
+        camera_position[2] - world_position[2],
+        camera_position[3] - world_position[3],
+        0.0f0,
+    )
+    lit_color = _material_response(
+        surface_color,
+        _apply_tangent_normal(normal, tangent, tangent_space),
+        light_direction,
+        light_color,
+        lighting_parameters[1],
+        environment_top,
+        environment_horizon,
+        environment_ground,
+        0.0f0,
+        1.0f0,
+        surface_parameters[1],
+        surface_parameters[2],
+        _shadow_visibility(light_space, shadow[1], shadow[2]),
+        view_direction,
+        roughness_sample,
+        occlusion_sample,
+        material[4],
+        Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0),
+        Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0),
+    )
+    Lava.gfx_output(0, _apply_fog(lit_color, fog_color, distance, lighting_parameters[2]))
+    return nothing
+end
+
 function _overlay_vertex(
     positions::Lava.LavaDeviceArray{Vec4f,1},
     colors::Lava.LavaDeviceArray{Vec4f,1},
@@ -1873,6 +2175,14 @@ function backend()::LavaBackend
             ;
             vertex=_terrain_vertex,
             fragment=_terrain_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthLess(),
+        )
+        terrain_layered_pipeline = GraphicsPipeline(
+            ;
+            vertex=_terrain_layered_vertex,
+            fragment=_terrain_layered_fragment,
             blend=Opaque(),
             cull=NoCull(),
             depth=DepthLess(),
@@ -1941,6 +2251,7 @@ function backend()::LavaBackend
             sky_pipeline,
             sky_view_pipeline,
             terrain_pipeline,
+            terrain_layered_pipeline,
             overlay_pipeline,
             mesh_pipeline,
             texture_pipeline,
@@ -1956,6 +2267,7 @@ function backend()::LavaBackend
             nothing,
             nothing,
             nothing,
+            nothing,
             Dict{Tuple{String,String,SamplerSpec},MaterialTextureResources}(),
             Dict{Tuple{String,String},MaterialTextures}(),
             Dict{SamplerSpec,Lava.LavaSampler}(),
@@ -1964,6 +2276,7 @@ function backend()::LavaBackend
             UInt64(0),
             UInt64(0),
             _gpu_timestamp_capable(context),
+            false,
             false,
             false,
             false,
@@ -2762,6 +3075,88 @@ function _material_texture_resources!(
         textures.max_sampler_lod,
     )
     cache[key] = created
+    return created
+end
+
+"""Lower the layer set into the seven layered-terrain uniforms.
+
+Per layer `a = (1/metres_per_repeat, slope_lo, slope_hi, macro_threshold)` and
+`b = (height_lo_m, height_hi_m, macro_softness, normal_scale)`. An absent term
+becomes a ramp that is 1 everywhere; a padding layer (two-layer sets fill the
+third slot) gets the slope ramp (2, 3), which is 0 for every real slope.
+Then `macro = (cycles per metre, amplitude, 0, 0)` from the render policy.
+"""
+function _terrain_layer_uniforms(packet::WGEGraphics.GraphicsScenePacket)::NTuple{7,Vec4f}
+    layers = packet.terrain.layers.layers
+    normal_scales = Float32[_material(packet, layer.material_id).normal_scale for layer in layers]
+    return _terrain_layer_uniforms(layers, normal_scales, packet.render_policy.terrain_surface)
+end
+
+function _terrain_layer_uniforms(
+    layers::Vector{WGEGraphics.TerrainLayerPacket},
+    normal_scales::Vector{Float32},
+    terrain::WGEGraphics.TerrainSurfacePolicy,
+)::NTuple{7,Vec4f}
+    vectors = Vec4f[]
+    for index in 1:WGEGraphics.MAX_TERRAIN_LAYERS
+        padding = index > length(layers)
+        layer = layers[min(index, length(layers))]
+        inverse_repeat = 1000.0f0 / Float32(layer.metres_per_repeat_milli)
+        normal_scale = normal_scales[min(index, length(layers))]
+        coverage = layer.coverage
+        slope = padding ? (2.0f0, 3.0f0) :
+            (coverage === nothing || coverage.slope_bp === nothing) ? (-2.0f0, -1.0f0) :
+            (_bp(coverage.slope_bp[1]), _bp(coverage.slope_bp[2]))
+        height = (coverage === nothing || coverage.height_mm === nothing) ? (-2.0f9, -1.0f9) :
+            (Float32(coverage.height_mm[1]) / 1000.0f0, Float32(coverage.height_mm[2]) / 1000.0f0)
+        macro_ramp = (coverage === nothing || coverage.macro_ramp === nothing) ? (-2.0f0, 0.5f0) :
+            (_bp(coverage.macro_ramp[1]), _bp(coverage.macro_ramp[2]))
+        push!(vectors, Vec4f(inverse_repeat, slope[1], slope[2], macro_ramp[1]))
+        push!(vectors, Vec4f(height[1], height[2], macro_ramp[2], normal_scale))
+    end
+    push!(vectors, Vec4f(Float32(terrain.macro_frequency_milli) / 1000.0f0, _bp(terrain.macro_variation_bp), 0.0f0, 0.0f0))
+    return Tuple(vectors)
+end
+
+function _terrain_layer_resources!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    shadow::ShadowResources,
+)::TerrainLayerResources
+    current = state.terrain_layer_resources
+    current !== nothing && current.cache_key == packet.content_sha256 && return current
+    layers = packet.terrain.layers
+    count = length(layers.layers)
+    sets = [
+        _material_textures!(state, packet, _material(packet, layers.layers[min(index, count)].material_id))
+        for index in 1:WGEGraphics.MAX_TERRAIN_LAYERS
+    ]
+    macro_levels = _texture_levels(_texture_payload(packet, layers.macro_texture_id, Val{:roughness}()))
+    macro_texture = _lava_texture2d!(state, macro_levels)
+    state.upload_bytes += UInt64(sum(16 * size(level, 2) * size(level, 1) for level in macro_levels; init=0))
+    # Not `_surface_sampler!`: that cache keeps the max LOD of whichever material
+    # created it first, which would silently strip the layers' mips.
+    max_lod = max(maximum(set.max_sampler_lod for set in sets), UInt32(length(macro_levels) - 1))
+    sampler = _lod_sampler!(state, max_lod; filter=:linear, wrap=:repeat)
+    base, middle, top = sets
+    bindings = Lava.bind_textures([
+        base.albedo_texture * sampler,
+        base.normal_texture * sampler,
+        base.roughness_texture * sampler,
+        base.occlusion_texture * sampler,
+        middle.albedo_texture * sampler,
+        shadow.texture * shadow.sampler,
+        middle.normal_texture * sampler,
+        middle.roughness_texture * sampler,
+        middle.occlusion_texture * sampler,
+        top.albedo_texture * sampler,
+        top.normal_texture * sampler,
+        top.roughness_texture * sampler,
+        top.occlusion_texture * sampler,
+        macro_texture * sampler,
+    ])
+    created = TerrainLayerResources(packet.content_sha256, bindings, sampler, _terrain_layer_uniforms(packet))
+    state.terrain_layer_resources = created
     return created
 end
 
@@ -4191,7 +4586,11 @@ function _record_scene_passes!(
     shadow_resources = _shadow_resources!(state, packet, lighting)
     # Refuse an unhonourable policy axis before any GPU work, so the failure is
     # a clean typed error rather than a frame that quietly ignored its policy.
-    _assert_render_policy_supported(packet.render_policy, _probe_gpu_capabilities(state.context))
+    _assert_render_policy_supported(
+        packet.render_policy,
+        _probe_gpu_capabilities(state.context);
+        layered_terrain=packet.terrain.layers !== nothing,
+    )
     shadow_uniform = _shadow_uniform(packet.render_policy)
     texture_resources = _material_texture_resources!(
         state,
@@ -4243,12 +4642,7 @@ function _record_scene_passes!(
             state.pipeline_compilations += 1
         end
     end
-    draw!(
-        state.queue,
-        state.terrain_pipeline,
-        scene_target,
-        terrain_vertices;
-        args=(
+    terrain_arguments = (
             resources.heights,
             resources.slopes,
             resources.regions,
@@ -4287,15 +4681,40 @@ function _record_scene_passes!(
             Vec4f(material.emissive_factor_rgb..., 1.0f0),
             shadow_uniform,
             Float32(packet.render_policy.terrain_surface.uv_repeat_scale_milli) / 1000.0f0,
-        ),
-        descriptor_set_layout=texture_resources.bindings.layout,
-        descriptor_set=texture_resources.bindings.set,
-        clear_color=nothing,
     )
-    state.draw_calls += 1
-    if !state.terrain_compiled
-        state.terrain_compiled = true
-        state.pipeline_compilations += 1
+    if packet.terrain.layers === nothing
+        draw!(
+            state.queue,
+            state.terrain_pipeline,
+            scene_target,
+            terrain_vertices;
+            args=terrain_arguments,
+            descriptor_set_layout=texture_resources.bindings.layout,
+            descriptor_set=texture_resources.bindings.set,
+            clear_color=nothing,
+        )
+        state.draw_calls += 1
+        if !state.terrain_compiled
+            state.terrain_compiled = true
+            state.pipeline_compilations += 1
+        end
+    else
+        layer_resources = _terrain_layer_resources!(state, packet, shadow_resources)
+        draw!(
+            state.queue,
+            state.terrain_layered_pipeline,
+            scene_target,
+            terrain_vertices;
+            args=(terrain_arguments..., layer_resources.uniforms...),
+            descriptor_set_layout=layer_resources.bindings.layout,
+            descriptor_set=layer_resources.bindings.set,
+            clear_color=nothing,
+        )
+        state.draw_calls += 1
+        if !state.terrain_layered_compiled
+            state.terrain_layered_compiled = true
+            state.pipeline_compilations += 1
+        end
     end
     if mesh_resources !== nothing
         for batch in mesh_resources.batches

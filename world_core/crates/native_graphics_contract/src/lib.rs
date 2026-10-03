@@ -50,6 +50,7 @@ pub mod material_maps;
 pub mod render_policy;
 pub mod scene_composition;
 pub mod session;
+pub mod terrain_layers;
 pub mod supervisor;
 pub mod visual_quality;
 pub mod window;
@@ -74,6 +75,11 @@ pub use asset_projection::{
     GraphicsAssetTexture, project_render_asset, validate_graphics_asset_projection,
 };
 pub use scene_composition::{compose_bound_scene, compose_bound_scene_with_camera};
+pub use terrain_layers::{
+    LayerCoverage, LayerSource, LayerTextureSizes, MacroRamp, SquareRgba8, TerrainLayer,
+    TerrainLayerSet, TerrainLayers, apply_terrain_layers, build_terrain_layer_set,
+    load_terrain_layer_set, validate_terrain_layers,
+};
 
 pub use input_session::{
     INPUT_FRAME_SCHEMA, INPUT_SAMPLE_SCHEMA, INPUT_SIM_TICK_DT_MS, INPUT_TRACE_SCHEMA,
@@ -248,6 +254,10 @@ pub struct TerrainPacket {
     pub heights_m: BufferReference,
     pub slope_grade: BufferReference,
     pub region_codes: BufferReference,
+    /// N-4 layered surface. Absent = the single-material terrain, and the
+    /// canonical bytes of every existing packet are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layers: Option<TerrainLayers>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -881,7 +891,7 @@ pub fn validate_scene_packet(packet: &GraphicsScenePacket) -> Result<(), Graphic
     valid_sha(&packet.body.spatial_fields_sha256, "spatial_fields_sha256")?;
     validate_coordinate_system(&packet.body.coordinate_system)?;
     validate_camera(&packet.body.camera)?;
-    validate_terrain(&packet.body.terrain, &packet.body.materials)?;
+    validate_terrain(&packet.body.terrain, &packet.body.materials, &packet.body.textures)?;
 
     let mut material_ids = BTreeSet::new();
     for material in &packet.body.materials {
@@ -3333,6 +3343,7 @@ pub fn lower_reference_world(
                 "terrain-regions",
                 world.body.fields.region_codes.clone(),
             ),
+            layers: None,
         },
         materials,
         textures: vec![
@@ -3994,14 +4005,18 @@ const TERRAIN_TILING_CANDIDATE: TerrainSurfacePolicy = TerrainSurfacePolicy {
 /// spacing, so source heights are copied, never resampled.
 pub const CONVERGE0_TERRAIN_SCALE: usize = 5;
 
-/// Terrain repeats across the converge0 extent. 30 repeats over 480 m is one
-/// repeat per 16 m, close to `full`'s 12 m, while staying inside the policy's
-/// existing [1, 32000] bound (40 repeats would have needed a contract change).
+/// converge0 terrain surface policy (superseded the 30-repeat extent tiling of
+/// CONVERGE-0 once N-4 gave every layer a physical repeat size).
 const CONVERGE0_TERRAIN_TILING: TerrainSurfacePolicy = TerrainSurfacePolicy {
-    uv_repeat_scale_milli: 30000,
+    // Layered terrain (N-4) tiles each layer at its scan's physical size, so
+    // the extent-relative repeat stays at identity; wrap is required because
+    // every layer UV is metric and exceeds 1.0.
+    uv_repeat_scale_milli: 1000,
     wrap_repeat: true,
-    macro_variation_bp: 0,
-    macro_frequency_milli: 40,
+    // ±20% albedo variation on a ~67 m period: large enough to break the
+    // 2-3 m tile repetition at distance, small enough not to read as blotches.
+    macro_variation_bp: 2000,
+    macro_frequency_milli: 15,
 };
 
 /// Shadow distance for the converge0 view-relative fit. 60 m covers every
@@ -4315,7 +4330,7 @@ pub fn lower_campaign2_packet(
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
     let candidate = ParityPolicyCandidate::from_env();
     let content = ParityContent::from_env(candidate)?;
-    lower_campaign2_packet_with(packet, view, candidate, content)
+    lower_campaign2_packet_with(packet, view, candidate, content, None)
 }
 
 /// `lower_campaign2_packet` with the parity arm passed explicitly instead of
@@ -4326,12 +4341,23 @@ pub fn lower_campaign2_packet_with(
     view: Campaign2View,
     parity_candidate: ParityPolicyCandidate,
     parity_content: ParityContent,
+    terrain_layers: Option<&TerrainLayerSet>,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
     validate_scene_packet(packet)?;
     if parity_content.converge0 != (parity_candidate == ParityPolicyCandidate::Converge0) {
         return Err(GraphicsContractError::malformed(
             "converge0 content and the converge0 render policy are only valid together",
         ));
+    }
+    // N-4: the converge0 world is surfaced by a scanned layer set, passed in
+    // explicitly (never read from disk here) so the packet stays a pure
+    // function of its inputs and the supervisor can re-derive it.
+    if parity_content.converge0 != terrain_layers.is_some() {
+        return Err(GraphicsContractError::provenance(if parity_content.converge0 {
+            "converge0 content requires a terrain layer set (tools/terrain_layers/converge0.json)"
+        } else {
+            "a terrain layer set is only valid with converge0 content"
+        }));
     }
     let objective = packet
         .body
@@ -5131,6 +5157,9 @@ pub fn lower_campaign2_packet_with(
     // changes CONTENT, not renderer behaviour.
     if parity_content.converge0 {
         apply_converge0_content(&mut body)?;
+        if let Some(set) = terrain_layers {
+            apply_terrain_layers(&mut body, set)?;
+        }
     }
     if parity_content.hero_materials {
         let remapped = material_maps::apply_hero_material_set(&mut body);
@@ -5303,7 +5332,11 @@ fn validate_camera(camera: &GraphicsCamera) -> Result<(), GraphicsContractError>
 fn validate_terrain(
     terrain: &TerrainPacket,
     materials: &[MaterialIntent],
+    textures: &[TextureReference],
 ) -> Result<(), GraphicsContractError> {
+    if let Some(layers) = &terrain.layers {
+        validate_terrain_layers(layers, materials, textures)?;
+    }
     valid_id(&terrain.terrain_id, "terrain_id")?;
     if !terrain.width_m.is_finite()
         || !terrain.length_m.is_finite()
@@ -6360,6 +6393,7 @@ mod tests {
                 heights_m: BufferReference::inline_f32("heights", vec![0.0; 9]),
                 slope_grade: BufferReference::inline_f32("slope", vec![0.0; 9]),
                 region_codes: BufferReference::inline_u8("regions", vec![1; 9]),
+                layers: None,
             },
             materials: vec![MaterialIntent {
                 material_id: "terrain".into(),
