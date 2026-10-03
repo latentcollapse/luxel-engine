@@ -99,20 +99,103 @@ P-1  Post-reboot health: GPU kernel compiles again (F-I.4 clears). Run Spiral I 
      defaults for direct_field vs cage_parametric are measured, not guessed.
      STATUS 2026-10-02: health PASS (F-I.4 closed by the 04:49 reboot; probe
      reconstructed as /tmp/p1_health.jl). Spiral I v4 hit the budgeted
-     first-run kernel bug — in-kernel BoundsError at blob, no CSV rows;
-     registered as F-I.5 with the -g2 debug plan. Crossover CSV pending on the
-     v4 kernel fix; no pins affected.
+     first-run kernel bug (F-I.5: lbs! palette instance offset — the dry-review
+     of the never-executed N>1 territory also caught B_direct's vertex binding
+     and an unwrapped identity comprehension); v5 fix → rerun ×2 ALL GATES PASS
+     (HI-G4 stable columns byte-identical, sha16 `4a9144326ebed3cb`).
+     GATE MET: crossover surface filled in results/spiral_i_comparators.csv;
+     HI-P1 amended at the (blob, N=128) corner (B_direct stops winning there
+     in BOTH runs); policy defaults now measured. Full crossovers + honest
+     negative envelope in TetLab/TETCAGE_GOAL2_FINAL.md §4/§9.
 P0   Vulkan compute parity port (spiral-G methodology): deform!/reconstruct! as one
      GLSL compute dispatch; oracle = TetDeform CPU path; gate max ≤ 0.5 px vs the
      analytic model, expected ~ulp; CSV evidence + sha pin. GATE: parity + wall
      within 2× of the CUDA pins on the same classes, or explain why.
+     >>> CLOSED 2026-10-02. Driver `graphics_lab/TetLab/vk/spiral_p0_compute.jl`;
+     canonical CSV `TetLab/results/spiral_p0_vulkan_compute.csv` sha16
+     `84915b3c1c3932df` (run b); P0-G5 stable parity block (168 rows) sha256
+     `5160e8a3e21e018c…` byte-identical x2; logs + run-A CSV archived at
+     `TetLab/logs/spiral_p0_run_{a,b}.{log,csv}`. ALL GATES PASS.
+     PARITY: 7 classes x 2 families x N in {1,8,32,128} x 3 layouts = 168 rows.
+     Worst object error 9.703e-07 (conifer) against a per-class bound of
+     4·eps(f32)·maxcoord; worst screen error 1.09e-04 px against the 0.5 px
+     gate — i.e. the arithmetic ported from the E authority was correct on
+     the FIRST hardware execution, at ulp, everywhere. WALL: within 2× of the
+     pinned CUDA comparators on every cell where a same-(class,N) pin exists
+     (worst 1.58x, teapot); the one cell over it, blob/rot/N=128 at 3.72x, is
+     the registered DRAM-write-bound corner already carrying a 2.04x CUDA
+     band (55.08/112.21 us). G0-G6 all GREEN, including the negative control
+     (cage_y quarter shifted 0.52 → obj 1.080 vs bound 5.700e-07: the gates
+     detect). Twelve defects registered in TETCAGERT_FAILURE_REGISTER.md
+     (F-P0.1…F-P0.9); no arithmetic defect in any of them.
+     The 2.9× headroom claim was RE-MEASURED, not assumed, per §1: the shipped
+     planar+packed form is at or under the CUDA pins wherever a same-cell pin
+     exists — the claim survives, with the corner band carried forward.
+     >>> RE-VERIFIED 2026-10-02 after Spiral H2 (P0-G4i). H2 measured the
+     missing CUDA wind N-ladder (28 rows, HF2-G1 identity at every (class,N),
+     HF2-G2 byte-identical x2, sha256 `088909edf19ff5f4…`), so BOTH families
+     now have same-(class,N) pins at all four N and the P0-G4d same-cell
+     substitute was RETIRED rather than left dormant. Re-run x2 ALL GATES
+     PASS, canonical CSV sha16 `ce4be8ca13563bb4`; the parity block sha256
+     `5160e8a3e21e018c…` is UNCHANGED, which is the correct outcome and a
+     useful check — the comparator table is wall-side only, so the numeric
+     evidence must be invariant to it. Worst ratio away from the registered
+     corner: 1.65x (teapot). `blob/wind/N=128` — the cell with no valid
+     comparator at all before H2 — now carries a real same-(class,N) claim at
+     1.47x against H2's 135.79 us pin.
+     >>> AND THE STANDING LESSON, because it is the part most likely to be
+     re-learned expensively: every amendment in the P0-G4d→G4h chain existed to
+     work around a MISSING MEASUREMENT. Each was individually defensible; each
+     added machinery, calibration, resolution limits and asserts. The fix was
+     ~150 lines of benchmark that measured the thing nobody had measured. **A
+     workaround that keeps growing a gate is telling you to go measure, not to
+     keep tuning.**
 P1   Packet v7 extension lands behind the flag: conifer-wind single instance on the
      certified worker path; telemetry (wall µs, instances, bytes/frame); typed
      rejections; static fallback proven. GATE: existing suites byte-identical with
      flag off; flagged run presents deformed frames with receipts.
+     >>> CLOSED 2026-10-02. `native_graphics_contract::deformation` +
+     `WGEGraphics.jl`, flag `WGE_TETCAGE_DEFORM_V7`. **GATE MET on both
+     halves.** (a) BYTE-IDENTICAL WITH FLAG OFF, proved against a COMMITTED
+     v6 artifact rather than a round-trip: re-sealing
+     `artifacts/campaign2/adapter-v6-baseline-replay-2026-09-29/run-a/
+     graphics_scene_packet.json` under the new code reproduces its committed
+     `packet_sha256` exactly — an assertion a leaked field cannot pass.
+     Byte-identity is a property of the TYPE (`Option` +
+     `skip_serializing_if`), not of a lucky test. Suites: 68→77 passed, 0
+     failed (the +9 is the new P1 suite); Julia `lava_adapter` protocol suites
+     unchanged. (b) FLAGGED RUN: v7 conifer-wind (1 instance, 226 tets, 3508
+     verts, H2's pinned A=0.2/phi=0.7/scale) validates, seals, round-trips and
+     carries receipts that agree with it; all 9 typed rejections reachable
+     through the real validator; static fallback validated as EVIDENCE (a
+     fallback frame must report no deform wall and must carry a reason).
+     v6/v7 are mutually exclusive in both directions on BOTH sides of the
+     Julia/Rust boundary — a receiver never has to guess whether the section
+     was ignored.
+     >>> AND ONE FINDING P1 SURPRISED US WITH, recorded because it will recur:
+     `wge-certification-authority` did not compile at HEAD — the earlier
+     mip-residency slice added a field to `GraphicsTelemetry` and closed
+     without running the WORKSPACE gate, so a crate outside its own lane sat
+     broken and invisible until P1 happened to touch the same struct.
+     **A slice that changes a shared contract type owes the workspace gate,
+     not just its own crate's suite.**
 P2   In-engine instancing ladder N ∈ {1,8,32,128} × classes; frame + memory
      telemetry vs the Spiral-I table. GATE: measured in-engine economics ≥ the
      registered predictions, or the gap is explained and the envelope updated.
+     >>> INHERITS AN OPEN ITEM (P2 owns the root cause, deliberately not closed
+     at P0): the DRAM-write-bound corner `blob/N=128` (12·ntot = 15.7 MB) has a
+     **5.4x CROSS-RUN band on the `soa+packed` layout** — 211.72 / 39.10 /
+     214.56 us across three runs of the same binary — while the other two
+     layouts held ~208–214 us in every run and the WITHIN-run trial spread
+     stayed tight (193.79–216.42 us). Stable within a process, 5.4x apart
+     between processes; mechanism not established (candidates only: per-
+     iteration output-buffer placement, GPU clock/power state). P2's first act
+     is to reproduce it deliberately — repeated fresh processes at that one
+     cell with buffer placement logged — because P2 is where in-engine
+     CAPACITY claims are published and every such claim inherits this band.
+     Until then the capacity number at that working set carries the band.
+     P0's determinism does not depend on it: the parity columns are
+     byte-identical x2 and are unaffected by wall variance.
 P3   ARENA A/B: ARENA BASELINE vs ARENA+TetCageRT, identical content/gameplay;
      publish package/runtime memory, GPU memory, animated-geometry cost, frame
      time, density, entity counts, visual error. Then SPEND the savings
@@ -129,5 +212,30 @@ P3   ARENA A/B: ARENA BASELINE vs ARENA+TetCageRT, identical content/gameplay;
 - The RT facet (instance-per-tet, μBLAS reuse) remains registered-dormant; this seam
   does not claim it.
 - F-I.4 (reboot-dependent compile failure) and the untested-on-hardware Spiral I v4
-  driver are the two known risks entering P-1; both are registered in
-  `TETCAGERT_FAILURE_REGISTER.md`.
+  driver were the two known risks entering P-1; both are CLOSED (reboot;
+  v5 fix, ×2 gates GREEN) and registered in
+  `TETCAGERT_FAILURE_REGISTER.md`. Entering P0: the measured wall ordering at
+  the (blob, N=128) corner is machine-state-sensitive across runs (2-run
+  spread in the CSV's machine-state columns) — capacity claims at that
+  working set carry that band.
+- CLOSED at P0, and the most useful thing the port taught the campaign: **a
+  comparator pin carries its (config, N) domain.** H produced wind pins with
+  no N-ladder, and the P0 driver applied them across the whole ladder,
+  reporting a "20.4x regression" that was 128x-the-work-against-a-1x-pin. The
+  ported kernel was never at fault (wind and rot cost the same at every N
+  measured). The 2× gate now asserts only where a same-(class,N) pin exists
+  and labels the rest UNAVAILABLE. Registering the domain of a pin is part of
+  using it, exactly as registering a gate is part of running it.
+- Second P0 lesson, recorded because it nearly shipped as a false PASS: **a
+  threshold derived from a measurement can disable the check that consumes
+  it.** The floor probe's own spread is the resolution limit for the
+  substitute wall gate; measured cold it was 656 µs against a 14 µs floor and
+  silently marked all 21 cells UNRESOLVABLE — the gate reported ALL PASS while
+  covering nothing. The calibration now asserts its own sanity and the gate
+  reports how many cells each form actually gated (4-5 of 21).
+- Third: **"stable across trials" and "stable across runs" are different
+  claims.** The (blob, N=128) soa+packed cell is tight within a run
+  (193.79–216.42 µs over its trials) and swings 5.4x between runs
+  (39.10 / 211.72 / 214.56 µs). Determinism here rests on the parity columns,
+  which are byte-identical x2; the wall at that corner is a sample of one
+  machine state, and P2 inherits the band.

@@ -43,6 +43,7 @@ const REFERENCE_FOG_WEIGHT_AT_CAMERA: f64 = 0.16;
 const MAX_REFERENCE_FOG_DENSITY: f64 = 0.006;
 
 pub mod asset_projection;
+pub mod deformation;
 pub mod input_session;
 pub mod live;
 pub mod scene_composition;
@@ -50,6 +51,13 @@ pub mod session;
 pub mod supervisor;
 pub mod visual_quality;
 pub mod window;
+
+pub use deformation::{
+    deformation_error, deformation_v7_enabled, validate_deformation,
+    validate_deformation_receipt, validate_schema_deformation, DeformationFamily, DeformationField,
+    DeformationIntent, DeformationRejection, DeformationTelemetry, DEFORMATION_V7_ENV,
+    SCENE_PACKET_SCHEMA_V7,
+};
 
 pub use asset_projection::{
     GRAPHICS_ASSET_PROJECTION_SCHEMA, GraphicsAssetMesh, GraphicsAssetProjection,
@@ -155,6 +163,14 @@ pub struct GraphicsScenePacketBody {
     pub environment: EnvironmentIntent,
     pub overlays: Vec<SemanticOverlay>,
     pub capture: GraphicsCaptureRequest,
+    /// TetCage deformation binding (scene packet v7 ONLY). `Option` +
+    /// `skip_serializing_if` is what makes flag-off output byte-identical to
+    /// v6 by construction rather than by test: absent means the key is absent
+    /// from the canonical JSON, so the sealed digest is unchanged. Presence
+    /// REQUIRES `schema_version == SCENE_PACKET_SCHEMA_V7` and is enforced in
+    /// both directions by `deformation::validate_schema_deformation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deformation: Option<DeformationIntent>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -747,6 +763,10 @@ pub struct GraphicsTelemetry {
     pub frame_time_us: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu_frame_time_us: Option<u64>,
+    /// TetCage deformation evidence (scene packet v7 ONLY). Same
+    /// byte-identity argument as `GraphicsScenePacketBody::deformation`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deformation: Option<DeformationTelemetry>,
     pub pass_timings: GraphicsPassTimings,
 }
 
@@ -803,11 +823,21 @@ pub fn validate_scene_packet(packet: &GraphicsScenePacket) -> Result<(), Graphic
             "scene packet digest does not match its canonical body",
         ));
     }
-    if packet.body.schema_version != SCENE_PACKET_SCHEMA {
+    if packet.body.schema_version != SCENE_PACKET_SCHEMA
+        && packet.body.schema_version != deformation::SCENE_PACKET_SCHEMA_V7
+    {
         return Err(GraphicsContractError::unsupported(format!(
             "unsupported scene packet schema {}",
             packet.body.schema_version
         )));
+    }
+    // v6/v7 mutual exclusion, before any content validation: a packet whose
+    // schema and contents disagree about whether it carries a deformation has
+    // no coherent meaning, and diagnosing that first keeps every later error
+    // message about deformation actually meaning something.
+    deformation::validate_schema_deformation(&packet.body)?;
+    if let Some(intent) = &packet.body.deformation {
+        deformation::validate_deformation(&packet.body, intent)?;
     }
     valid_id(&packet.body.packet_id, "packet_id")?;
     match (
@@ -2977,6 +3007,7 @@ pub fn lower_reference_world(
 
     let body = GraphicsScenePacketBody {
         schema_version: SCENE_PACKET_SCHEMA.into(),
+        deformation: None,
         packet_id: format!(
             "graphics-packet-{}",
             world.artifact_id.trim_start_matches("world-")
@@ -5394,6 +5425,7 @@ mod tests {
         };
         seal_scene_packet(GraphicsScenePacketBody {
             schema_version: SCENE_PACKET_SCHEMA.into(),
+            deformation: None,
             packet_id: "packet-test".into(),
             scene_artifact_id: None,
             scene_artifact_sha256: None,
@@ -5584,6 +5616,7 @@ mod tests {
         packet = seal_scene_packet(packet.body).expect("multi-level packet seals");
 
         let mut telemetry = GraphicsTelemetry {
+            deformation: None,
             upload_bytes: 0,
             readback_bytes: 0,
             draw_calls: 0,
@@ -5782,6 +5815,7 @@ mod tests {
             capture_sha256: Some(sha256_prefixed(&capture)),
             measurements,
             telemetry: GraphicsTelemetry {
+                deformation: None,
                 upload_bytes: 1,
                 readback_bytes: 1,
                 draw_calls: 1,

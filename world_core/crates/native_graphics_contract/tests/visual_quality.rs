@@ -70,6 +70,7 @@ fn packet(overlays: bool) -> GraphicsScenePacket {
         }
     }
     seal_scene_packet(GraphicsScenePacketBody {
+        deformation: None,
         schema_version: wge_native_graphics_contract::SCENE_PACKET_SCHEMA.into(),
         packet_id: if overlays {
             "quality-overlay-packet".into()
@@ -171,6 +172,7 @@ fn receipt(packet: &GraphicsScenePacket, pixels: &[u8]) -> GraphicsFrameReceipt 
         capture_sha256: Some(sha256_prefixed(pixels)),
         measurements,
         telemetry: GraphicsTelemetry {
+            deformation: None,
             upload_bytes: 0,
             readback_bytes: pixels.len(),
             draw_calls: 1,

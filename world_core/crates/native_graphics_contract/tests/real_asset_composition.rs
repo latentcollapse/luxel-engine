@@ -172,6 +172,7 @@ fn scene_for_asset_at(
 
 fn base_body() -> GraphicsScenePacketBody {
     GraphicsScenePacketBody {
+        deformation: None,
         schema_version: "wge.graphics-scene-packet/v6".into(),
         packet_id: "real-asset-packet".into(),
         scene_artifact_id: None,

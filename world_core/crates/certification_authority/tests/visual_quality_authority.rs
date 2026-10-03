@@ -125,6 +125,8 @@ fn frame_receipt(
             .then(|| graphics::sha256_prefixed(capture)),
         measurements,
         telemetry: graphics::GraphicsTelemetry {
+            deformation: None,
+            texture_residency: None,
             upload_bytes: 0,
             readback_bytes: capture.len(),
             draw_calls: 1,

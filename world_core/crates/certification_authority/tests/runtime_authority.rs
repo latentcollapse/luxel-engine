@@ -260,6 +260,8 @@ fn add_native_quality_artifacts(candidate: &mut CandidateContext) {
         capture_sha256: Some(graphics::sha256_prefixed(&capture)),
         measurements,
         telemetry: graphics::GraphicsTelemetry {
+            deformation: None,
+            texture_residency: None,
             upload_bytes: 0,
             readback_bytes: capture.len(),
             draw_calls: 1,
