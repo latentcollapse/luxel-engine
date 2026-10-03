@@ -253,6 +253,86 @@ tests:
 decision: keep
 ```
 
+### FR-0015 — a port's comparator pin silently loses its domain when the ladder widens
+
+```yaml
+friction_id: FR-0015
+status: verified
+first_seen: 2026-10-02
+last_seen: 2026-10-02
+campaign: TetCageRT P0 (Vulkan compute parity port)
+operation: porting a verified kernel to a new backend, gated against the old backend's measured walls
+symptom: "P0-G4 reported a 20.4x wall regression at blob/wind/N=128. The kernel was never slower: the wind comparator pins came from a campaign that ran no N-ladder, so every wind pin was an N=1 measurement, and the new harness applied it at all four ladder points — comparing 128x the work against a 1x pin."
+repeated_behavior: an operator must re-derive, per comparator, which axes (N, family, layout, config) it was actually measured over, before any ratio gate may consume it; nothing in the pin's representation enforced that
+responsible_layer: contract (comparator/pin provenance carries no machine-checkable domain)
+workaround: per-row `pin_applicable` flag; the 2x gate asserts only where a same-(class,N) pin exists, and the remainder is labeled UNAVAILABLE with an explicitly-weaker same-work substitute
+proposed_improvement: a comparator pin should carry its measured domain as data (axes + values), and a comparison helper should refuse or downgrade any pairing that falls outside it, rather than dividing
+expected_leverage: diagnosis
+authority_impact: review-required (changes what a "within 2x of the reference" claim is allowed to mean)
+before_metrics:
+  gate_claim: "20.4x regression attributed to the ported kernel"
+  pinned_cells: "wind applied at N in {1,8,32,128} against N=1-only pins"
+after_metrics:
+  gate_claim: "claim asserted only where a same-(class,N) pin exists; wind N>1 labeled unavailable"
+  measured: "wind and rot cost the same at every N (blob/N=128: rot 196.8 vs wind 201.6 us attributed; N=1: 1.54 vs 2.04 us)"
+tests:
+  - "P0-G4d/G4f substitute coverage line in TetLab/results/spiral_p0_vulkan_compute.csv"
+decision: keep
+```
+
+### FR-0016 — a threshold derived from a measurement silently disabled the gate that consumed it
+
+```yaml
+friction_id: FR-0016
+status: verified
+first_seen: 2026-10-02
+last_seen: 2026-10-02
+campaign: TetCageRT P0 (Vulkan compute parity port)
+operation: calibration-then-gate (measure a resolution floor, use its spread to decide which cells a wall gate may rank)
+symptom: "the run printed ALL GATES PASS while the substitute wall gate covered ZERO of 21 cells. The resolution limit was the submit-floor probe's own spread; that probe had no warmup, so measured cold it reported a 656 us band against a ~14 us steady-state floor, which marked every cell UNRESOLVABLE."
+repeated_behavior: an operator must check what a gate actually gated, every run, and must sanity-assert every calibration constant before trusting a threshold derived from it
+responsible_layer: contract (no assertion tied calibration validity to gate coverage)
+workaround: sanity assert on the calibration itself (`floor_band < 0.5 * floor`), a coverage assert (DRAM-bound cells must be resolvable), and a per-run coverage count in the artifact
+proposed_improvement: a gate should emit the size of the set it gated, and refuse to report success when that set is empty or suspiciously small
+expected_leverage: reliability
+authority_impact: none (reporting and self-check only; no threshold loosened)
+before_metrics:
+  calibration: "floor band 656.48 us vs floor 13.88 us (cold, min-max over 5 trials)"
+  gated_cells: "0 of 21"
+after_metrics:
+  calibration: "floor band 2.71-3.34 us vs floor 13.88-15.26 us (25 trials, warm, p90-p10)"
+  gated_cells: "4-5 of 21 ratio-gated, remainder recorded as floor-bound and unrankable"
+tests:
+  - "P0-G4g sanity assert trips on an intermediate 8.55 us min-max band"
+  - "P0-G4h coverage assert trips if a DRAM-bound substitute cell is unresolvable"
+decision: keep
+```
+
+### FR-0017 — "stable across trials" was read as "stable across runs"
+
+```yaml
+friction_id: FR-0017
+status: verified
+first_seen: 2026-10-02
+last_seen: 2026-10-02
+campaign: TetCageRT P0 (Vulkan compute parity port)
+operation: benchmarking a ported kernel at the throughput-bound corner
+symptom: "the DRAM-write-bound cell (blob/N=128, soa+packed) measured 211.72, 39.10 and 214.56 us across three runs of the same binary, while its within-run trial spread stayed tight (193.79-216.42 us). A harness that takes 50 samples per run can prove steadiness and still be a sample of one machine state."
+repeated_behavior: capacity claims at that corner need repeated fresh processes, not repeated trials; determinism had to be argued from the parity columns instead of the wall
+responsible_layer: runtime (process-level GPU state: buffer placement or clock/power state, mechanism NOT established)
+workaround: stable columns are the deterministic evidence (parity/error vectors, byte-identical x2); the wall at that corner is recorded with its min/max and carried as a band into P2
+proposed_improvement: a repeatability harness should distinguish trial-level and process-level variance, and report a capacity claim only from process-level repeats
+expected_leverage: reliability
+authority_impact: review-required (capacity claims at that working set carry the band)
+before_metrics:
+  corner_wall: "single-run sample only; ordering claims treated as run-independent"
+after_metrics:
+  corner_wall: "3 runs spanning 39.10-214.56 us on soa+packed; other two layouts stable at ~208-214 us"
+tests:
+  - "sust_min_us/sust_max_us columns in TetLab/results/spiral_p0_vulkan_compute.csv"
+decision: keep
+```
+
 ## Evidence rules
 
 1. A candidate is not a defect until a run reproduces it or the design review establishes a contract violation.
