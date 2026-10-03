@@ -456,3 +456,92 @@ end
     @test policy.shadow.darkness_bp == 7500
     @test policy == WGEGraphics.RenderPolicy()
 end
+
+# ---------------------------------------------------------------------------
+# CONVERGE-0 axes: mesh repeat wrap, view-relative shadow fit, view sky.
+# ---------------------------------------------------------------------------
+
+@testset "unknown render policy keys fail closed (CONVERGE-0)" begin
+    policy_json(overrides) = JSON3.read(JSON3.write(Dict{String,Any}("render_policy" => overrides)))
+    # An axis this worker does not know must be refused, not ignored.
+    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+        policy_json(Dict("volumetrics" => Dict("density_bp" => 100))),
+    )
+    # So must an unknown field inside a known axis.
+    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+        policy_json(Dict("dither" => Dict("amplitude_milli_lsb" => 1000, "pattern" => "blue"))),
+    )
+    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+        policy_json(Dict("sky" => Dict("sun_disc_radius_milli_deg" => 650))),
+    )
+    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+        policy_json(Dict("shadow_fit" => Dict("view_distance_m" => 7))),
+    )
+    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+        policy_json(Dict("mesh_surface" => Dict("wrap_repeat" => 1))),
+    )
+    parsed = WGEGraphics._parse_render_policy(policy_json(Dict(
+        "mesh_surface" => Dict("wrap_repeat" => true),
+        "shadow_fit" => Dict("view_distance_m" => 60),
+        "sky" => Dict("sun_disc_radius_milli_deg" => 650, "sun_disc_gain_bp" => 120000, "sun_glow_gain_bp" => 2400),
+    )))
+    @test parsed.mesh_surface.wrap_repeat
+    @test parsed.shadow_fit.view_distance_m == 60
+    @test parsed.sky.sun_disc_gain_bp == 120000
+    # Absent axes keep their absent meaning.
+    absent = WGEGraphics.RenderPolicy()
+    @test absent.shadow_fit === nothing
+    @test absent.sky === nothing
+    @test absent.mesh_surface.wrap_repeat == false
+end
+
+@testset "mesh repeat wrap is its own axis (CONVERGE-0)" begin
+    wrapped = WGEGraphics.RenderPolicy(
+        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
+        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(),
+        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(),
+        WGEGraphics.MeshSurfacePolicy(true), nothing, nothing,
+    )
+    @test LavaAdapter._surface_sampler_spec(wrapped, :mesh).wrap == :repeat
+    # Mesh wrap must not leak onto terrain either (the F-4 split, reversed).
+    @test LavaAdapter._surface_sampler_spec(wrapped, :terrain).wrap == :clamp
+end
+
+@testset "view-fitted shadow frame bounds the frustum slice (CONVERGE-0)" begin
+    camera = WGEGraphics.CameraPacket(
+        "fit-camera",
+        WGEGraphics.PerspectiveProjection(50.0f0),
+        (54.5f0, 26.0f0, 49.0f0),
+        (-0.6f0, -0.2f0, -0.77f0),
+        (0.0f0, 1.0f0, 0.0f0),
+        0.1f0,
+        1500.0f0,
+        UInt32(960),
+        UInt32(640),
+    )
+    light = LavaAdapter._normalize_vector(Vec4f(1.6407f0, -1.0f0, -1.381f0, 0.0f0))
+    light_direction, right, up = LavaAdapter._basis_vectors(
+        light, LavaAdapter._shadow_up_hint(light), "test light basis")
+    frame = LavaAdapter._view_fitted_shadow_frame(camera, light_direction, right, up, 60.0f0)
+    @test frame.mode == 0.0f0
+    half_span = frame.projection[1]
+    # Every frustum-slice corner must project inside the orthographic extent.
+    view = LavaAdapter._camera_frame(camera)
+    for depth in (view.projection[3], 60.0f0), sx in (-1.0f0, 1.0f0), sy in (-1.0f0, 1.0f0)
+        corner = Vec4f(
+            (view.position .+ view.forward .* depth .+ view.right .* (sx * view.projection[1] * depth) .+ view.up .* (sy * view.projection[2] * depth))[1:3]...,
+            1.0f0,
+        )
+        ndc = LavaAdapter._project_world(
+            corner, frame.position, frame.right, frame.up, frame.forward, frame.projection, frame.mode)
+        @test abs(ndc[1]) <= 1.0f0
+        @test abs(ndc[2]) <= 1.0f0
+        @test 0.0f0 <= ndc[3] <= 1.0f0
+    end
+    # Resolution is independent of world size: ~4 texels/m at 60 m.
+    texels_per_metre = 512.0f0 / (2.0f0 * half_span)
+    @test texels_per_metre > 3.5f0
+    # And the fit refuses a distance that does not reach past the near plane.
+    @test_throws LavaAdapter.AdapterError LavaAdapter._view_fitted_shadow_frame(
+        camera, light_direction, right, up, 0.05f0)
+end

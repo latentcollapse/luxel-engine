@@ -63,8 +63,9 @@ pub use deformation::{
 
 pub use render_policy::{
     validate_packet_render_policy, validate_render_policy, BloomPolicy, DitherPolicy,
-    GradePolicy, RenderPolicy, ResolvedRenderPolicy, SamplerPolicy, ShadowPolicy,
-    TerrainSurfacePolicy, VignettePolicy, POLICY_SCALE,
+    GradePolicy, MeshSurfacePolicy, RenderPolicy, ResolvedRenderPolicy, SamplerPolicy,
+    ShadowFitPolicy, ShadowPolicy, SkyPolicy, TerrainSurfacePolicy, VignettePolicy,
+    POLICY_SCALE,
 };
 
 
@@ -1333,6 +1334,85 @@ fn cross3(first: [f32; 3], second: [f32; 3]) -> [f32; 3] {
     ]
 }
 
+/// Fraction of sampled pixels, in basis points, whose camera ray points BELOW
+/// the horizon yet never meets the terrain before the far plane: the visible
+/// "world ends here" void (audit item 1, CONVERGE-0 step 6).
+///
+/// Deterministic CPU geometry, not a capture statistic: each sampled pixel's
+/// ray is marched over the bilinear terrain heightfield (step 1% of distance,
+/// at least 0.25 m). Instances are ignored, so the measure is conservative —
+/// a prop can only hide void, never create it. Rays above the horizon are sky
+/// and never count.
+pub fn world_void_fraction_bp(packet: &GraphicsScenePacket, stride_px: u32) -> u32 {
+    let camera = &packet.body.camera;
+    let terrain = &packet.body.terrain;
+    let BufferPayload::F32(heights) = &terrain.heights_m.payload else {
+        return 10_000;
+    };
+    let CameraProjection::Perspective { fov_y_degrees } = camera.projection else {
+        return 0;
+    };
+    let (forward, right, up) = camera_basis(camera);
+    let tan_y = (fov_y_degrees.to_radians() * 0.5).tan();
+    let tan_x = tan_y * camera.width_px as f32 / camera.height_px as f32;
+    let n = terrain.resolution;
+    let half_width = terrain.width_m * 0.5;
+    let half_length = terrain.length_m * 0.5;
+    let height_at = |x: f32, z: f32| -> Option<f32> {
+        if x.abs() > half_width || z.abs() > half_length {
+            return None;
+        }
+        let column = (x / terrain.width_m + 0.5) * (n - 1) as f32;
+        let row = (0.5 - z / terrain.length_m) * (n - 1) as f32;
+        let c0 = (column.floor() as usize).min(n - 2);
+        let r0 = (row.floor() as usize).min(n - 2);
+        let tc = column - c0 as f32;
+        let tr = row - r0 as f32;
+        let sample = |r: usize, c: usize| heights[r * n + c];
+        let top = sample(r0, c0) * (1.0 - tc) + sample(r0, c0 + 1) * tc;
+        let bottom = sample(r0 + 1, c0) * (1.0 - tc) + sample(r0 + 1, c0 + 1) * tc;
+        Some(top * (1.0 - tr) + bottom * tr)
+    };
+    let stride = stride_px.max(1) as usize;
+    let (mut sampled, mut void) = (0u64, 0u64);
+    for py in (0..camera.height_px as usize).step_by(stride) {
+        for px in (0..camera.width_px as usize).step_by(stride) {
+            sampled += 1;
+            let ndc_x = (px as f32 + 0.5) / camera.width_px as f32 * 2.0 - 1.0;
+            let ndc_y = 1.0 - (py as f32 + 0.5) / camera.height_px as f32 * 2.0;
+            let mut ray = [0.0f32; 3];
+            for axis in 0..3 {
+                ray[axis] = forward[axis] + ndc_x * tan_x * right[axis] + ndc_y * tan_y * up[axis];
+            }
+            let length = (ray[0] * ray[0] + ray[1] * ray[1] + ray[2] * ray[2]).sqrt();
+            let ray = ray.map(|value| value / length);
+            if ray[1] >= 0.0 {
+                continue;
+            }
+            let mut distance = camera.near_plane_m;
+            let mut hit = false;
+            while distance < camera.far_plane_m {
+                let point = [
+                    camera.position_xyz_m[0] + ray[0] * distance,
+                    camera.position_xyz_m[1] + ray[1] * distance,
+                    camera.position_xyz_m[2] + ray[2] * distance,
+                ];
+                if let Some(ground) = height_at(point[0], point[2])
+                    && point[1] <= ground
+                {
+                    hit = true;
+                    break;
+                }
+                distance += (distance * 0.01).max(0.25);
+            }
+            if !hit {
+                void += 1;
+            }
+        }
+    }
+    if sampled == 0 { 0 } else { (void * 10_000 / sampled) as u32 }
+}
+
 fn camera_basis(camera: &GraphicsCamera) -> ([f32; 3], [f32; 3], [f32; 3]) {
     let forward = normalize3(camera.forward_xyz);
     let right = normalize3(cross3(forward, normalize3(camera.up_xyz)));
@@ -1790,7 +1870,45 @@ fn radial_mesh(
     bottom_cap: Option<f32>,
     top_cap: Option<f32>,
 ) -> MeshPacket {
-    let mut mesh = BeaconMeshBuffers::with_capacity(segments);
+    radial_mesh_with(
+        BeaconMeshBuffers::with_capacity(segments),
+        mesh_id,
+        material_id,
+        bands,
+        bottom_cap,
+        top_cap,
+    )
+}
+
+/// `radial_mesh` with metric UVs: one texture repeat per `metres_per_repeat`
+/// along the circumference and the profile (audit MD-4).
+fn radial_mesh_metric(
+    mesh_id: &str,
+    material_id: &str,
+    segments: usize,
+    bands: &[(f32, f32, f32, f32)],
+    bottom_cap: Option<f32>,
+    top_cap: Option<f32>,
+    metres_per_repeat: f32,
+) -> MeshPacket {
+    radial_mesh_with(
+        BeaconMeshBuffers::with_metric_uv(segments, metres_per_repeat),
+        mesh_id,
+        material_id,
+        bands,
+        bottom_cap,
+        top_cap,
+    )
+}
+
+fn radial_mesh_with(
+    mut mesh: BeaconMeshBuffers,
+    mesh_id: &str,
+    material_id: &str,
+    bands: &[(f32, f32, f32, f32)],
+    bottom_cap: Option<f32>,
+    top_cap: Option<f32>,
+) -> MeshPacket {
     for &(lower_y, upper_y, lower_radius, upper_radius) in bands {
         mesh.append_band(lower_y, upper_y, lower_radius, upper_radius);
     }
@@ -1864,6 +1982,126 @@ fn torus_mesh(
         material_id: material_id.into(),
         tangents: Vec::new(),
     }
+}
+
+/// Torus with metric UVs and a duplicated seam column/row.
+///
+/// The parametric `torus_mesh` shares the seam vertices through `% segments`,
+/// so its last quad interpolates U from 63/64 back to 0 — the whole texture
+/// squeezed backwards into one quad. That is invisible under 0..1 clamp and
+/// a hard seam under repeat, so the metric variant duplicates the seam instead.
+fn torus_mesh_metric(
+    mesh_id: &str,
+    material_id: &str,
+    major_radius: f32,
+    minor_radius: f32,
+    major_segments: usize,
+    minor_segments: usize,
+    metres_per_repeat: f32,
+) -> MeshPacket {
+    let mut positions = Vec::with_capacity((major_segments + 1) * (minor_segments + 1));
+    let mut normals = Vec::with_capacity((major_segments + 1) * (minor_segments + 1));
+    let mut uv0 = Vec::with_capacity((major_segments + 1) * (minor_segments + 1));
+    let mut indices = Vec::with_capacity(major_segments * minor_segments * 6);
+    for major in 0..=major_segments {
+        let major_angle = std::f32::consts::TAU * major as f32 / major_segments as f32;
+        let (major_sin, major_cos) = major_angle.sin_cos();
+        for minor in 0..=minor_segments {
+            let minor_angle = std::f32::consts::TAU * minor as f32 / minor_segments as f32;
+            let (minor_sin, minor_cos) = minor_angle.sin_cos();
+            let radius = major_radius + minor_radius * minor_cos;
+            positions.push([
+                radius * major_cos,
+                radius * major_sin,
+                minor_radius * minor_sin,
+            ]);
+            normals.push([minor_cos * major_cos, minor_cos * major_sin, minor_sin]);
+            // U along the tube's centre line, V around the tube.
+            uv0.push([
+                major_angle * major_radius / metres_per_repeat,
+                minor_angle * minor_radius / metres_per_repeat,
+            ]);
+        }
+    }
+    let row = minor_segments + 1;
+    for major in 0..major_segments {
+        for minor in 0..minor_segments {
+            let first = (major * row + minor) as u32;
+            let second = ((major + 1) * row + minor) as u32;
+            let third = ((major + 1) * row + minor + 1) as u32;
+            let fourth = (major * row + minor + 1) as u32;
+            indices.extend([first, second, third, first, third, fourth]);
+        }
+    }
+    MeshPacket {
+        mesh_id: mesh_id.into(),
+        positions_m: positions,
+        normals,
+        uv0,
+        indices,
+        material_id: material_id.into(),
+        tangents: Vec::new(),
+    }
+}
+
+/// Planar metric UVs for a mesh whose instance is scaled by `scale_xyz`.
+///
+/// Used for meshes whose faces own their vertices (disc fans, block faces), so
+/// a per-vertex projection cannot tear a shared vertex. The projection plane is
+/// chosen per vertex from its dominant normal axis, and coordinates are scaled
+/// into WORLD metres first: a unit block stretched to 0.30 x 1.75 x 0.62 m must
+/// not carry a 5.8:1 texel stretch just because its UVs were authored in
+/// object space.
+fn with_planar_metric_uv(mut mesh: MeshPacket, scale_xyz: [f32; 3], metres_per_repeat: f32) -> MeshPacket {
+    mesh.uv0 = mesh
+        .positions_m
+        .iter()
+        .zip(&mesh.normals)
+        .map(|(position, normal)| {
+            let world = [
+                position[0] * scale_xyz[0],
+                position[1] * scale_xyz[1],
+                position[2] * scale_xyz[2],
+            ];
+            let [nx, ny, nz] = normal.map(f32::abs);
+            let (a, b) = if ny >= nx && ny >= nz {
+                (world[0], world[2])
+            } else if nx >= nz {
+                (world[2], world[1])
+            } else {
+                (world[0], world[1])
+            };
+            [a / metres_per_repeat, b / metres_per_repeat]
+        })
+        .collect();
+    mesh
+}
+
+/// Ellipsoid with metric UVs: U along the equator, V along the meridian, one
+/// repeat per `metres_per_repeat`. Latitude/longitude topology still pinches
+/// at the poles (analytic area-weighted p90 anisotropy 2.29 for a sphere); a
+/// cube-sphere would remove that, but the crowns are placeholder geometry
+/// scheduled for replacement by imported trees (audit N-5/N-6).
+fn ellipsoid_mesh_metric(
+    mesh_id: &str,
+    material_id: &str,
+    radii: [f32; 3],
+    longitude_segments: usize,
+    latitude_segments: usize,
+    metres_per_repeat: f32,
+) -> MeshPacket {
+    let mut mesh = ellipsoid_mesh(mesh_id, material_id, radii, longitude_segments, latitude_segments);
+    let equator = std::f32::consts::TAU * 0.5 * (radii[0] + radii[2]);
+    // Meridian length of an ellipse with semi-axes (horizontal, vertical),
+    // Ramanujan's approximation halved (pole to pole).
+    let (a, b) = (0.5 * (radii[0] + radii[2]), radii[1]);
+    let h = ((a - b) * (a - b)) / ((a + b) * (a + b));
+    let half_perimeter =
+        0.5 * std::f32::consts::PI * (a + b) * (1.0 + 3.0 * h / (10.0 + (4.0 - 3.0 * h).sqrt()));
+    for uv in &mut mesh.uv0 {
+        *uv = [uv[0] * equator / metres_per_repeat, uv[1] * half_perimeter / metres_per_repeat];
+    }
+    mesh
 }
 
 fn disc_mesh(mesh_id: &str, material_id: &str, segments: usize) -> MeshPacket {
@@ -2136,6 +2374,13 @@ struct BeaconMeshBuffers {
     uv0: Vec<[f32; 2]>,
     indices: Vec<u32>,
     segments: usize,
+    /// `None` = the historical parametric UVs (each band V 0..1, U 0..1 around
+    /// the circumference). `Some(m)` = metric UVs, one texture repeat per `m`
+    /// metres along both the circumference and the profile (audit MD-4).
+    metric_repeat_m: Option<f32>,
+    /// Profile arc length already consumed by earlier bands, metres. Metric V
+    /// continues across bands so stacked bands share one texture field.
+    profile_length_m: f32,
 }
 
 impl BeaconMeshBuffers {
@@ -2146,7 +2391,15 @@ impl BeaconMeshBuffers {
             uv0: Vec::with_capacity(segments * 4 * 3 + segments * 6),
             indices: Vec::with_capacity(segments * 6 * 4),
             segments,
+            metric_repeat_m: None,
+            profile_length_m: 0.0,
         }
+    }
+
+    fn with_metric_uv(segments: usize, metres_per_repeat: f32) -> Self {
+        let mut buffers = Self::with_capacity(segments);
+        buffers.metric_repeat_m = Some(metres_per_repeat);
+        buffers
     }
 
     fn into_mesh(self, mesh_id: &str, material_id: &str) -> MeshPacket {
@@ -2218,15 +2471,38 @@ impl BeaconMeshBuffers {
                 smooth_normal(second_angle),
                 smooth_normal(first_angle),
             ]);
-            self.uv0.extend([
-                [first_u, 0.0],
-                [second_u, 0.0],
-                [second_u, 1.0],
-                [first_u, 1.0],
-            ]);
+            if let Some(repeat) = self.metric_repeat_m {
+                // Both rings are measured at the band's MEAN radius. Measuring
+                // each ring at its own radius looks more exact but shears: the
+                // U offset between the rings grows as angle x (r_lower -
+                // r_upper), reaching 2*pi*dr at the seam (measured p90
+                // anisotropy 7.5 on the hero core). The mean radius has no
+                // shear and a density error bounded by r_edge / r_mean.
+                let slant = (vertical_delta * vertical_delta + radial_delta * radial_delta).sqrt();
+                let lower_v = self.profile_length_m / repeat;
+                let upper_v = (self.profile_length_m + slant) / repeat;
+                let mean_radius = 0.5 * (lower_radius + upper_radius);
+                self.uv0.extend([
+                    [first_angle * mean_radius / repeat, lower_v],
+                    [second_angle * mean_radius / repeat, lower_v],
+                    [second_angle * mean_radius / repeat, upper_v],
+                    [first_angle * mean_radius / repeat, upper_v],
+                ]);
+            } else {
+                self.uv0.extend([
+                    [first_u, 0.0],
+                    [second_u, 0.0],
+                    [second_u, 1.0],
+                    [first_u, 1.0],
+                ]);
+            }
             self.indices
                 .extend([first, first + 1, first + 2, first, first + 2, first + 3]);
         }
+        let radial_delta = upper_radius - lower_radius;
+        let vertical_delta = upper_y - lower_y;
+        self.profile_length_m +=
+            (vertical_delta * vertical_delta + radial_delta * radial_delta).sqrt();
     }
 
     fn append_cap(&mut self, y: f32, radius: f32, top: bool) {
@@ -2247,21 +2523,21 @@ impl BeaconMeshBuffers {
             } else {
                 [center, second, first]
             };
-            self.append_triangle(
-                vertices,
-                normal,
-                [
-                    [0.5, 0.5],
-                    [
-                        0.5 + first[0] / (radius * 2.0),
-                        0.5 + first[2] / (radius * 2.0),
-                    ],
-                    [
-                        0.5 + second[0] / (radius * 2.0),
-                        0.5 + second[2] / (radius * 2.0),
-                    ],
-                ],
-            );
+            let uvs = if let Some(repeat) = self.metric_repeat_m {
+                // Planar metric mapping; the order follows `vertices`.
+                vertices.map(|vertex| [vertex[0] / repeat, vertex[2] / repeat])
+            } else {
+                let first_uv = [
+                    0.5 + first[0] / (radius * 2.0),
+                    0.5 + first[2] / (radius * 2.0),
+                ];
+                let second_uv = [
+                    0.5 + second[0] / (radius * 2.0),
+                    0.5 + second[2] / (radius * 2.0),
+                ];
+                [[0.5, 0.5], first_uv, second_uv]
+            };
+            self.append_triangle(vertices, normal, uvs);
         }
     }
 
@@ -3627,9 +3903,77 @@ pub enum ParityPolicyCandidate {
     /// landed (sprint F-4); leaving it would have kept a now-supported axis
     /// behind a refusal and made `full` weaker than it needs to be.
     FullUnsupported,
+    /// CONVERGE-0 (WGE_GRAPHICS_CONVERGENCE_AUDIT.md §H): `Full` plus the three
+    /// axes the converge0 content cannot render without — mesh repeat wrap
+    /// (metric UVs), a view-relative shadow fit (extended world), and the
+    /// view-direction sky. Selecting this arm also selects converge0 CONTENT;
+    /// the policy and content are only meaningful together, and
+    /// `ParityContent::from_env` refuses converge0 content under any other arm.
+    Converge0,
 }
 
-/// The terrain material-scale candidate: 24 tiles across the field.
+/// Content flags for the parity experiments, orthogonal to the render policy.
+///
+/// Audit MD-5: the hero material set used to be a value of the RENDER POLICY
+/// variable, so it could not combine with `full` and was judged on the frozen
+/// baseline. Content is now its own comma-separated variable.
+///
+/// Unset = no content change = the frozen baseline content, byte-identical.
+pub const PARITY_CONTENT_ENV: &str = "WGE_PARITY_CONTENT";
+
+/// Which content changes a run applies on top of the authored Campaign 2 frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ParityContent {
+    /// Per-family coherent material maps (`material_maps::apply_hero_material_set`).
+    pub hero_materials: bool,
+    /// CONVERGE-0 scene content: extended world with a backdrop ridge, daylight
+    /// sky and low warm sun, metric mesh UVs, physical metallic values.
+    pub converge0: bool,
+}
+
+impl ParityContent {
+    /// Parse `WGE_PARITY_CONTENT` together with the policy arm it must agree
+    /// with. Unknown tokens are refused rather than ignored: a typo that
+    /// silently rendered the baseline would be a mislabelled experiment.
+    pub fn from_env(policy: ParityPolicyCandidate) -> Result<Self, GraphicsContractError> {
+        let raw = std::env::var(PARITY_CONTENT_ENV).unwrap_or_default();
+        Self::parse(&raw, policy)
+    }
+
+    pub fn parse(raw: &str, policy: ParityPolicyCandidate) -> Result<Self, GraphicsContractError> {
+        let mut content = Self::default();
+        for token in raw.split(',').map(str::trim).filter(|token| !token.is_empty()) {
+            match token {
+                "hero-materials" => content.hero_materials = true,
+                "converge0" => content.converge0 = true,
+                other => {
+                    return Err(GraphicsContractError::malformed(format!(
+                        "{PARITY_CONTENT_ENV} token `{other}` is unknown; expected \
+                         `hero-materials` and/or `converge0`"
+                    )));
+                }
+            }
+        }
+        // The legacy spelling `WGE_PARITY_RENDER_POLICY=hero-materials` still
+        // means "baseline renderer + hero content", so the archived `ab-hero3`
+        // run stays reproducible.
+        if policy == ParityPolicyCandidate::HeroMaterials {
+            content.hero_materials = true;
+        }
+        if policy == ParityPolicyCandidate::Converge0 {
+            content.converge0 = true;
+        } else if content.converge0 {
+            return Err(GraphicsContractError::malformed(format!(
+                "converge0 content requires {PARITY_POLICY_ENV}=converge0: its metric \
+                 UVs need mesh repeat wrap and its extended world needs the \
+                 view-relative shadow fit"
+            )));
+        }
+        Ok(content)
+    }
+}
+
+/// The terrain material-scale candidate: 8 tiles across the field.
 ///
 /// 8000 milli = 8 repeats across the extent. On the 96 m riverwatch field that
 /// is one texture repeat every 12 m — a believable ground scale, versus the
@@ -3643,6 +3987,27 @@ const TERRAIN_TILING_CANDIDATE: TerrainSurfacePolicy = TerrainSurfacePolicy {
     macro_frequency_milli: 40,
 };
 
+/// CONVERGE-0 world extension factor. The source terrain grid is embedded at
+/// the centre of a grid `CONVERGE0_TERRAIN_SCALE` times larger on each axis.
+/// It must be ODD so every source sample lands exactly on an extended grid
+/// point: (N-1)*k+1 points over k times the extent keeps the 2.0 m / 1.5 m
+/// spacing, so source heights are copied, never resampled.
+pub const CONVERGE0_TERRAIN_SCALE: usize = 5;
+
+/// Terrain repeats across the converge0 extent. 30 repeats over 480 m is one
+/// repeat per 16 m, close to `full`'s 12 m, while staying inside the policy's
+/// existing [1, 32000] bound (40 repeats would have needed a contract change).
+const CONVERGE0_TERRAIN_TILING: TerrainSurfacePolicy = TerrainSurfacePolicy {
+    uv_repeat_scale_milli: 30000,
+    wrap_repeat: true,
+    macro_variation_bp: 0,
+    macro_frequency_milli: 40,
+};
+
+/// Shadow distance for the converge0 view-relative fit. 60 m covers every
+/// authored object in the wide view while keeping the 512² map at ~4 texels/m.
+pub const CONVERGE0_SHADOW_DISTANCE_M: i32 = 60;
+
 impl ParityPolicyCandidate {
     pub fn from_env() -> Self {
         match std::env::var(PARITY_POLICY_ENV).as_deref() {
@@ -3653,6 +4018,7 @@ impl ParityPolicyCandidate {
             Ok("shadow") => Self::Shadow,
             Ok("terrain") => Self::Terrain,
             Ok("hero-materials") => Self::HeroMaterials,
+            Ok("converge0") => Self::Converge0,
             _ => Self::Null,
         }
     }
@@ -3718,6 +4084,22 @@ impl ParityPolicyCandidate {
                     }
                 }
             }),
+            Self::Converge0 => {
+                let full = Self::Full.policy().expect("Full always carries a policy");
+                Some(RenderPolicy {
+                    terrain_surface: Some(CONVERGE0_TERRAIN_TILING),
+                    mesh_surface: Some(MeshSurfacePolicy { wrap_repeat: true }),
+                    shadow_fit: Some(ShadowFitPolicy {
+                        view_distance_m: CONVERGE0_SHADOW_DISTANCE_M,
+                    }),
+                    sky: Some(SkyPolicy {
+                        sun_disc_radius_milli_deg: 650,
+                        sun_disc_gain_bp: 120_000,
+                        sun_glow_gain_bp: 2_400,
+                    }),
+                    ..full
+                })
+            }
             Self::HeroMaterials => Some(RenderPolicy::default()),
             Self::Terrain => Some(RenderPolicy {
                 terrain_surface: Some(TERRAIN_TILING_CANDIDATE),
@@ -3738,11 +4120,219 @@ impl ParityPolicyCandidate {
     }
 }
 
+/// CONVERGE-0 scene content (WGE_GRAPHICS_CONVERGENCE_AUDIT.md §H steps 5-7).
+///
+/// Every change here is CONTENT, gated by `ParityContent::converge0`, so the
+/// null arm keeps the frozen bytes:
+///
+///  * the world no longer ends inside the frame (extended terrain + backdrop
+///    ridge high enough that every camera ray below the horizon meets ground);
+///  * daylight sky, a low warm sun (25° elevation, same azimuth, so forms get
+///    long shadows and side light), and fog whose colour IS the horizon colour
+///    so distance fades into the sky instead of into a different grey;
+///  * metallic is 0 or 1 (audit MD-6): water and stone are dielectrics.
+fn apply_converge0_content(body: &mut GraphicsScenePacketBody) -> Result<(), GraphicsContractError> {
+    extend_terrain_with_backdrop(&mut body.terrain)?;
+    // The backdrop ridge sits up to ~300 m from the wide camera; 256 m clipped it.
+    body.camera.far_plane_m = 1500.0;
+    body.environment = EnvironmentIntent {
+        sky_top_rgb: [0.16, 0.30, 0.58],
+        sky_horizon_rgb: [0.62, 0.66, 0.72],
+        ground_rgb: [0.11, 0.12, 0.085],
+        // Slightly bluer and darker than the horizon: distance fades TOWARD the
+        // sky without the backdrop silhouette dissolving into it.
+        fog_color_rgb: [0.52, 0.58, 0.67],
+        fog_density: 0.0011,
+        exposure: 1.08,
+    };
+    if let Some(light) = body.lights.first_mut() {
+        light.intensity = 5.0;
+        light.color_rgb = [1.0, 0.82, 0.62];
+        if let LightKind::Directional { direction_xyz } = &mut light.kind {
+            // Same azimuth as the authored key light, horizontal magnitude
+            // 1/tan(25°) = 2.1445 for a 25° elevation.
+            *direction_xyz = [1.6407, -1.0, -1.3810];
+        }
+    }
+    for material in &mut body.materials {
+        let metallic = match material.material_id.as_str() {
+            "campaign2-hero-metal" => 1.0,
+            "campaign2-wet" | "campaign2-hero-glow" | "objective-beacon" | "obstacle-default"
+            | "campaign2-hero-stone" | "campaign2-rock" => 0.0,
+            _ => continue,
+        };
+        material.metallic = metallic;
+    }
+    Ok(())
+}
+
+/// Deterministic 2D value noise in world metres, independent of any texture
+/// period, for the backdrop landforms.
+fn backdrop_noise(x: f32, z: f32, wavelength_m: f32, seed: u32) -> f32 {
+    let fx = x / wavelength_m;
+    let fz = z / wavelength_m;
+    let x0 = fx.floor();
+    let z0 = fz.floor();
+    let tx = fx - x0;
+    let tz = fz - z0;
+    let tx = tx * tx * (3.0 - 2.0 * tx);
+    let tz = tz * tz * (3.0 - 2.0 * tz);
+    let hash = |ix: i32, iz: i32| {
+        let mut h = (ix as u32).wrapping_mul(0x27d4_eb2d)
+            ^ (iz as u32).wrapping_mul(0x1656_67b1)
+            ^ seed.wrapping_mul(0x9e37_79b9);
+        h ^= h >> 15;
+        h = h.wrapping_mul(0x2c1b_3c6d);
+        h ^= h >> 12;
+        (h >> 8) as f32 / 16_777_216.0
+    };
+    let (ix, iz) = (x0 as i32, z0 as i32);
+    let top = hash(ix, iz) * (1.0 - tx) + hash(ix + 1, iz) * tx;
+    let bottom = hash(ix, iz + 1) * (1.0 - tx) + hash(ix + 1, iz + 1) * tx;
+    top * (1.0 - tz) + bottom * tz
+}
+
+fn smoothstep_range(edge0: f32, edge1: f32, value: f32) -> f32 {
+    let t = ((value - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
+}
+
+/// Embed the source terrain in a `CONVERGE0_TERRAIN_SCALE`-times larger grid.
+///
+/// Inside the source rectangle every height, slope, and region value is copied
+/// verbatim (the odd scale makes the grids coincide exactly). Outside it the
+/// surface blends from the nearest source edge height into rolling hills over
+/// the first 50 m, then rises into a backdrop ridge between 50 m and 140 m out.
+/// The ridge has to stand above every camera: a finite world seen from 11 m up
+/// otherwise shows a band of void between its far edge and the true horizon.
+fn extend_terrain_with_backdrop(terrain: &mut TerrainPacket) -> Result<(), GraphicsContractError> {
+    let source_heights = match &terrain.heights_m.payload {
+        BufferPayload::F32(values) => values.clone(),
+        BufferPayload::U8(_) | BufferPayload::U32(_) => {
+            return Err(GraphicsContractError::unsupported(
+                "converge0 terrain extension requires f32 heights",
+            ));
+        }
+    };
+    let source_slope = match &terrain.slope_grade.payload {
+        BufferPayload::F32(values) => values.clone(),
+        _ => {
+            return Err(GraphicsContractError::unsupported(
+                "converge0 terrain extension requires f32 slope grade",
+            ));
+        }
+    };
+    let source_regions = match &terrain.region_codes.payload {
+        BufferPayload::U8(values) => values.clone(),
+        _ => {
+            return Err(GraphicsContractError::unsupported(
+                "converge0 terrain extension requires u8 region codes",
+            ));
+        }
+    };
+    let n = terrain.resolution;
+    let k = CONVERGE0_TERRAIN_SCALE;
+    let extended = (n - 1) * k + 1;
+    let offset = (n - 1) * (k - 1) / 2;
+    let dx = terrain.width_m / (n - 1) as f32;
+    let dz = terrain.length_m / (n - 1) as f32;
+    let width_m = terrain.width_m * k as f32;
+    let length_m = terrain.length_m * k as f32;
+    let base_level = source_heights.iter().sum::<f32>() / source_heights.len() as f32;
+    let inside = |index: usize| index >= offset && index < offset + n;
+
+    let mut heights = vec![0.0f32; extended * extended];
+    for row in 0..extended {
+        for column in 0..extended {
+            let index = row * extended + column;
+            if inside(row) && inside(column) {
+                heights[index] = source_heights[(row - offset) * n + (column - offset)];
+                continue;
+            }
+            let clamped_row = row.clamp(offset, offset + n - 1);
+            let clamped_column = column.clamp(offset, offset + n - 1);
+            let edge_height = source_heights[(clamped_row - offset) * n + (clamped_column - offset)];
+            let out_x = (column as f32 - clamped_column as f32) * dx;
+            let out_z = (row as f32 - clamped_row as f32) * dz;
+            let distance = (out_x * out_x + out_z * out_z).sqrt();
+            // World position, matching the adapter's centred layout.
+            let world_x = (column as f32 / (extended - 1) as f32 - 0.5) * width_m;
+            let world_z = (0.5 - row as f32 / (extended - 1) as f32) * length_m;
+            let hills = (backdrop_noise(world_x, world_z, 70.0, 0x51ed_2701) - 0.5) * 9.0
+                + (backdrop_noise(world_x, world_z, 31.0, 0x1b87_3f2d) - 0.5) * 3.5;
+            let ridge_shape = 1.0
+                - (backdrop_noise(world_x, world_z, 95.0, 0x2f8b_1c77) * 2.0 - 1.0).abs();
+            // 26 m: the lowest ridge that still stands above every campaign2
+            // camera (eye heights 5-11 m above the hero ground) at the 0.6
+            // noise floor. 55 m (first pass) filled the upper half of the wide
+            // frame with a fogged wall and hid the sky.
+            let ridge = 26.0 * smoothstep_range(50.0, 140.0, distance) * (0.6 + 0.4 * ridge_shape);
+            let edge_weight = 1.0 - smoothstep_range(0.0, 50.0, distance);
+            heights[index] =
+                edge_weight * edge_height + (1.0 - edge_weight) * (base_level + hills) + ridge;
+        }
+    }
+
+    // Slope: copied inside; rise/run central differences outside, which is the
+    // unit the source field uses (verified against the source to within 0.1).
+    let mut slope = vec![0.0f32; extended * extended];
+    let mut regions = vec![0u8; extended * extended];
+    for row in 0..extended {
+        for column in 0..extended {
+            let index = row * extended + column;
+            if inside(row) && inside(column) {
+                let source = (row - offset) * n + (column - offset);
+                slope[index] = source_slope[source];
+                regions[index] = source_regions[source];
+                continue;
+            }
+            let left = heights[row * extended + column.saturating_sub(1)];
+            let right = heights[row * extended + (column + 1).min(extended - 1)];
+            let up = heights[row.saturating_sub(1) * extended + column];
+            let down = heights[(row + 1).min(extended - 1) * extended + column];
+            let gx = (right - left) / (2.0 * dx);
+            let gz = (down - up) / (2.0 * dz);
+            slope[index] = (gx * gx + gz * gz).sqrt();
+        }
+    }
+
+    terrain.width_m = width_m;
+    terrain.length_m = length_m;
+    terrain.resolution = extended;
+    terrain.heights_m = BufferReference::inline_f32("terrain-heights-converge0", heights);
+    terrain.slope_grade = BufferReference::inline_f32("terrain-slope-converge0", slope);
+    terrain.region_codes = BufferReference::inline_u8("terrain-regions-converge0", regions);
+    Ok(())
+}
+
+/// Instance scale of both hero fins. Named because the converge0 metric fin
+/// mesh folds this scale into its UVs; the two must never drift apart.
+const CAMPAIGN2_FIN_SCALE: [f32; 3] = [0.30, 1.75, 0.62];
+
 pub fn lower_campaign2_packet(
     packet: &GraphicsScenePacket,
     view: Campaign2View,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    let candidate = ParityPolicyCandidate::from_env();
+    let content = ParityContent::from_env(candidate)?;
+    lower_campaign2_packet_with(packet, view, candidate, content)
+}
+
+/// `lower_campaign2_packet` with the parity arm passed explicitly instead of
+/// read from the environment, so tests can lower several arms in one process
+/// without racing on process-global environment variables.
+pub fn lower_campaign2_packet_with(
+    packet: &GraphicsScenePacket,
+    view: Campaign2View,
+    parity_candidate: ParityPolicyCandidate,
+    parity_content: ParityContent,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
     validate_scene_packet(packet)?;
+    if parity_content.converge0 != (parity_candidate == ParityPolicyCandidate::Converge0) {
+        return Err(GraphicsContractError::malformed(
+            "converge0 content and the converge0 render policy are only valid together",
+        ));
+    }
     let objective = packet
         .body
         .instances
@@ -3771,7 +4361,16 @@ pub fn lower_campaign2_packet(
     // Candidate policy attaches here. With the flag unset this is `None`, the
     // key is omitted from canonical JSON by `skip_serializing_if`, and the
     // packet digests are exactly the frozen baseline's.
-    body.render_policy = ParityPolicyCandidate::from_env().policy();
+    body.render_policy = parity_candidate.policy();
+    // One texture repeat every 6 m on surface materials under converge0. The
+    // campaign2 albedos are still 8x8 placeholder swatches; at 2 m (first pass)
+    // their 25 cm texels read as polka dots on every surface. 6 m keeps the
+    // smear fixed (MD-4) without magnifying placeholder content. Real physical
+    // texture sizes belong to the scanned calibration materials, not here. The
+    // emissive "glow" meshes keep parametric UVs on purpose: their 32x32
+    // emissive stripe pattern is authored in UV space as a decal, and tiling it
+    // would be a redesign, not a fix.
+    let metric_repeat_m = parity_content.converge0.then_some(6.0f32);
     // Campaign 2 is an authored-frame calibration projection, not the
     // gameplay diagnostic view.  Keep the world/spatial identities bound but
     // fence the sparse source render instances (marker foliage, cube obstacle,
@@ -4013,38 +4612,81 @@ pub fn lower_campaign2_packet(
         },
     ]);
     body.meshes.extend([
-        disc_mesh("campaign2-wet-pool", "campaign2-wet", 48),
+        match metric_repeat_m {
+            Some(repeat) => with_planar_metric_uv(
+                disc_mesh("campaign2-wet-pool", "campaign2-wet", 48),
+                [3.8, 1.0, 2.7],
+                repeat,
+            ),
+            None => disc_mesh("campaign2-wet-pool", "campaign2-wet", 48),
+        },
         ring_mesh("campaign2-wet-ripple", "campaign2-hero-glow", 0.94, 1.0, 48),
-        radial_mesh(
-            "campaign2-hero-pedestal",
-            "campaign2-hero-stone",
-            64,
-            &[
-                (0.0, 0.16, 3.9, 3.9),
-                (0.16, 0.30, 3.9, 3.55),
-                (0.30, 0.46, 3.55, 3.45),
-                (0.46, 0.62, 3.45, 2.95),
-                (0.62, 0.78, 2.95, 2.75),
-            ],
-            Some(3.9),
-            Some(2.75),
-        ),
-        radial_mesh(
-            "campaign2-hero-core",
-            "campaign2-hero-metal",
-            64,
-            &[
-                (0.0, 0.18, 1.72, 1.72),
-                (0.18, 0.38, 1.72, 1.48),
-                (0.38, 0.66, 1.48, 1.28),
-                (0.66, 2.95, 1.28, 1.04),
-                (2.95, 3.20, 1.04, 1.34),
-                (3.20, 3.42, 1.34, 1.18),
-                (3.42, 4.72, 1.18, 0.72),
-            ],
-            Some(1.72),
-            Some(0.72),
-        ),
+        match metric_repeat_m {
+            Some(repeat) => radial_mesh_metric(
+                "campaign2-hero-pedestal",
+                "campaign2-hero-stone",
+                64,
+                &[
+                    (0.0, 0.16, 3.9, 3.9),
+                    (0.16, 0.30, 3.9, 3.55),
+                    (0.30, 0.46, 3.55, 3.45),
+                    (0.46, 0.62, 3.45, 2.95),
+                    (0.62, 0.78, 2.95, 2.75),
+                ],
+                Some(3.9),
+                Some(2.75),
+                repeat,
+            ),
+            None => radial_mesh(
+                "campaign2-hero-pedestal",
+                "campaign2-hero-stone",
+                64,
+                &[
+                    (0.0, 0.16, 3.9, 3.9),
+                    (0.16, 0.30, 3.9, 3.55),
+                    (0.30, 0.46, 3.55, 3.45),
+                    (0.46, 0.62, 3.45, 2.95),
+                    (0.62, 0.78, 2.95, 2.75),
+                ],
+                Some(3.9),
+                Some(2.75),
+            ),
+        },
+        match metric_repeat_m {
+            Some(repeat) => radial_mesh_metric(
+                "campaign2-hero-core",
+                "campaign2-hero-metal",
+                64,
+                &[
+                    (0.0, 0.18, 1.72, 1.72),
+                    (0.18, 0.38, 1.72, 1.48),
+                    (0.38, 0.66, 1.48, 1.28),
+                    (0.66, 2.95, 1.28, 1.04),
+                    (2.95, 3.20, 1.04, 1.34),
+                    (3.20, 3.42, 1.34, 1.18),
+                    (3.42, 4.72, 1.18, 0.72),
+                ],
+                Some(1.72),
+                Some(0.72),
+                repeat,
+            ),
+            None => radial_mesh(
+                "campaign2-hero-core",
+                "campaign2-hero-metal",
+                64,
+                &[
+                    (0.0, 0.18, 1.72, 1.72),
+                    (0.18, 0.38, 1.72, 1.48),
+                    (0.38, 0.66, 1.48, 1.28),
+                    (0.66, 2.95, 1.28, 1.04),
+                    (2.95, 3.20, 1.04, 1.34),
+                    (3.20, 3.42, 1.34, 1.18),
+                    (3.42, 4.72, 1.18, 0.72),
+                ],
+                Some(1.72),
+                Some(0.72),
+            ),
+        },
         radial_mesh(
             "campaign2-hero-spire",
             "campaign2-hero-glow",
@@ -4058,14 +4700,25 @@ pub fn lower_campaign2_packet(
             Some(0.72),
             Some(0.12),
         ),
-        torus_mesh(
-            "campaign2-hero-halo",
-            "campaign2-hero-metal",
-            2.28,
-            0.16,
-            64,
-            16,
-        ),
+        match metric_repeat_m {
+            Some(repeat) => torus_mesh_metric(
+                "campaign2-hero-halo",
+                "campaign2-hero-metal",
+                2.28,
+                0.16,
+                64,
+                16,
+                repeat,
+            ),
+            None => torus_mesh(
+                "campaign2-hero-halo",
+                "campaign2-hero-metal",
+                2.28,
+                0.16,
+                64,
+                16,
+            ),
+        },
         torus_mesh(
             "campaign2-hero-rune-ring",
             "campaign2-hero-glow",
@@ -4074,42 +4727,96 @@ pub fn lower_campaign2_packet(
             64,
             12,
         ),
-        block_mesh("campaign2-hero-fin", "campaign2-hero-stone"),
+        match metric_repeat_m {
+            // Both fin instances share one scale, so one metric mesh serves both.
+            Some(repeat) => with_planar_metric_uv(
+                block_mesh("campaign2-hero-fin", "campaign2-hero-stone"),
+                CAMPAIGN2_FIN_SCALE,
+                repeat,
+            ),
+            None => block_mesh("campaign2-hero-fin", "campaign2-hero-stone"),
+        },
         block_mesh("campaign2-hero-inlay", "campaign2-hero-glow"),
-        radial_mesh(
-            "campaign2-foliage-trunk",
-            "campaign2-bark",
-            24,
-            &[(0.0, 0.12, 0.34, 0.34), (0.12, 1.65, 0.34, 0.22)],
-            Some(0.34),
-            Some(0.22),
-        ),
-        ellipsoid_mesh(
-            "campaign2-foliage-crown",
-            "campaign2-foliage",
-            [1.00, 1.15, 1.00],
-            32,
-            16,
-        ),
-        ellipsoid_mesh(
-            "campaign2-foliage-lobe",
-            "campaign2-foliage",
-            [0.72, 0.76, 0.64],
-            24,
-            12,
-        ),
-        radial_mesh(
-            "campaign2-rock",
-            "campaign2-rock",
-            24,
-            &[
-                (0.0, 0.18, 1.25, 1.42),
-                (0.18, 0.72, 1.42, 1.06),
-                (0.72, 1.18, 1.06, 0.42),
-            ],
-            Some(1.25),
-            Some(0.42),
-        ),
+        match metric_repeat_m {
+            Some(repeat) => radial_mesh_metric(
+                "campaign2-foliage-trunk",
+                "campaign2-bark",
+                24,
+                &[(0.0, 0.12, 0.34, 0.34), (0.12, 1.65, 0.34, 0.22)],
+                Some(0.34),
+                Some(0.22),
+                repeat,
+            ),
+            None => radial_mesh(
+                "campaign2-foliage-trunk",
+                "campaign2-bark",
+                24,
+                &[(0.0, 0.12, 0.34, 0.34), (0.12, 1.65, 0.34, 0.22)],
+                Some(0.34),
+                Some(0.22),
+            ),
+        },
+        match metric_repeat_m {
+            Some(repeat) => ellipsoid_mesh_metric(
+                "campaign2-foliage-crown",
+                "campaign2-foliage",
+                [1.00, 1.15, 1.00],
+                32,
+                16,
+                repeat,
+            ),
+            None => ellipsoid_mesh(
+                "campaign2-foliage-crown",
+                "campaign2-foliage",
+                [1.00, 1.15, 1.00],
+                32,
+                16,
+            ),
+        },
+        match metric_repeat_m {
+            Some(repeat) => ellipsoid_mesh_metric(
+                "campaign2-foliage-lobe",
+                "campaign2-foliage",
+                [0.72, 0.76, 0.64],
+                24,
+                12,
+                repeat,
+            ),
+            None => ellipsoid_mesh(
+                "campaign2-foliage-lobe",
+                "campaign2-foliage",
+                [0.72, 0.76, 0.64],
+                24,
+                12,
+            ),
+        },
+        match metric_repeat_m {
+            Some(repeat) => radial_mesh_metric(
+                "campaign2-rock",
+                "campaign2-rock",
+                24,
+                &[
+                    (0.0, 0.18, 1.25, 1.42),
+                    (0.18, 0.72, 1.42, 1.06),
+                    (0.72, 1.18, 1.06, 0.42),
+                ],
+                Some(1.25),
+                Some(0.42),
+                repeat,
+            ),
+            None => radial_mesh(
+                "campaign2-rock",
+                "campaign2-rock",
+                24,
+                &[
+                    (0.0, 0.18, 1.25, 1.42),
+                    (0.18, 0.72, 1.42, 1.06),
+                    (0.72, 1.18, 1.06, 0.42),
+                ],
+                Some(1.25),
+                Some(0.42),
+            ),
+        },
     ]);
 
     let identity = [0.0, 0.0, 0.0, 1.0];
@@ -4177,7 +4884,7 @@ pub fn lower_campaign2_packet(
             transform: Transform3d {
                 translation_xyz_m: [hero_x - 1.85, hero_y + 2.10, hero_z],
                 rotation_xyzw: [0.0, 0.20, 0.0, 0.98],
-                scale_xyz: [0.30, 1.75, 0.62],
+                scale_xyz: CAMPAIGN2_FIN_SCALE,
             },
         },
         InstancePacket {
@@ -4188,7 +4895,7 @@ pub fn lower_campaign2_packet(
             transform: Transform3d {
                 translation_xyz_m: [hero_x + 1.85, hero_y + 2.10, hero_z],
                 rotation_xyzw: [0.0, -0.20, 0.0, 0.98],
-                scale_xyz: [0.30, 1.75, 0.62],
+                scale_xyz: CAMPAIGN2_FIN_SCALE,
             },
         },
         InstancePacket {
@@ -4422,10 +5129,10 @@ pub fn lower_campaign2_packet(
     //
     // Behind the candidate flag, so the null arm keeps the frozen bytes: this
     // changes CONTENT, not renderer behaviour.
-    if matches!(
-        ParityPolicyCandidate::from_env(),
-        ParityPolicyCandidate::HeroMaterials
-    ) {
+    if parity_content.converge0 {
+        apply_converge0_content(&mut body)?;
+    }
+    if parity_content.hero_materials {
         let remapped = material_maps::apply_hero_material_set(&mut body);
         if remapped == 0 {
             return Err(GraphicsContractError::provenance(

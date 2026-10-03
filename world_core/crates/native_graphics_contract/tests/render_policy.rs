@@ -8,8 +8,8 @@
 //! JSON, but re-sealing a committed packet can.
 
 use wge_native_graphics_contract::{
-    BloomPolicy, DitherPolicy, GradePolicy, RenderPolicy, SamplerPolicy, ShadowPolicy,
-    TerrainSurfacePolicy, VignettePolicy, canonical_json, seal_scene_packet, validate_render_policy,
+    BloomPolicy, DitherPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, SamplerPolicy,
+    ShadowFitPolicy, ShadowPolicy, SkyPolicy, TerrainSurfacePolicy, VignettePolicy, canonical_json, seal_scene_packet, validate_render_policy,
     validate_scene_packet, GraphicsContractError, GraphicsScenePacketBody, POLICY_SCALE,
     SCENE_PACKET_SCHEMA,
 };
@@ -490,6 +490,13 @@ fn a_full_policy_survives_serde_round_trip_and_revalidates() {
         shadow: Some(ShadowPolicy {
             darkness_bp: 9600,
             filter_radius_milli: 2400,
+        }),
+        mesh_surface: Some(MeshSurfacePolicy { wrap_repeat: true }),
+        shadow_fit: Some(ShadowFitPolicy { view_distance_m: 60 }),
+        sky: Some(SkyPolicy {
+            sun_disc_radius_milli_deg: 650,
+            sun_disc_gain_bp: 120_000,
+            sun_glow_gain_bp: 2_400,
         }),
     });
     b.schema_version = SCENE_PACKET_SCHEMA.into();

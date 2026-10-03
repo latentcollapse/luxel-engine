@@ -125,7 +125,9 @@ function _surface_sampler_spec(
     surface::Symbol,
 )::SamplerSpec
     if surface === :mesh
-        return CLAMPED_LINEAR_SPEC
+        # CONVERGE-0 metric UVs exceed 1.0 and need REPEAT; the default clamp
+        # is the historical spec, so an absent policy is byte-identical.
+        return policy.mesh_surface.wrap_repeat ? REPEATED_LINEAR_SPEC : CLAMPED_LINEAR_SPEC
     elseif surface === :terrain
         return policy.terrain_surface.wrap_repeat ?
                REPEATED_LINEAR_SPEC : CLAMPED_LINEAR_SPEC
@@ -197,11 +199,12 @@ struct ResolveResources
     bindings::Lava.TextureBindings
 end
 
-mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
+mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
     context::C
     queue::Q
     probe_pipeline::PP
     sky_pipeline::SP
+    sky_view_pipeline::SVP
     terrain_pipeline::TP
     overlay_pipeline::OP
     mesh_pipeline::MP
@@ -230,6 +233,7 @@ mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
     terrain_compiled::Bool
     overlay_compiled::Bool
     sky_compiled::Bool
+    sky_view_compiled::Bool
     mesh_compiled::Bool
     texture_compiled::Bool
     depth_compiled::Bool
@@ -301,6 +305,141 @@ function _sky_fragment()
     Lava.gfx_output(0, Lava.gfx_input(Vec4f, 0))
     return nothing
 end
+
+"""View-direction sky (render_policy.sky).
+
+The vertex stage emits the UNNORMALISED camera ray for each corner of the
+full-screen triangle. The ray is affine in NDC, so its linear interpolation is
+exact per pixel; the fragment normalises it. `ndc_y` is negated exactly as in
+`_project_world`, because positive NDC Y maps to lower framebuffer rows.
+"""
+function _sky_view_vertex(
+    camera_forward::Vec4f,
+    camera_right_scaled::Vec4f,
+    camera_up_scaled::Vec4f,
+    sky_top::Vec4f,
+    sky_horizon::Vec4f,
+    sun_direction::Vec4f,
+    sun_radiance::Vec4f,
+    sun_parameters::Vec4f,
+)
+    vertex_id = Lava.vertex_index() - Int32(1)
+    x = Float32(Int32(vertex_id & Int32(1)) * 4 - 1)
+    y = Float32(Int32((vertex_id >> Int32(1)) & Int32(1)) * 4 - 1)
+    Lava.set_position!(Vec4f(x, y, 0.99f0, 1.0f0))
+    Lava.gfx_output(
+        0,
+        Vec4f(
+            camera_forward[1] + x * camera_right_scaled[1] - y * camera_up_scaled[1],
+            camera_forward[2] + x * camera_right_scaled[2] - y * camera_up_scaled[2],
+            camera_forward[3] + x * camera_right_scaled[3] - y * camera_up_scaled[3],
+            0.0f0,
+        ),
+    )
+    Lava.gfx_output(1, sky_top)
+    Lava.gfx_output(2, sky_horizon)
+    Lava.gfx_output(3, sun_direction)
+    Lava.gfx_output(4, sun_radiance)
+    Lava.gfx_output(5, sun_parameters)
+    return nothing
+end
+
+"""Shade one sky pixel along its view ray.
+
+Above the horizon this is the same `sqrt`-weighted horizon→zenith gradient the
+surface shading samples for ambient light, so the sky the eye sees and the sky
+the materials are lit by are one function. Below the horizon it holds the
+horizon colour: a ray that misses the terrain there would otherwise show the
+dark ground term and read as a hole in the world.
+
+`sun_parameters = (cos outer disc edge, cos inner disc edge, disc gain, glow gain)`.
+The glow is `0.8 cos^32 + 0.2 cos^4` of the angle to the sun — a narrow
+forward-scattering halo plus a broad warm cast on the sun side of the sky.
+"""
+function _sky_view_fragment()
+    ray = _normalize_vector(Lava.gfx_input(Vec4f, 0))
+    sky_top = Lava.gfx_input(Vec4f, 1)
+    sky_horizon = Lava.gfx_input(Vec4f, 2)
+    sun_direction = Lava.gfx_input(Vec4f, 3)
+    sun_radiance = Lava.gfx_input(Vec4f, 4)
+    parameters = Lava.gfx_input(Vec4f, 5)
+    vertical = ray[2]
+    weight = vertical > 0.0f0 ? sqrt(vertical) : 0.0f0
+    base_red = sky_horizon[1] * (1.0f0 - weight) + sky_top[1] * weight
+    base_green = sky_horizon[2] * (1.0f0 - weight) + sky_top[2] * weight
+    base_blue = sky_horizon[3] * (1.0f0 - weight) + sky_top[3] * weight
+    alignment = max(_dot_vector(ray, sun_direction), 0.0f0)
+    disc_t = clamp(
+        (alignment - parameters[1]) / max(parameters[2] - parameters[1], 1.0f-7),
+        0.0f0,
+        1.0f0,
+    )
+    disc = disc_t * disc_t * (3.0f0 - 2.0f0 * disc_t)
+    power2 = alignment * alignment
+    power4 = power2 * power2
+    power8 = power4 * power4
+    power16 = power8 * power8
+    power32 = power16 * power16
+    sun = parameters[3] * disc + parameters[4] * (0.8f0 * power32 + 0.2f0 * power4)
+    Lava.gfx_output(
+        0,
+        Vec4f(
+            base_red + sun_radiance[1] * sun,
+            base_green + sun_radiance[2] * sun,
+            base_blue + sun_radiance[3] * sun,
+            1.0f0,
+        ),
+    )
+    return nothing
+end
+
+"""Lower the sky policy and camera into `_sky_view_vertex` arguments.
+
+Perspective only: an orthographic camera has one ray direction, so a gradient
+sky along it is meaningless, and the honest response is a typed refusal.
+"""
+function _sky_view_arguments(
+    camera_frame::CameraFrame,
+    packet::WGEGraphics.GraphicsScenePacket,
+    lighting::DirectionalLighting,
+    sky::WGEGraphics.SkyPolicy,
+)
+    camera_frame.mode > 0.5f0 || throw(AdapterError(
+        "unsupported_render_policy",
+        "render_policy.sky requires a perspective camera",
+    ))
+    tan_x = camera_frame.projection[1]
+    tan_y = camera_frame.projection[2]
+    toward_sun = _normalize_vector(Vec4f(
+        -lighting.direction[1],
+        -lighting.direction[2],
+        -lighting.direction[3],
+        0.0f0,
+    ))
+    radius = Float32(sky.sun_disc_radius_milli_deg) / 1000.0f0 * Float32(pi) / 180.0f0
+    # Antialias the disc edge over the outer 15% of its radius.
+    cos_outer = cos(radius)
+    cos_inner = cos(radius * 0.85f0)
+    disc_gain = sky.sun_disc_radius_milli_deg > 0 ? Float32(sky.sun_disc_gain_bp) / POLICY_SCALE_F32 : 0.0f0
+    radiance = Vec4f(
+        lighting.color[1] * lighting.intensity,
+        lighting.color[2] * lighting.intensity,
+        lighting.color[3] * lighting.intensity,
+        0.0f0,
+    )
+    return (
+        camera_frame.forward,
+        Vec4f(camera_frame.right[1] * tan_x, camera_frame.right[2] * tan_x, camera_frame.right[3] * tan_x, 0.0f0),
+        Vec4f(camera_frame.up[1] * tan_y, camera_frame.up[2] * tan_y, camera_frame.up[3] * tan_y, 0.0f0),
+        Vec4f(packet.environment.sky_top_rgb..., 1.0f0),
+        Vec4f(packet.environment.sky_horizon_rgb..., 1.0f0),
+        toward_sun,
+        radiance,
+        Vec4f(cos_outer, cos_inner, disc_gain, Float32(sky.sun_glow_gain_bp) / POLICY_SCALE_F32),
+    )
+end
+
+const POLICY_SCALE_F32 = 10_000.0f0
 
 function _texture_probe_vertex()
     vertex_id = Lava.vertex_index() - Int32(1)
@@ -1643,7 +1782,15 @@ function _terrain_fragment()
         camera_position[3] - world_position[3],
         0.0f0,
     )
-    roughness_sample = _sample_texture(UInt32(2), uv)[1]
+    # Roughness is read from GREEN, glTF's channel. `asset_projection` binds an
+    # imported `metallicRoughnessTexture` (roughness = G, metallic = B, R unused
+    # or AO in ORM packing) to this slot, and reading RED gave every imported
+    # PBR asset the wrong roughness. Every procedural roughness map and the
+    # 1x1 fallback are scalar (R == G == B, verified for all campaign2 maps),
+    # so this is byte-identical for existing content. The metallic channel (B)
+    # is still not read: metallic is factor-only until the contract carries
+    # channel semantics (CONVERGE-0 ledger, turn 11).
+    roughness_sample = _sample_texture(UInt32(2), uv)[2]
     occlusion_sample = _sample_texture(UInt32(3), uv)[1]
     emissive_sample = _sample_texture(UInt32(4), uv)
     lit_color = _material_response(
@@ -1710,6 +1857,14 @@ function backend()::LavaBackend
             ;
             vertex=_sky_vertex,
             fragment=_sky_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthOff(),
+        )
+        sky_view_pipeline = GraphicsPipeline(
+            ;
+            vertex=_sky_view_vertex,
+            fragment=_sky_view_fragment,
             blend=Opaque(),
             cull=NoCull(),
             depth=DepthOff(),
@@ -1784,6 +1939,7 @@ function backend()::LavaBackend
             context.default_bq,
             probe_pipeline,
             sky_pipeline,
+            sky_view_pipeline,
             terrain_pipeline,
             overlay_pipeline,
             mesh_pipeline,
@@ -1808,6 +1964,7 @@ function backend()::LavaBackend
             UInt64(0),
             UInt64(0),
             _gpu_timestamp_capable(context),
+            false,
             false,
             false,
             false,
@@ -2728,6 +2885,76 @@ function _camera_frame(camera::WGEGraphics.CameraPacket)::CameraFrame
     )
 end
 
+"""Shadow frame fitted to the camera frustum truncated at `view_distance`.
+
+The historical fit encloses the whole terrain and every instance, which ties
+shadow resolution to world size. This fit encloses only the eight corners of
+the camera frustum slice [near, min(far, view_distance)]: the bounding sphere
+is centred on their mean and spans their farthest corner, and the orthographic
+extent is exactly that sphere's diameter (the historical fit's 2.5x margin was
+headroom for a sphere that did not bound the casters tightly; this one does).
+Casters up to two radii toward the light stay inside the near plane, so a tree
+outside the slice can still shadow ground inside it.
+"""
+function _view_fitted_shadow_frame(
+    view_camera::WGEGraphics.CameraPacket,
+    light_direction::Vec4f,
+    right::Vec4f,
+    up::Vec4f,
+    view_distance::Float32,
+)::CameraFrame
+    camera = _camera_frame(view_camera)
+    near = camera.projection[3]
+    far = min(camera.projection[4], view_distance)
+    far > near || throw(AdapterError(
+        "unsupported_render_policy",
+        "render_policy.shadow_fit.view_distance_m=$(view_distance) does not reach past the camera near plane",
+    ))
+    corners = Vec4f[]
+    for depth in (near, far)
+        half_width = camera.mode < 0.5f0 ? camera.projection[1] : camera.projection[1] * depth
+        half_height = camera.mode < 0.5f0 ? camera.projection[2] : camera.projection[2] * depth
+        for sx in (-1.0f0, 1.0f0), sy in (-1.0f0, 1.0f0)
+            push!(corners, Vec4f(
+                camera.position[1] + camera.forward[1] * depth + camera.right[1] * sx * half_width + camera.up[1] * sy * half_height,
+                camera.position[2] + camera.forward[2] * depth + camera.right[2] * sx * half_width + camera.up[2] * sy * half_height,
+                camera.position[3] + camera.forward[3] * depth + camera.right[3] * sx * half_width + camera.up[3] * sy * half_height,
+                0.0f0,
+            ))
+        end
+    end
+    center = Vec4f(
+        sum(corner[1] for corner in corners) / 8.0f0,
+        sum(corner[2] for corner in corners) / 8.0f0,
+        sum(corner[3] for corner in corners) / 8.0f0,
+        0.0f0,
+    )
+    radius = 1.0f0
+    for corner in corners
+        offset = Vec4f(corner[1] - center[1], corner[2] - center[2], corner[3] - center[3], 0.0f0)
+        radius = max(radius, sqrt(_dot_vector(offset, offset)))
+    end
+    distance = max(2.0f0 * radius, 32.0f0)
+    position = Vec4f(
+        center[1] - light_direction[1] * distance,
+        center[2] - light_direction[2] * distance,
+        center[3] - light_direction[3] * distance,
+        0.0f0,
+    )
+    span = 2.0f0 * radius
+    far_plane = 2.0f0 * distance + radius
+    return CameraFrame(
+        position,
+        right,
+        up,
+        light_direction,
+        Vec4f(0.5f0 * span, 0.5f0 * span, 0.1f0, far_plane),
+        0.0f0,
+        1.0f0,
+        1.0f0,
+    )
+end
+
 function _shadow_frame(
     packet::WGEGraphics.GraphicsScenePacket,
     lighting::DirectionalLighting,
@@ -2739,6 +2966,11 @@ function _shadow_frame(
         up_hint,
         "directional light basis",
     )
+
+    fit = packet.render_policy.shadow_fit
+    if fit !== nothing
+        return _view_fitted_shadow_frame(packet.camera, light_direction, right, up, Float32(fit.view_distance_m))
+    end
 
     minimum_height = minimum(packet.terrain.heights_m)
     maximum_height = maximum(packet.terrain.heights_m)
@@ -3972,23 +4204,40 @@ function _record_scene_passes!(
 
     scene_raster_started_ns = time_ns()
     scene_raster_gpu_timing_slot = _begin_gpu_pass_timing(state, GPU_PASS_TIMING_LABELS.scene_raster)
-    draw!(
-        state.queue,
-        state.sky_pipeline,
-        scene_target,
-        3;
-        args=(
-            Vec4f(packet.environment.sky_top_rgb..., 1.0f0),
-            Vec4f(packet.environment.sky_horizon_rgb..., 1.0f0),
-            environment_lighting.ground,
-            Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
-        ),
-        clear_color=(0.02f0, 0.03f0, 0.05f0, 1.0f0),
-    )
-    state.draw_calls += 1
-    if !state.sky_compiled
-        state.sky_compiled = true
-        state.pipeline_compilations += 1
+    sky_policy = packet.render_policy.sky
+    if sky_policy === nothing
+        draw!(
+            state.queue,
+            state.sky_pipeline,
+            scene_target,
+            3;
+            args=(
+                Vec4f(packet.environment.sky_top_rgb..., 1.0f0),
+                Vec4f(packet.environment.sky_horizon_rgb..., 1.0f0),
+                environment_lighting.ground,
+                Vec4f(packet.environment.fog_color_rgb..., 1.0f0),
+            ),
+            clear_color=(0.02f0, 0.03f0, 0.05f0, 1.0f0),
+        )
+        state.draw_calls += 1
+        if !state.sky_compiled
+            state.sky_compiled = true
+            state.pipeline_compilations += 1
+        end
+    else
+        draw!(
+            state.queue,
+            state.sky_view_pipeline,
+            scene_target,
+            3;
+            args=_sky_view_arguments(camera_frame, packet, lighting, sky_policy),
+            clear_color=(0.02f0, 0.03f0, 0.05f0, 1.0f0),
+        )
+        state.draw_calls += 1
+        if !state.sky_view_compiled
+            state.sky_view_compiled = true
+            state.pipeline_compilations += 1
+        end
     end
     draw!(
         state.queue,

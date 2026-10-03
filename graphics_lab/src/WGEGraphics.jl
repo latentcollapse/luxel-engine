@@ -251,6 +251,27 @@ end
 # exactly, so an absent policy keeps the frozen baseline shadow.
 ShadowPolicy() = ShadowPolicy(7500, 1000)
 
+# Mesh repeat wrap. Default clamp == the historical CLAMPED_LINEAR_SPEC for
+# every mesh material, so an absent policy is byte-identical.
+struct MeshSurfacePolicy
+    wrap_repeat::Bool
+end
+
+MeshSurfacePolicy() = MeshSurfacePolicy(false)
+
+# View-relative shadow fit. There is deliberately no default VALUE: absence
+# selects the historical whole-world fit, a different code path.
+struct ShadowFitPolicy
+    view_distance_m::Int32
+end
+
+# View-direction sky. Absence selects the historical screen-space sky draw.
+struct SkyPolicy
+    sun_disc_radius_milli_deg::Int32
+    sun_disc_gain_bp::Int32
+    sun_glow_gain_bp::Int32
+end
+
 struct RenderPolicy
     grade::GradePolicy
     bloom::BloomPolicy
@@ -259,6 +280,9 @@ struct RenderPolicy
     terrain_surface::TerrainSurfacePolicy
     sampler::SamplerPolicy
     shadow::ShadowPolicy
+    mesh_surface::MeshSurfacePolicy
+    shadow_fit::Union{Nothing,ShadowFitPolicy}
+    sky::Union{Nothing,SkyPolicy}
 end
 
 RenderPolicy() = RenderPolicy(
@@ -269,6 +293,45 @@ RenderPolicy() = RenderPolicy(
     TerrainSurfacePolicy(),
     SamplerPolicy(),
     ShadowPolicy(),
+    MeshSurfacePolicy(),
+    nothing,
+    nothing,
+)
+
+# The seven-axis form predates CONVERGE-0; the three newer axes default to
+# their absent meaning (clamp, historical shadow fit, screen-space sky).
+RenderPolicy(
+    grade::GradePolicy,
+    bloom::BloomPolicy,
+    vignette::VignettePolicy,
+    dither::DitherPolicy,
+    terrain_surface::TerrainSurfacePolicy,
+    sampler::SamplerPolicy,
+    shadow::ShadowPolicy,
+) = RenderPolicy(
+    grade,
+    bloom,
+    vignette,
+    dither,
+    terrain_surface,
+    sampler,
+    shadow,
+    MeshSurfacePolicy(),
+    nothing,
+    nothing,
+)
+
+const RENDER_POLICY_KEYS = (
+    "grade",
+    "bloom",
+    "vignette",
+    "dither",
+    "terrain_surface",
+    "sampler",
+    "shadow",
+    "mesh_surface",
+    "shadow_fit",
+    "sky",
 )
 
 abstract type OverlayPacket end
@@ -463,8 +526,17 @@ end
 function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     haskey(body, "render_policy") || return RenderPolicy()
     value = _object(body["render_policy"], "packet.body.render_policy")
+    # Fail closed on unknown axes. Before CONVERGE-0 this object was read
+    # key-by-key and an unknown axis (a newer producer's `sky`, a typo) was
+    # silently ignored — a frame that claimed a policy it never honoured.
+    _exact_keys(value, (), RENDER_POLICY_KEYS, "render_policy")
     grade = if haskey(value, "grade")
         g = _object(value["grade"], "render_policy.grade")
+        _exact_keys(
+            g,
+            ("lift_r_bp", "lift_g_bp", "lift_b_bp", "gamma_bp", "gain_r_bp", "gain_g_bp", "gain_b_bp", "saturation_bp"),
+            "render_policy.grade",
+        )
         GradePolicy(
             (
                 _bounded_bp(g["lift_r_bp"], "grade.lift_r_bp", -1000, 1000),
@@ -484,6 +556,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     end
     bloom = if haskey(value, "bloom")
         b = _object(value["bloom"], "render_policy.bloom")
+        _exact_keys(b, ("threshold_bp", "intensity_bp"), "render_policy.bloom")
         BloomPolicy(
             _bounded_bp(b["threshold_bp"], "bloom.threshold_bp", 0, POLICY_SCALE),
             _bounded_bp(b["intensity_bp"], "bloom.intensity_bp", 0, 8000),
@@ -493,6 +566,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     end
     vignette = if haskey(value, "vignette")
         v = _object(value["vignette"], "render_policy.vignette")
+        _exact_keys(v, ("strength_bp", "radius_bp", "softness_bp"), "render_policy.vignette")
         parsed = VignettePolicy(
             _bounded_bp(v["strength_bp"], "vignette.strength_bp", 0, 8000),
             _bounded_bp(v["radius_bp"], "vignette.radius_bp", 1000, 10000),
@@ -508,6 +582,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     end
     dither = if haskey(value, "dither")
         d = _object(value["dither"], "render_policy.dither")
+        _exact_keys(d, ("amplitude_milli_lsb",), "render_policy.dither")
         DitherPolicy(
             _bounded_bp(
                 d["amplitude_milli_lsb"],
@@ -521,6 +596,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     end
     terrain_surface = if haskey(value, "terrain_surface")
         t = _object(value["terrain_surface"], "render_policy.terrain_surface")
+        _exact_keys(t, ("uv_repeat_scale_milli", "wrap_repeat", "macro_variation_bp", "macro_frequency_milli"), "render_policy.terrain_surface")
         TerrainSurfacePolicy(
             _bounded_bp(
                 t["uv_repeat_scale_milli"],
@@ -542,6 +618,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     end
     sampler = if haskey(value, "sampler")
         s = _object(value["sampler"], "render_policy.sampler")
+        _exact_keys(s, ("anisotropy",), "render_policy.sampler")
         anisotropy = Int32(_integer(s["anisotropy"], "sampler.anisotropy"))
         (anisotropy < 1 || anisotropy > 16) && throw(ProtocolError(
             "malformed",
@@ -553,6 +630,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     end
     shadow = if haskey(value, "shadow")
         sh = _object(value["shadow"], "render_policy.shadow")
+        _exact_keys(sh, ("darkness_bp", "filter_radius_milli"), "render_policy.shadow")
         ShadowPolicy(
             _bounded_bp(sh["darkness_bp"], "shadow.darkness_bp", 0, POLICY_SCALE),
             _bounded_bp(sh["filter_radius_milli"], "shadow.filter_radius_milli", 100, 8000),
@@ -560,7 +638,47 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     else
         ShadowPolicy()
     end
-    return RenderPolicy(grade, bloom, vignette, dither, terrain_surface, sampler, shadow)
+    mesh_surface = if haskey(value, "mesh_surface")
+        m = _object(value["mesh_surface"], "render_policy.mesh_surface")
+        _exact_keys(m, ("wrap_repeat",), "render_policy.mesh_surface")
+        MeshSurfacePolicy(_boolean(m["wrap_repeat"], "mesh_surface.wrap_repeat"))
+    else
+        MeshSurfacePolicy()
+    end
+    shadow_fit = if haskey(value, "shadow_fit")
+        f = _object(value["shadow_fit"], "render_policy.shadow_fit")
+        _exact_keys(f, ("view_distance_m",), "render_policy.shadow_fit")
+        ShadowFitPolicy(_bounded_bp(f["view_distance_m"], "shadow_fit.view_distance_m", 8, 2000))
+    else
+        nothing
+    end
+    sky = if haskey(value, "sky")
+        k = _object(value["sky"], "render_policy.sky")
+        _exact_keys(
+            k,
+            ("sun_disc_radius_milli_deg", "sun_disc_gain_bp", "sun_glow_gain_bp"),
+            "render_policy.sky",
+        )
+        SkyPolicy(
+            _bounded_bp(k["sun_disc_radius_milli_deg"], "sky.sun_disc_radius_milli_deg", 0, 5000),
+            _bounded_bp(k["sun_disc_gain_bp"], "sky.sun_disc_gain_bp", 0, 400_000),
+            _bounded_bp(k["sun_glow_gain_bp"], "sky.sun_glow_gain_bp", 0, 20000),
+        )
+    else
+        nothing
+    end
+    return RenderPolicy(
+        grade,
+        bloom,
+        vignette,
+        dither,
+        terrain_surface,
+        sampler,
+        shadow,
+        mesh_surface,
+        shadow_fit,
+        sky,
+    )
 end
 
 """Strictly-typed boolean reader for policy fields.

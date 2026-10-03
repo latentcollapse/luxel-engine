@@ -248,6 +248,66 @@ impl Default for SamplerPolicy {
     }
 }
 
+/// Mesh surface policy: the mesh counterpart of `TerrainSurfacePolicy::wrap_repeat`.
+///
+/// The adapter has always sampled mesh materials with CLAMP_TO_EDGE because
+/// every authored mesh carried parametric 0..1 UVs. Parametric UVs stretch a
+/// texture across whatever the band happens to measure (a 0.16 m pedestal band
+/// carried one texture across ~24.5 m of circumference, a ~150:1 smear — audit
+/// MD-4). Metric UVs fix that, but metric UVs exceed 1.0 and therefore REQUIRE
+/// a repeat wrap; with clamp they would smear the border texel instead.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MeshSurfacePolicy {
+    /// `true` samples mesh materials with REPEAT, `false` with the baseline clamp.
+    pub wrap_repeat: bool,
+}
+
+impl Default for MeshSurfacePolicy {
+    fn default() -> Self {
+        Self { wrap_repeat: false }
+    }
+}
+
+/// View-relative shadow frustum fit.
+///
+/// ABSENT means the historical fit: one orthographic shadow frame enclosing the
+/// whole terrain and every instance. That fit ties shadow resolution to world
+/// size — extending a 96 m field to 480 m would drop the single 512² map from
+/// ~3.4 to ~0.7 texels per metre — so a world cannot grow without this axis.
+/// PRESENT fits the shadow frame to the camera frustum truncated at
+/// `view_distance_m`, the classic single-cascade "shadow distance". Receivers
+/// beyond it are unshadowed, which is the honest trade at one cascade.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ShadowFitPolicy {
+    /// Far edge of the shadowed frustum slice, whole metres. Range [8, 2000].
+    pub view_distance_m: i32,
+}
+
+/// View-direction sky.
+///
+/// ABSENT means the historical sky draw: a full-screen triangle whose three
+/// vertices sample the environment at NDC y = -1 and y = 3 only, so the sky is
+/// a screen-space blend of `ground_rgb` and `sky_top_rgb` that never uses
+/// `sky_horizon_rgb` and ignores camera pitch. PRESENT evaluates the
+/// environment gradient per pixel along the camera ray (so the horizon colour
+/// sits on the real horizon), shows the horizon colour below the horizon, and
+/// draws a sun disc and glow along the key light.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SkyPolicy {
+    /// Angular radius of the visible sun disc, milli-degrees. Range [0, 5000].
+    /// 0 draws no disc.
+    pub sun_disc_radius_milli_deg: i32,
+    /// Disc radiance as a multiple of the key light's colour × intensity, in
+    /// basis points. Range [0, 400000] (0–40×).
+    pub sun_disc_gain_bp: i32,
+    /// Forward-scattering glow around the sun as a multiple of the key light's
+    /// colour × intensity, basis points. Range [0, 20000] (0–2×).
+    pub sun_glow_gain_bp: i32,
+}
+
 /// The complete typed policy set. Every field is `Option`, so an absent field
 /// means "declared default" and the packet stays minimal — but the DEFAULTS are
 /// here, not in the renderer, so they are auditable and testable.
@@ -268,6 +328,12 @@ pub struct RenderPolicy {
     pub sampler: Option<SamplerPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shadow: Option<ShadowPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh_surface: Option<MeshSurfacePolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow_fit: Option<ShadowFitPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sky: Option<SkyPolicy>,
 }
 
 impl RenderPolicy {
@@ -283,11 +349,18 @@ impl RenderPolicy {
             terrain_surface: self.terrain_surface.unwrap_or_default(),
             sampler: self.sampler.unwrap_or_default(),
             shadow: self.shadow.unwrap_or_default(),
+            mesh_surface: self.mesh_surface.unwrap_or_default(),
+            shadow_fit: self.shadow_fit,
+            sky: self.sky,
         }
     }
 }
 
 /// A `RenderPolicy` with every field resolved. This is what the adapter binds.
+///
+/// `shadow_fit` and `sky` stay optional after resolution: their absence selects
+/// a different code path (the historical whole-world fit and screen-space sky),
+/// not a default parameter value, so there is no honest default to resolve to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedRenderPolicy {
     pub grade: GradePolicy,
@@ -297,6 +370,9 @@ pub struct ResolvedRenderPolicy {
     pub terrain_surface: TerrainSurfacePolicy,
     pub sampler: SamplerPolicy,
     pub shadow: ShadowPolicy,
+    pub mesh_surface: MeshSurfacePolicy,
+    pub shadow_fit: Option<ShadowFitPolicy>,
+    pub sky: Option<SkyPolicy>,
 }
 
 impl Default for ResolvedRenderPolicy {
@@ -396,6 +472,19 @@ pub fn validate_render_policy(policy: &RenderPolicy) -> Result<(), GraphicsContr
             8000,
             "shadow.filter_radius_milli",
         )?;
+    }
+    if let Some(fit) = &policy.shadow_fit {
+        bounded_i32(fit.view_distance_m, 8, 2000, "shadow_fit.view_distance_m")?;
+    }
+    if let Some(sky) = &policy.sky {
+        bounded_i32(
+            sky.sun_disc_radius_milli_deg,
+            0,
+            5000,
+            "sky.sun_disc_radius_milli_deg",
+        )?;
+        bounded_i32(sky.sun_disc_gain_bp, 0, 400_000, "sky.sun_disc_gain_bp")?;
+        bounded_i32(sky.sun_glow_gain_bp, 0, 20000, "sky.sun_glow_gain_bp")?;
     }
     Ok(())
 }

@@ -87,11 +87,15 @@ def main():
     ap.add_argument("--candidate", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--label", default="candidate")
+    # The left panel is only the FROZEN baseline when --baseline points at it.
+    # Comparing against a retained arm (e.g. ab-full-ctl) under the frozen label
+    # would mislabel the evidence a human is asked to judge.
+    ap.add_argument("--baseline-label", default="BASELINE (frozen)")
     args = ap.parse_args()
 
     os.makedirs(args.out, exist_ok=True)
-    manifest = {"baseline": args.baseline, "candidate": args.candidate,
-                "label": args.label, "sheets": []}
+    manifest = {"baseline": args.baseline, "baseline_label": args.baseline_label,
+                "candidate": args.candidate, "label": args.label, "sheets": []}
 
     for view in VIEWS:
         base = load(args.baseline, view)
@@ -107,7 +111,7 @@ def main():
         diff.save(os.path.join(args.out, "%s-diff.png" % view))
 
         panels = [
-            label(base, "%s / BASELINE (frozen)" % view.upper()),
+            label(base, "%s / %s" % (view.upper(), args.baseline_label.upper())),
             label(cand, "%s / %s" % (view.upper(), args.label.upper())),
             label(diff, "%s / DIFFERENCE (red=darker, blue=lighter)" % view.upper()),
         ]

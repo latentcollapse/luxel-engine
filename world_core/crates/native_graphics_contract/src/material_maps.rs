@@ -32,7 +32,9 @@
 //! Roughness and occlusion are `Data` (they are linear scalars). Getting this
 //! wrong is the classic reason a correct asset renders muddy.
 
-use crate::{procedural_texture, TextureColorSpace, TextureReference};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+use crate::{procedural_texture, TextureColorSpace, TexturePayload, TextureReference};
 
 /// One coherent material: albedo plus the three maps that must agree with it.
 pub struct MaterialMapSet {
@@ -261,17 +263,13 @@ fn material_albedo(kind: MaterialKind, u: f32, v: f32, height: f32) -> [u8; 3] {
     // lightness. Without it the ramp still reads as one tint.
     let hue = (tileable_value_noise(u, v, 12, 0xbb67_ae85) - 0.5) * 2.0;
     let speckle = (tileable_value_noise(u, v, 96, 0x6a09_e667) - 0.5) * 6.0;
-    let blend = |c: f32, index: usize, a: [f32; 3], b: [f32; 3]| {
+    let blend = |index: usize, a: [f32; 3], b: [f32; 3]| {
         let base = a[index] + (b[index] - a[index]) * t;
         // Push saturation outward, not just lightness.
         let chroma = (index as f32 - 1.0) * hue * 9.0;
         (base + chroma + speckle).clamp(0.0, 255.0) as u8
     };
-    [
-        blend(0.0, 0, from, to),
-        blend(1.0, 1, from, to),
-        blend(2.0, 2, from, to),
-    ]
+    [blend(0, from, to), blend(1, from, to), blend(2, from, to)]
 }
 
 /// Roughness in 0..1. Metals stay smoother in their high points and rougher in
@@ -470,6 +468,7 @@ pub fn apply_hero_material_set(body: &mut crate::GraphicsScenePacketBody) -> usi
     }
 
     let mut remapped = 0usize;
+    let previous_textures = body.textures.clone();
     for material in body.materials.iter_mut() {
         let Some(kind) = kind_for_material(&material.material_id) else {
             continue;
@@ -479,6 +478,28 @@ pub fn apply_hero_material_set(body: &mut crate::GraphicsScenePacketBody) -> usi
             .position(|candidate| *candidate == kind)
             .expect("kind came from the families list");
         let set = &sets[index];
+        // Audit MD-1, part 1 — the generated roughness maps hold ABSOLUTE
+        // roughness, and the shader multiplies map x factor. Leaving the old
+        // factor in place applied roughness twice: hero metal rendered at
+        // 0.06-0.085 (near-mirror) and wet pinned to the 0.045 clamp.
+        material.roughness = 1.0;
+        // Audit MD-1, part 2 — preserve the material's declared mean colour.
+        // The copper lived in the replaced albedo TEXTURE (the factor was
+        // near-white), so swapping in the grey metal ramp turned the landmark
+        // to steel. Rescale the factor so factor x mean(new albedo) matches
+        // factor x mean(old albedo) per channel; the generated map then
+        // contributes variation only.
+        if let (Some(old_mean), Some(new_mean)) = (
+            material
+                .texture_ids
+                .first()
+                .and_then(|id| previous_textures.iter().find(|texture| &texture.texture_id == id))
+                .and_then(mean_linear_rgb),
+            mean_linear_rgb(&set.albedo),
+        ) {
+            material.base_color_rgba =
+                preserved_base_color(material.base_color_rgba, old_mean, new_mean);
+        }
         material.texture_ids = vec![set.albedo.texture_id.clone()];
         material.normal_texture_id = Some(set.normal.texture_id.clone());
         material.roughness_texture_id = Some(set.roughness.texture_id.clone());
@@ -486,6 +507,56 @@ pub fn apply_hero_material_set(body: &mut crate::GraphicsScenePacketBody) -> usi
         remapped += 1;
     }
     remapped
+}
+
+/// Mean linear RGB of an sRGB RGBA8 texture's base level, or `None` when the
+/// texture carries no inline payload (an external reference keeps its factor).
+pub fn mean_linear_rgb(texture: &TextureReference) -> Option<[f32; 3]> {
+    let encoded = match texture.payload.as_ref()? {
+        TexturePayload::Rgba8(encoded) => encoded,
+        TexturePayload::Rgba8MipChain { levels } => &levels.first()?.base64,
+    };
+    let bytes = STANDARD.decode(encoded).ok()?;
+    if bytes.len() < 4 || bytes.len() % 4 != 0 {
+        return None;
+    }
+    let decode = |value: u8| {
+        let c = f32::from(value) / 255.0;
+        if texture.color_space == TextureColorSpace::Srgb {
+            if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        } else {
+            c
+        }
+    };
+    let mut sum = [0.0f64; 3];
+    for pixel in bytes.chunks_exact(4) {
+        for channel in 0..3 {
+            sum[channel] += f64::from(decode(pixel[channel]));
+        }
+    }
+    let count = (bytes.len() / 4) as f64;
+    Some(sum.map(|value| (value / count) as f32))
+}
+
+/// The factor that makes `factor x new_mean` equal `old_factor x old_mean`.
+///
+/// `base_color_rgba` is bounded to [0, 1]. When a generated albedo is darker
+/// than the colour it replaces, the exact ratio can exceed 1; the result is
+/// then divided by its largest channel, which keeps hue and saturation and
+/// gives up brightness. That shortfall is a property of the generated map (a
+/// dark grey metal ramp cannot carry bright copper), not something to clamp
+/// per channel — per-channel clamping would shift the hue.
+pub fn preserved_base_color(old_factor: [f32; 4], old_mean: [f32; 3], new_mean: [f32; 3]) -> [f32; 4] {
+    let mut rgb = [0.0f32; 3];
+    for channel in 0..3 {
+        let target = old_factor[channel] * old_mean[channel];
+        rgb[channel] = if new_mean[channel] > 1e-6 { target / new_mean[channel] } else { 0.0 };
+    }
+    let peak = rgb.iter().copied().fold(0.0f32, f32::max);
+    if peak > 1.0 {
+        rgb = rgb.map(|value| value / peak);
+    }
+    [rgb[0], rgb[1], rgb[2], old_factor[3]]
 }
 
 #[cfg(test)]
