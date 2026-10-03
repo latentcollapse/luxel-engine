@@ -2304,8 +2304,12 @@ function _texture_levels(payload)
     levels = Vector{Matrix{NTuple{4,Float32}}}()
     push!(levels, _texture_matrix(payload.bytes, width, height, color_space))
     for mip in get(payload, :mips, ())
-        width = max(width ÷ 2, UInt32(1))
-        height = max(height ÷ 2, UInt32(1))
+        # `UInt32 ÷ Int` promotes to UInt64, and `_texture_matrix` only accepts
+        # UInt32 dimensions: with an Int literal here every packet texture that
+        # carried a mip chain crashed the worker (found in EDGE-1; no test had
+        # pushed a real chain through this loop).
+        width = max(width ÷ UInt32(2), UInt32(1))
+        height = max(height ÷ UInt32(2), UInt32(1))
         expected = 4 * Int(width) * Int(height)
         length(mip.bytes) == expected ||
             throw(AdapterError(

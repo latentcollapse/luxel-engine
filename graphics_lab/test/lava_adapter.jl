@@ -556,3 +556,28 @@ end
     @test final_capabilities.depth_attachment
     @test final_capabilities.texture_sampling
 end
+
+@testset "packet mip chains decode through _texture_levels (EDGE-1 regression)" begin
+    # A 4x4 base with 2x2 and 1x1 levels, as an authority-conditioned packet
+    # texture carries them. Before the fix, the first mip computed its size as
+    # UInt64 and `_texture_matrix` had no method for it.
+    base = fill(UInt8(200), 4 * 4 * 4)
+    level1 = fill(UInt8(100), 2 * 2 * 4)
+    level2 = fill(UInt8(50), 1 * 1 * 4)
+    payload = (
+        bytes=base,
+        width=UInt32(4),
+        height=UInt32(4),
+        color_space=:data,
+        mips=((bytes=level1,), (bytes=level2,)),
+    )
+    levels = LavaAdapter._texture_levels(payload)
+    @test length(levels) == 3
+    @test size(levels[1]) == (4, 4)
+    @test size(levels[2]) == (2, 2)
+    @test size(levels[3]) == (1, 1)
+    @test levels[2][1, 1][1] ≈ 100 / 255
+    # And a wrongly sized level is still refused.
+    bad = merge(payload, (mips=((bytes=fill(UInt8(1), 3),),),))
+    @test_throws LavaAdapter.AdapterError LavaAdapter._texture_levels(bad)
+end

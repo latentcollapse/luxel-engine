@@ -170,3 +170,69 @@ all four maps (≈ 213 MB) does not.
 - **Non-goals:** foliage (until alpha), IBL (N-2 consumes this scene, it does
   not wait for it — metal and wet are EXPECTED to fail before N-2 and that
   failure is the scene's first useful output).
+
+---
+
+## 4. N-4 — Terrain surface content (from spiral EDGE-1)
+
+### Evidence
+
+EDGE-1 investigated the CONVERGE-0 open item: the Campaign 2 edge-density
+authority (`minimum_edge_pair_fraction_bp: 220`) flagged converge0 medium/wide.
+A Python replica of the authority metric reproduced its numbers exactly, then
+scored deliberately broken renders of the same scene (throwaway probe, raw
+`render_packet` requests, never promoted):
+
+| Arm | close | medium | wide |
+|---|---|---|---|
+| C3 fog ×40 (broken) | 24 | 0 | 0 |
+| C2 sun off (broken) | 174 | 70 | 52 |
+| C1 all textures stripped (broken) | 216 | 133 | 125 |
+| converge0 | 295 | 148 | 123 |
+| `full` (retained) | 529 | 313 | 355 |
+| X1 scanned CC0 ground, no mips | 4209 | 5052 | 5103 |
+| X2 scanned CC0 ground, mipped | 2366 | 2843 | 2239 |
+
+Findings:
+
+1. **The floor is not recalibrated.** Pre-registered rule: a new floor must be
+   1.5 × the highest broken-render score. converge0 sits AT control level, so
+   no defensible floor passes it.
+2. **The gate detects "no pixel-scale detail" — and that diagnosis of converge0
+   is correct.** Its textures carry almost no information at frame scale
+   (stripping them costs ~80 bp close, ~0 wide).
+3. **The gate cannot tell detail from defects.** ~70% of `full`'s edge lead came
+   from the parametric ring smear on one mesh (MD-4), and unmipped scanned
+   ground scores 5000 bp from aliasing. It is a necessary floor, never a
+   quality signal.
+4. **Real content clears it by ~10×** (X2), and reads as ground in the frame
+   (`artifacts/parity/review-x2-scanned-ground/`).
+5. **Bug fixed en route:** `_texture_levels` computed mip sizes as UInt64
+   (`UInt32 ÷ Int`), so every packet texture carrying a mip chain crashed the
+   worker. No test had pushed a real chain through it; one does now.
+6. **Contract limitation:** `terrain_surface.uv_repeat_scale_milli` is repeats
+   across the whole extent, capped at 32. On the 480 m converge0 world the finest
+   tiling is 15 m per repeat; a scanned ground set represents ~2–4 m, so X2's
+   twigs render ~4× too large.
+
+### Contract
+
+- **Texel scale in metres:** add `metres_per_repeat_milli` to the terrain layer
+  (per layer, not per policy), so tiling is a property of the texture's physical
+  size and independent of world extent. Keep `uv_repeat_scale_milli` for
+  existing packets.
+- **Layers:** 2–4 scanned CC0 sets (ground litter, grass, dirt, rock) blended by
+  slope and height, plus a low-frequency macro variation term (the policy already
+  reserves `macro_variation_bp`; implement it rather than refusing it).
+- **Assets via the asset route:** scanned sets enter through a manifest
+  (URL, size, sha256, licence) and the asset pipeline. Not through campaign
+  lowering: a lowering that reads files breaks "packet = pure function of world".
+- **Mips are mandatory** for every scanned texture (X1 shows why).
+- **Tests:** manifest completeness; every terrain texture mipped; repeat
+  scale in metres within ±1% of the declared physical size; existing packets
+  byte-identical.
+- **Acceptance (measured):** converge0 medium/wide clear the existing 220 bp
+  floor with no threshold change.
+- **Acceptance (human, mandatory):** ground reads at the right scale (twig
+  test) and shows no visible tile repetition in the wide view.
+- **Non-goals:** virtual texturing, runtime splat painting, displacement.
