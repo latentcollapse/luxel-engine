@@ -205,6 +205,7 @@ end
         UInt32(64),
         UInt32(64),
         false,
+        WGEGraphics.RenderPolicy(),
     )
     angle = Float32(pi / 2)
     importance = WGEGraphics.BackgroundImportance()

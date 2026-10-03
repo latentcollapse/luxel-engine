@@ -71,6 +71,7 @@ fn packet(overlays: bool) -> GraphicsScenePacket {
     }
     seal_scene_packet(GraphicsScenePacketBody {
         deformation: None,
+        render_policy: None,
         schema_version: wge_native_graphics_contract::SCENE_PACKET_SCHEMA.into(),
         packet_id: if overlays {
             "quality-overlay-packet".into()

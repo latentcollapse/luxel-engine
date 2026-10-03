@@ -125,6 +125,7 @@ fn asset() -> GraphicsAssetProjection {
 fn body() -> GraphicsScenePacketBody {
     GraphicsScenePacketBody {
         deformation: None,
+        render_policy: None,
         schema_version: "wge.graphics-scene-packet/v6".into(),
         packet_id: "packet-v1".into(),
         scene_artifact_id: None,

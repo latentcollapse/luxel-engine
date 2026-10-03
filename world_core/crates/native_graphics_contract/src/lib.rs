@@ -46,6 +46,8 @@ pub mod asset_projection;
 pub mod deformation;
 pub mod input_session;
 pub mod live;
+pub mod material_maps;
+pub mod render_policy;
 pub mod scene_composition;
 pub mod session;
 pub mod supervisor;
@@ -58,6 +60,13 @@ pub use deformation::{
     DeformationIntent, DeformationRejection, DeformationTelemetry, DEFORMATION_V7_ENV,
     SCENE_PACKET_SCHEMA_V7,
 };
+
+pub use render_policy::{
+    validate_packet_render_policy, validate_render_policy, BloomPolicy, DitherPolicy,
+    GradePolicy, RenderPolicy, ResolvedRenderPolicy, SamplerPolicy, ShadowPolicy,
+    TerrainSurfacePolicy, VignettePolicy, POLICY_SCALE,
+};
+
 
 pub use asset_projection::{
     GRAPHICS_ASSET_PROJECTION_SCHEMA, GraphicsAssetMesh, GraphicsAssetProjection,
@@ -171,6 +180,16 @@ pub struct GraphicsScenePacketBody {
     /// both directions by `deformation::validate_schema_deformation`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub deformation: Option<DeformationIntent>,
+    /// Typed render policy: the execution channel from style intent to renderer
+    /// state (graphical parity audit GP-01). `Option` +
+    /// `skip_serializing_if` for the same reason as `deformation`: an absent
+    /// section means "the renderer used its declared defaults", so a v6
+    /// packet's canonical bytes are unchanged by the section existing at all.
+    /// Presence is honoured in BOTH v6 and v7 — unlike `deformation`, a policy
+    /// does not change what a packet MEANS, only how it is presented, so it
+    /// does not warrant a schema split.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_policy: Option<RenderPolicy>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -839,6 +858,7 @@ pub fn validate_scene_packet(packet: &GraphicsScenePacket) -> Result<(), Graphic
     if let Some(intent) = &packet.body.deformation {
         deformation::validate_deformation(&packet.body, intent)?;
     }
+    render_policy::validate_packet_render_policy(&packet.body)?;
     valid_id(&packet.body.packet_id, "packet_id")?;
     match (
         &packet.body.scene_artifact_id,
@@ -3008,6 +3028,7 @@ pub fn lower_reference_world(
     let body = GraphicsScenePacketBody {
         schema_version: SCENE_PACKET_SCHEMA.into(),
         deformation: None,
+        render_policy: None,
         packet_id: format!(
             "graphics-packet-{}",
             world.artifact_id.trim_start_matches("world-")
@@ -3559,6 +3580,164 @@ pub fn lower_world_showcase_packet(
 /// terrain fields, and gameplay-critical instance identity remain inherited
 /// from the source packet, while all calibration geometry is explicit,
 /// deterministic, and content-addressed in the derived packet.
+/// Candidate render policy for the graphical parity A/B experiments.
+///
+/// Named after the gap it attacks rather than after a look, because a policy
+/// that encodes "Demo A's art style" is exactly the failure the sprint forbids
+/// (GP-01's whole point: style arrives through policy, but only policy the
+/// renderer genuinely implements, and only as a *candidate* until human review
+/// accepts it).
+///
+/// Unset = OFF = the frozen baseline, byte-identical. This is a producer flag;
+/// validation does not consult it, for the same reason `deformation_v7_enabled`
+/// is producer-only: a receiver must be able to check a packet it did not
+/// produce.
+pub const PARITY_POLICY_ENV: &str = "WGE_PARITY_RENDER_POLICY";
+
+/// Which candidate policy a run should attach.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParityPolicyCandidate {
+    /// No policy section at all: the frozen baseline renderer behaviour.
+    Null,
+    /// Anti-banding only (sprint §3.1). The single highest perceived-gain
+    /// change in the audit, so it is measured alone before anything rides
+    /// along with it.
+    Dither,
+    /// Dither plus a restrained post chain (sprint §3.5).
+    DitherPost,
+    /// Shadow rework alone (sprint §5.2): removes the hard-coded 0.25
+    /// direct-light visibility floor and widens the PCF tap spread. Measured on
+    /// its own so a shadow judgement is never contaminated by post or dither.
+    Shadow,
+    /// Hero material set alone (goal step 1): gives every material its OWN
+    /// 256x256 albedo/normal/roughness/occlusion derived from one coherent
+    /// height field, replacing the shared 8x8 `riverwatch-*` maps that were
+    /// identical across grass, stone, bark, metal, and foliage.
+    HeroMaterials,
+    /// Terrain material scale alone (sprint §3.3): tiles the terrain albedo 24
+    /// times across the field with a repeat wrap. Isolated so a texture-scale
+    /// judgement is not contaminated by post, dither, or shadows.
+    Terrain,
+    /// Everything that is genuinely implemented: dither, post chain, the
+    /// shadow rework, and terrain tiling.
+    Full,
+    /// `Full` plus the axis this renderer still genuinely REFUSES
+    /// (anisotropy, blocked on the Vulkan device feature). Terrain tiling used
+    /// to be in this arm and was removed once the sampler-per-surface split
+    /// landed (sprint F-4); leaving it would have kept a now-supported axis
+    /// behind a refusal and made `full` weaker than it needs to be.
+    FullUnsupported,
+}
+
+/// The terrain material-scale candidate: 24 tiles across the field.
+///
+/// 8000 milli = 8 repeats across the extent. On the 96 m riverwatch field that
+/// is one texture repeat every 12 m — a believable ground scale, versus the
+/// baseline's single 96 m stretch. `wrap_repeat` is REQUIRED alongside it: with
+/// CLAMP_TO_EDGE the outer 7 of 8 tiles would smear the border texel instead of
+/// wrapping, which is why the contract enforces the pair.
+const TERRAIN_TILING_CANDIDATE: TerrainSurfacePolicy = TerrainSurfacePolicy {
+    uv_repeat_scale_milli: 8000,
+    wrap_repeat: true,
+    macro_variation_bp: 0,
+    macro_frequency_milli: 40,
+};
+
+impl ParityPolicyCandidate {
+    pub fn from_env() -> Self {
+        match std::env::var(PARITY_POLICY_ENV).as_deref() {
+            Ok("dither") => Self::Dither,
+            Ok("dither-post") => Self::DitherPost,
+            Ok("full") => Self::Full,
+            Ok("full-unsupported") => Self::FullUnsupported,
+            Ok("shadow") => Self::Shadow,
+            Ok("terrain") => Self::Terrain,
+            Ok("hero-materials") => Self::HeroMaterials,
+            _ => Self::Null,
+        }
+    }
+
+    /// Build the typed policy this candidate represents.
+    pub fn policy(self) -> Option<RenderPolicy> {
+        match self {
+            // Explicitly NULL, not "defaults": the point of this arm is to
+            // prove that ABSENT produces the baseline bytes. Attaching an
+            // all-defaults policy would move the packet digest and stop being
+            // that control.
+            Self::Null => None,
+            Self::Dither => Some(RenderPolicy {
+                dither: Some(DitherPolicy {
+                    amplitude_milli_lsb: 1000,
+                }),
+                ..RenderPolicy::default()
+            }),
+            Self::DitherPost => Some(RenderPolicy {
+                dither: Some(DitherPolicy {
+                    amplitude_milli_lsb: 1000,
+                }),
+                bloom: Some(BloomPolicy {
+                    threshold_bp: 8200,
+                    intensity_bp: 1200,
+                }),
+                vignette: Some(VignettePolicy {
+                    strength_bp: 1800,
+                    radius_bp: 6200,
+                    softness_bp: 3600,
+                }),
+                ..RenderPolicy::default()
+            }),
+            Self::Full | Self::FullUnsupported => Some(RenderPolicy {
+                dither: Some(DitherPolicy {
+                    amplitude_milli_lsb: 1000,
+                }),
+                bloom: Some(BloomPolicy {
+                    threshold_bp: 8200,
+                    intensity_bp: 1200,
+                }),
+                vignette: Some(VignettePolicy {
+                    strength_bp: 1800,
+                    radius_bp: 6200,
+                    softness_bp: 3600,
+                }),
+                shadow: Some(ShadowPolicy {
+                    darkness_bp: 9600,
+                    filter_radius_milli: 2400,
+                }),
+                // Only the refusal arm asks for an axis the renderer cannot
+                // honour. `Full` must stay renderable, or "full" would be a
+                // name for a configuration that always errors.
+                ..if matches!(self, Self::FullUnsupported) {
+                    RenderPolicy {
+                        sampler: Some(SamplerPolicy { anisotropy: 8 }),
+                        ..RenderPolicy::default()
+                    }
+                } else {
+                    RenderPolicy {
+                        terrain_surface: Some(TERRAIN_TILING_CANDIDATE),
+                        ..RenderPolicy::default()
+                    }
+                }
+            }),
+            Self::HeroMaterials => Some(RenderPolicy::default()),
+            Self::Terrain => Some(RenderPolicy {
+                terrain_surface: Some(TERRAIN_TILING_CANDIDATE),
+                ..RenderPolicy::default()
+            }),
+            Self::Shadow => Some(RenderPolicy {
+                shadow: Some(ShadowPolicy {
+                    // 0.96 floor removal: a fully occluded sample keeps 4% of
+                    // direct light instead of 25%.
+                    darkness_bp: 9600,
+                    // 2.4 texels of PCF spread instead of 1.0 — softer edges
+                    // without pretending to be PCSS.
+                    filter_radius_milli: 2400,
+                }),
+                ..RenderPolicy::default()
+            }),
+        }
+    }
+}
+
 pub fn lower_campaign2_packet(
     packet: &GraphicsScenePacket,
     view: Campaign2View,
@@ -3589,6 +3768,10 @@ pub fn lower_campaign2_packet(
     let mut body = packet.body.clone();
     body.packet_id = format!("{}-campaign2-{view_name}", packet.body.packet_id);
     body.overlays.clear();
+    // Candidate policy attaches here. With the flag unset this is `None`, the
+    // key is omitted from canonical JSON by `skip_serializing_if`, and the
+    // packet digests are exactly the frozen baseline's.
+    body.render_policy = ParityPolicyCandidate::from_env().policy();
     // Campaign 2 is an authored-frame calibration projection, not the
     // gameplay diagnostic view.  Keep the world/spatial identities bound but
     // fence the sparse source render instances (marker foliage, cube obstacle,
@@ -4229,6 +4412,27 @@ pub fn lower_campaign2_packet(
         fog_density: 0.0018,
         exposure: 1.08,
     };
+    // Goal step 1 — coherent production-quality material set. Deliberately the
+    // LAST mutation before sealing: the campaign2 materials are appended long
+    // after the packet is cloned, so an earlier call rewrote them and was then
+    // overwritten. That shipped 24 hero textures that no material referenced —
+    // payload with no effect, which is precisely the decorative-schema failure
+    // this sprint exists to prevent. Placing it here also means every texture
+    // added is referenced, so packet size and residency telemetry stay honest.
+    //
+    // Behind the candidate flag, so the null arm keeps the frozen bytes: this
+    // changes CONTENT, not renderer behaviour.
+    if matches!(
+        ParityPolicyCandidate::from_env(),
+        ParityPolicyCandidate::HeroMaterials
+    ) {
+        let remapped = material_maps::apply_hero_material_set(&mut body);
+        if remapped == 0 {
+            return Err(GraphicsContractError::provenance(
+                "hero material set remapped no materials; refusing to report an unchanged frame",
+            ));
+        }
+    }
     seal_scene_packet(body)
 }
 
@@ -5426,6 +5630,7 @@ mod tests {
         seal_scene_packet(GraphicsScenePacketBody {
             schema_version: SCENE_PACKET_SCHEMA.into(),
             deformation: None,
+            render_policy: None,
             packet_id: "packet-test".into(),
             scene_artifact_id: None,
             scene_artifact_sha256: None,

@@ -89,14 +89,67 @@ struct TextureProbeResources
     bindings::Lava.TextureBindings
 end
 
-struct MaterialTextureResources
-    cache_key::String
-    material_id::String
+"""How a surface samples its textures.
+
+This type is the CACHE KEY that makes per-surface sampling possible. Before it
+existed, `_material_texture_resources!` cached by `material_id` alone, so two
+surfaces sharing a material also shared one sampler — and terrain therefore
+could not request `REPEAT` without silently changing every mesh's UV
+addressing. That was the structural blocker behind sprint finding F-4.
+
+Immutable and comparable, so it can key a `Dict`, and small enough that the
+per-frame lookup is free. It deliberately carries ONLY what is actually
+exercised today: anisotropy is NOT here, because the Vulkan device feature it
+needs is still unenabled upstream (see `_anisotropy_refusal_detail`). Adding a
+field here that nothing can set would be speculative machinery for a capability
+that cannot execute.
+"""
+struct SamplerSpec
+    filter::Symbol
+    wrap::Symbol
+end
+
+const CLAMPED_LINEAR_SPEC = SamplerSpec(:linear, :clamp)
+const REPEATED_LINEAR_SPEC = SamplerSpec(:linear, :repeat)
+
+"""The sampling spec a given surface uses, derived from render policy.
+
+Meshes are ALWAYS clamped: their UVs are authored in 0..1 per mesh, and letting
+a terrain tiling policy reach them would be precisely the cross-surface
+contamination F-4 describes. Terrain follows the policy. This function is the
+single place that asymmetry is decided, so it can be tested rather than
+discovered in a screenshot.
+"""
+function _surface_sampler_spec(
+    policy::WGEGraphics.RenderPolicy,
+    surface::Symbol,
+)::SamplerSpec
+    if surface === :mesh
+        return CLAMPED_LINEAR_SPEC
+    elseif surface === :terrain
+        return policy.terrain_surface.wrap_repeat ?
+               REPEATED_LINEAR_SPEC : CLAMPED_LINEAR_SPEC
+    end
+    throw(AdapterError(
+        "unsupported_texture",
+        "unknown surface kind $surface; expected :terrain or :mesh",
+    ))
+end
+
+struct MaterialTextures
     albedo_texture::Lava.LavaTexture2D
     normal_texture::Lava.LavaTexture2D
     roughness_texture::Lava.LavaTexture2D
     occlusion_texture::Lava.LavaTexture2D
     emissive_texture::Lava.LavaTexture2D
+    max_sampler_lod::UInt32
+end
+
+struct MaterialTextureResources
+    cache_key::String
+    material_id::String
+    spec::SamplerSpec
+    textures::MaterialTextures
     sampler::Lava.LavaSampler
     bindings::Lava.TextureBindings
     max_sampler_lod::UInt32
@@ -165,7 +218,9 @@ mutable struct LavaBackend{C,Q,PP,SP,TP,OP,MP,TXP,DP,TSP,MSP,RP}
     shadow_resources::Union{Nothing,ShadowResources}
     resolve_resources::Union{Nothing,ResolveResources}
     texture_resources::Union{Nothing,TextureProbeResources}
-    material_texture_resources::Dict{String,MaterialTextureResources}
+    material_texture_resources::Dict{Tuple{String,String,SamplerSpec},MaterialTextureResources}
+    material_textures::Dict{Tuple{String,String},MaterialTextures}
+    surface_samplers::Dict{SamplerSpec,Lava.LavaSampler}
     upload_bytes::UInt64
     draw_calls::UInt64
     readback_bytes::UInt64
@@ -783,6 +838,8 @@ function _terrain_vertex(
     exposure::Float32,
     texture_enabled::Float32,
     emissive_factor::Vec4f,
+    shadow::Vec4f,
+    uv_repeat::Float32,
 )
     vertex_id = Lava.vertex_index() - Int32(1)
     cells_per_axis = resolution - Int32(1)
@@ -815,7 +872,13 @@ function _terrain_vertex(
         ),
     )
     terrain_color = _terrain_base_color(base_color, slope, region)
-    uv = Vec2f(normalized_x, normalized_z)
+    # Multiplied, not recomputed from world metres. At the declared default
+    # `uv_repeat == 1.0f0` this is a multiplication by exactly one, so the frozen
+    # captures are bit-identical. A world-metre formulation would be prettier to
+    # read but would introduce a float round-trip through `width_m` that changes
+    # the low bits of every UV — a byte-identity regression for no gain, since
+    # the physical scale is already expressed by `uv_repeat`.
+    uv = Vec2f(normalized_x * uv_repeat, normalized_z * uv_repeat)
     terrain_normal = _terrain_normal(heights, resolution, sample_x, sample_z, width_m, length_m)
     Lava.gfx_output(0, terrain_color)
     Lava.gfx_output(1, terrain_normal)
@@ -848,6 +911,7 @@ function _terrain_vertex(
         16,
         _terrain_tangent(heights, resolution, sample_x, sample_z, width_m, length_m),
     )
+    Lava.gfx_output(17, shadow)
     return nothing
 end
 
@@ -885,6 +949,7 @@ function _mesh_vertex(
     fog_density::Float32,
     exposure::Float32,
     texture_enabled::Float32,
+    shadow::Vec4f,
 )
     vertex_id = Lava.vertex_index()
     instance_id = Lava.instance_index()
@@ -957,6 +1022,7 @@ function _mesh_vertex(
     Lava.gfx_output(14, emissive_parameters[instance_id])
     Lava.gfx_output(15, surface_parameters[instance_id])
     Lava.gfx_output(16, tangent)
+    Lava.gfx_output(17, shadow)
     return nothing
 end
 
@@ -1081,7 +1147,22 @@ function _shadow_depth(u::Float32, v::Float32)::Float32
     return Lava.sample_texture_2d(UInt32(5), u, v, UInt32(0))
 end
 
-function _shadow_visibility(light_space::Vec4f)::Float32
+"""Directional shadow lookup: 4-tap PCF with a policy-driven darkness floor.
+
+The historical adapter returned `0.25 + 0.75 * pcf`, i.e. a shadowed surface
+could never receive less than 25% of direct light. The audit called that out as
+the single reason the image reads as ambient-lit and toy-like: contact shadows
+were not missing, they were UNREPRESENTABLE.
+
+`darkness` and `filter_texel` are policy parameters rather than constants, so
+the baseline value (0.75 / one texel) still reproduces the frozen captures
+byte-for-byte while a candidate policy can ask for a genuinely dark, softer
+shadow. `min_visibility = 1 - darkness`.
+
+Taps are unrolled because Lava's shader JIT cannot lower a loop with a
+constant bound (see `_apply_bloom`).
+"""
+@inline function _shadow_visibility(light_space::Vec4f, darkness::Float32, filter_texel::Float32)::Float32
     inside =
         -1.0f0 <= light_space[1] <= 1.0f0 &&
             -1.0f0 <= light_space[2] <= 1.0f0 &&
@@ -1089,7 +1170,7 @@ function _shadow_visibility(light_space::Vec4f)::Float32
     inside || return 1.0f0
     uv_x = light_space[1] * 0.5f0 + 0.5f0
     uv_y = light_space[2] * 0.5f0 + 0.5f0
-    texel = 1.0f0 / 512.0f0
+    texel = filter_texel / 512.0f0
     bias = 0.0035f0
     depth = light_space[3] - bias
     visible = 0.0f0
@@ -1097,10 +1178,219 @@ function _shadow_visibility(light_space::Vec4f)::Float32
     visible += depth <= _shadow_depth(uv_x + texel, uv_y - texel) ? 1.0f0 : 0.0f0
     visible += depth <= _shadow_depth(uv_x - texel, uv_y + texel) ? 1.0f0 : 0.0f0
     visible += depth <= _shadow_depth(uv_x + texel, uv_y + texel) ? 1.0f0 : 0.0f0
-    return 0.25f0 + 0.75f0 * (visible * 0.25f0)
+    pcf = visible * 0.25f0
+    return (1.0f0 - darkness) + darkness * pcf
 end
 
-function _resolve_vertex(texel_size::Vec2f, exposure::Float32)
+"""Lower the shadow policy into the flat wire form the scene shaders take.
+
+`(darkness, filter_texel, _, _)`. The defaults 7500/1000 reproduce the historical
+`0.25 + 0.75 * pcf` with a one-texel tap spread EXACTLY — `1.0f0 - 0.75f0` is
+0.25f0 in Float32 and `filter_texel = 1.0f0` gives `1.0f0/512.0f0` — so an
+absent policy is byte-identical, which is the whole premise of this channel.
+"""
+@inline function _shadow_uniform(policy::WGEGraphics.RenderPolicy)::Vec4f
+    shadow = policy.shadow
+    return Vec4f(
+        _bp(shadow.darkness_bp),
+        Float32(shadow.filter_radius_milli) / 1000.0f0,
+        0.0f0,
+        0.0f0,
+    )
+end
+
+"""Reject any policy axis this renderer cannot actually honour.
+
+The sprint rule is that a style signal must never be *silently* accepted and
+then ignored: a packet asking for anisotropic filtering that renders exactly as
+it would with the flag off is worse than no flag at all, because the receipt
+will report a policy that had no effect. Every refusal below names the axis, the
+value asked for, and the concrete reason — so the gap is recorded where it can
+be found instead of being discovered later from a screenshot.
+
+Each entry is a real dependency or structural blocker, not an unimplemented
+nice-to-have:
+
+  * `sampler.anisotropy` — the pinned Lava revision creates its VkDevice
+    WITHOUT the `samplerAnisotropy` feature enabled. Setting `anisotropyEnable`
+    on a sampler without that feature is invalid Vulkan usage (undefined
+    behaviour, not a graceful no-op), so this cannot be turned on from the
+    adapter alone; it needs an upstream device-feature change.
+
+  * `terrain_surface.macro_variation_bp` — has no shader implementation. The
+    tiling half of the same policy (`uv_repeat_scale_milli` + `wrap_repeat`) IS
+    executed, after the sampler-per-surface split.
+
+Called once per frame, before any GPU work, so a refusal costs nothing and
+cannot leave a half-rendered frame.
+"""
+# NOTE: the definition of `_assert_render_policy_supported` deliberately sits
+# BELOW `GpuCapabilityProfile` and `_anisotropy_refusal_detail`, because its
+# signature names both types and Julia resolves a signature's types at
+# definition time. Moving the docstring here and the function body above the
+# type is what produced an `UndefVarError` once already.
+
+"""What the GPU can actually do, queried rather than assumed.
+
+Every field is a REAL QUERY against the selected physical device. Nothing here
+is hardcoded and nothing here is a literal — this exists because the sprint
+found two capabilities being asserted rather than measured:
+
+  * `sampler_anisotropy` — the audit treated anisotropy as "just turn it on".
+    The device almost certainly supports it, but the pinned Lava revision
+    creates its VkDevice WITHOUT enabling the feature, so setting
+    `anisotropyEnable` would be invalid Vulkan usage. Querying separates "the
+    hardware cannot" (nothing to do) from "the device creation must change"
+    (a concrete upstream edit) — which is the difference between a blocker and
+    a ticket.
+
+  * `timestamp_compute_and_graphics` — the previous capability check tested only
+    `timestamp_period` and `timestamp_valid_bits`, and so reported GPU timing
+    as available on a device where it could never work. This is the limit that
+    actually gates timestamp queries and it was being ignored.
+
+Declared here rather than beside the probe because the render-time policy
+refusal below names this type in its signature, and Julia resolves a
+signature's types when the method is defined.
+
+The struct is immutable and computed once per context, at backend construction.
+"""
+struct GpuCapabilityProfile
+    device_name::String
+    # Supported by the HARDWARE (limit), independent of what was enabled.
+    max_sampler_anisotropy::Float32
+    # Supported by the HARDWARE (feature bit).
+    sampler_anisotropy_supported::Bool
+    # The limit that actually gates timestamp queries.
+    timestamp_compute_and_graphics::Bool
+    timestamp_period::Float32
+    timestamp_valid_bits::UInt32
+    # Set when a query failed. A capability we could not determine must be
+    # reported as unknown, never defaulted to true.
+    probe_complete::Bool
+end
+
+const UNKNOWN_CAPABILITY_PROFILE = GpuCapabilityProfile(
+    "unknown", 1.0f0, false, false, 0.0f0, UInt32(0), false)
+
+"""Explain an anisotropy refusal from MEASURED device capability, not folklore.
+
+The three cases are genuinely different problems with genuinely different fixes,
+and collapsing them into one message is what made the original refusal read as
+an excuse rather than a diagnosis:
+
+  * the hardware cannot        → there is nothing to do; request 1
+  * the probe failed           → we do not know, so we refuse; fix the probe
+  * the hardware can, but the
+    pinned device creation
+    never enabled the feature → a concrete, bounded upstream change
+"""
+function _anisotropy_refusal_detail(requested::Int32, capabilities::GpuCapabilityProfile)
+    requested_text = "render_policy.sampler.anisotropy=$requested is refused. "
+    if !capabilities.probe_complete
+        return requested_text *
+            "The device capability probe did not complete, so WGE cannot tell " *
+            "whether this GPU supports anisotropy. Request anisotropy 1, or fix " *
+            "the probe before requesting more."
+    end
+    if !capabilities.sampler_anisotropy_supported || capabilities.max_sampler_anisotropy <= 1.0f0
+        return requested_text *
+            "This device ($(capabilities.device_name)) reports " *
+            "sampler_anisotropy unsupported and maxSamplerAnisotropy=" *
+            "$(capabilities.max_sampler_anisotropy), so this is a hardware limit, " *
+            "not a configuration problem. Request anisotropy 1."
+    end
+    return requested_text *
+        "This device ($(capabilities.device_name)) SUPPORTS it: " *
+        "maxSamplerAnisotropy=$(capabilities.max_sampler_anisotropy). It is refused " *
+        "because the pinned Lava revision creates its VkDevice without enabling " *
+        "the samplerAnisotropy feature, and setting anisotropyEnable on a sampler " *
+        "without that feature is invalid Vulkan usage rather than a silent no-op. " *
+        "The fix is a bounded upstream change: enable the feature during device " *
+        "creation, clamped to the value above."
+end
+
+function _assert_render_policy_supported(
+    policy::WGEGraphics.RenderPolicy,
+    capabilities::GpuCapabilityProfile,
+)
+    if policy.sampler.anisotropy > 1
+        throw(AdapterError(
+            "unsupported_render_policy",
+            _anisotropy_refusal_detail(policy.sampler.anisotropy, capabilities),
+        ))
+    end
+    terrain = policy.terrain_surface
+    # Tiling and the repeat wrap are NOW EXECUTED (sprint F-4/F-5). Macro
+    # variation is still refused: it has no shader implementation, and accepting
+    # a non-zero amplitude would render identically to zero while a receipt
+    # implied otherwise.
+    if terrain.macro_variation_bp != 0
+        throw(AdapterError(
+            "unsupported_render_policy",
+            "render_policy.terrain_surface.macro_variation_bp=" *
+            "$(terrain.macro_variation_bp) is refused: terrain macro variation has no " *
+            "shader implementation yet, and honouring the value silently is worse " *
+            "than refusing it. Request 0, or land the macro-variation pass first.",
+        ))
+    end
+    return nothing
+end
+
+# Resolve-pass policy uniforms. The packed vectors carry the render policy in
+# the exact fields the shader needs; `_resolve_policy` is the ONE lowering point
+# from `WGEGraphics.RenderPolicy` to GPU state, so "what does absent mean" is
+# decided in WGEGraphics (auditable, cross-language tested) and nowhere else.
+struct ResolvePolicy
+    grade_lift_rgb::Vec4f        # lift r,g,b, unused
+    grade_gain_rgb::Vec4f        # gain r,g,b, unused
+    grade_gamma_saturation::Vec4f  # gamma, saturation, unused, unused
+    bloom::Vec4f                 # threshold, intensity, unused, unused
+    vignette::Vec4f              # strength, radius, softness, unused
+    dither::Vec4f                # amplitude_milli_lsb, unused, unused, unused
+end
+
+@inline _bp(value::Int32)::Float32 = Float32(value) / Float32(WGEGraphics.POLICY_SCALE)
+
+"""Lower a validated RenderPolicy into resolve-pass uniforms.
+
+The defaults here are the FROZEN BASELINE: bloom intensity 0, vignette
+strength 0, gamma/saturation/gain identity, dither 0. A packet with no
+`render_policy` section therefore produces byte-identical pixels, which is
+asserted end to end by the frozen-baseline comparison.
+"""
+function _resolve_policy(policy::WGEGraphics.RenderPolicy)::ResolvePolicy
+    grade = policy.grade
+    bloom = policy.bloom
+    vignette = policy.vignette
+    dither = policy.dither
+    return ResolvePolicy(
+        Vec4f(_bp(grade.lift_rgb_bp[1]), _bp(grade.lift_rgb_bp[2]), _bp(grade.lift_rgb_bp[3]), 0.0f0),
+        Vec4f(_bp(grade.gain_rgb_bp[1]), _bp(grade.gain_rgb_bp[2]), _bp(grade.gain_rgb_bp[3]), 0.0f0),
+        Vec4f(_bp(grade.gamma_bp), _bp(grade.saturation_bp), 0.0f0, 0.0f0),
+        Vec4f(_bp(bloom.threshold_bp), _bp(bloom.intensity_bp), 0.0f0, 0.0f0),
+        Vec4f(_bp(vignette.strength_bp), _bp(vignette.radius_bp), _bp(vignette.softness_bp), 0.0f0),
+        Vec4f(Float32(dither.amplitude_milli_lsb) / 1000.0f0, 0.0f0, 0.0f0, 0.0f0),
+    )
+end
+
+"""Resolve vertex stage.
+
+Takes FLAT arguments rather than the `ResolvePolicy` struct: Lava's `draw!`
+passes each `args` entry to the shader as a separate parameter, so a struct
+parameter has no way to be bound. The struct is the lowering-side grouping;
+the wire form is these eight scalars.
+"""
+function _resolve_vertex(
+    texel_size::Vec2f,
+    exposure::Float32,
+    grade_lift_rgb::Vec4f,
+    grade_gain_rgb::Vec4f,
+    grade_gamma_saturation::Vec4f,
+    bloom::Vec4f,
+    vignette::Vec4f,
+    dither::Vec4f,
+)
     vertex_id = Lava.vertex_index() - Int32(1)
     x = Float32(Int32(vertex_id & Int32(1)) * 4 - 1)
     y = Float32(Int32((vertex_id >> Int32(1)) & Int32(1)) * 4 - 1)
@@ -1108,6 +1398,12 @@ function _resolve_vertex(texel_size::Vec2f, exposure::Float32)
     Lava.gfx_output(0, Vec2f((x + 1.0f0) * 0.5f0, (y + 1.0f0) * 0.5f0))
     Lava.gfx_output(1, texel_size)
     Lava.gfx_output(2, Vec4f(exposure, 0.0f0, 0.0f0, 0.0f0))
+    Lava.gfx_output(3, grade_lift_rgb)
+    Lava.gfx_output(4, grade_gain_rgb)
+    Lava.gfx_output(5, grade_gamma_saturation)
+    Lava.gfx_output(6, bloom)
+    Lava.gfx_output(7, vignette)
+    Lava.gfx_output(8, dither)
     return nothing
 end
 
@@ -1120,10 +1416,186 @@ function _resolve_sample(u::Float32, v::Float32)::Vec4f
     )
 end
 
+"""Display-referred grade: lift, gamma, gain, then saturation.
+
+Saturation runs LAST and in display space because that is where a viewer
+judges it; applying it in linear HDR would make the same number mean different
+things at different exposures, which is precisely the kind of un-auditable
+knob this policy channel exists to remove.
+"""
+@inline function _apply_grade(color::Vec4f, lift::Vec4f, gain::Vec4f, gamma_saturation::Vec4f)::Vec4f
+    # Identity must be BIT-EXACT, not merely close. `x ^ 1.0` goes through
+    # `powf`, which is not guaranteed to return `x` unchanged: applying the
+    # default grade moved 6 bytes of the frozen baseline by 1 LSB each. The
+    # whole point of "absent policy == baseline bytes" is that it is provable,
+    # so the neutral case short-circuits instead of being multiplied through.
+    if lift[1] == 0.0f0 && lift[2] == 0.0f0 && lift[3] == 0.0f0 &&
+       gamma_saturation[1] == 1.0f0 && gamma_saturation[2] == 1.0f0 &&
+       gain[1] == 1.0f0 && gain[2] == 1.0f0 && gain[3] == 1.0f0
+        return color
+    end
+    red = lift[1] + color[1]
+    green = lift[2] + color[2]
+    blue = lift[3] + color[3]
+    gamma = gamma_saturation[1]
+    if gamma == 1.0f0
+        red = max(red, 0.0f0) * gain[1]
+        green = max(green, 0.0f0) * gain[2]
+        blue = max(blue, 0.0f0) * gain[3]
+    else
+        red = max(red, 0.0f0)^gamma * gain[1]
+        green = max(green, 0.0f0)^gamma * gain[2]
+        blue = max(blue, 0.0f0)^gamma * gain[3]
+    end
+    red = clamp(red, 0.0f0, 1.0f0)
+    green = clamp(green, 0.0f0, 1.0f0)
+    blue = clamp(blue, 0.0f0, 1.0f0)
+    saturation = gamma_saturation[2]
+    if saturation != 1.0f0
+        # Rec.709 luma on already-encoded values; this is a display-space
+        # stylisation knob, not a colourimetric transform.
+        luma = 0.2126f0 * red + 0.7152f0 * green + 0.0722f0 * blue
+        red = clamp(luma + (red - luma) * saturation, 0.0f0, 1.0f0)
+        green = clamp(luma + (green - luma) * saturation, 0.0f0, 1.0f0)
+        blue = clamp(luma + (blue - luma) * saturation, 0.0f0, 1.0f0)
+    end
+    return Vec4f(red, green, blue, color[4])
+end
+
+"""Restrained bloom from the already-downsampled resolve input.
+
+A single wide tap ring at the resolve scale. This is deliberately NOT a
+progressive downsample/upsample bloom: that needs extra framebuffers and a
+multi-pass graph, and at the baseline's 2x supersample the single ring buys
+most of the perceived halo for a fraction of the machinery. Intensity 0 (the
+default) short-circuits to the input unchanged.
+"""
+@inline _bloom_engaged(bloom::Vec4f)::Bool = bloom[2] > 0.0f0
+
+"""Soft-knee highlight extraction: how much of `luma` exceeds `threshold`.
+
+Pure arithmetic, deliberately factored out of `_apply_bloom` so it is
+host-testable — the bloom body itself calls a GPU intrinsic and cannot run on
+the CPU.
+"""
+@inline _bloom_knee(luma::Float32, threshold::Float32)::Float32 =
+    max(luma - threshold, 0.0f0)
+
+"""Restrained bloom from the already-downsampled resolve input.
+
+A single wide tap ring at the resolve scale, UNROLLED. This is deliberately
+NOT a progressive downsample/upsample bloom: that needs extra framebuffers and
+a multi-pass graph, and at the baseline's 2x supersample one ring buys most of
+the perceived halo for a fraction of the machinery.
+
+The taps are written out rather than looped because Lava's shader JIT rejects
+a `for` over a constant tuple — it constant-folds the bound into an
+`LLVM.ConstantExpr` the backend cannot lower, and the whole pipeline fails to
+compile. Every other shader in this adapter is loop-free for the same reason.
+"""
+@inline function _bloom_tap_luma(texel_size::Vec2f, uv::Vec2f, dx::Float32, dy::Float32)::Float32
+    tap = _resolve_sample(
+        uv[1] + dx * 4.0f0 * texel_size[1],
+        uv[2] + dy * 4.0f0 * texel_size[2],
+    )
+    return 0.2126f0 * tap[1] + 0.7152f0 * tap[2] + 0.0722f0 * tap[3]
+end
+
+@inline function _apply_bloom(color::Vec4f, bloom::Vec4f, texel_size::Vec2f, uv::Vec2f)::Vec4f
+    _bloom_engaged(bloom) || return color
+    threshold = bloom[1]
+    intensity = bloom[2]
+    accumulated = (
+        _bloom_knee(_bloom_tap_luma(texel_size, uv, 1.0f0, 0.0f0), threshold) +
+        _bloom_knee(_bloom_tap_luma(texel_size, uv, -1.0f0, 0.0f0), threshold) +
+        _bloom_knee(_bloom_tap_luma(texel_size, uv, 0.0f0, 1.0f0), threshold) +
+        _bloom_knee(_bloom_tap_luma(texel_size, uv, 0.0f0, -1.0f0), threshold)
+    ) * 0.25f0
+    scale = accumulated * intensity
+    return Vec4f(
+        min(color[1] + color[1] * scale, 1.0f0),
+        min(color[2] + color[2] * scale, 1.0f0),
+        min(color[3] + color[3] * scale, 1.0f0),
+        color[4],
+    )
+end
+
+"""Radial vignette in normalized frame space.
+
+`radius` and `softness` are fractions of the half-diagonal so the falloff is
+resolution independent: the same policy produces the same composition at
+768x512 and at 1920x1080.
+"""
+@inline function _apply_vignette(color::Vec4f, vignette::Vec4f, uv::Vec2f)::Vec4f
+    strength = vignette[1]
+    strength <= 0.0f0 && return color
+    radius = vignette[2]
+    softness = max(vignette[3], 1.0f-4)
+    centered_x = uv[1] * 2.0f0 - 1.0f0
+    centered_y = uv[2] * 2.0f0 - 1.0f0
+    distance = sqrt(centered_x * centered_x + centered_y * centered_y) / 1.41421356f0
+    falloff = clamp((distance - radius) / softness, 0.0f0, 1.0f0)
+    # smoothstep so the transition has no visible edge of its own.
+    shaped = falloff * falloff * (3.0f0 - 2.0f0 * falloff)
+    attenuation = 1.0f0 - shaped * strength
+    return Vec4f(color[1] * attenuation, color[2] * attenuation, color[3] * attenuation, color[4])
+end
+
+"""Bayer 8x8 ordered dither, applied in DISPLAY space immediately before
+quantisation.
+
+Two properties matter here and both are load-bearing:
+
+1. ORDERED, not hashed or temporal. The certified frame must be a pure
+   function of the packet; a noise sequence would make it a function of a
+   counter, which is exactly the determinism this engine is built on.
+2. APPLIED IN DISPLAY SPACE. The banding this attacks is created by quantising
+   an sRGB-encoded gradient to 8 bits, so dithering the linear value would
+   attack a different (invisible) artefact.
+
+Amplitude is in LSB, so 1.0 is one full quantisation step peak-to-peak. The
+value is added AFTER the sRGB encode, in `_rgba8`/capture, which is the last
+point before the UInt8 conversion.
+"""
+# The standard recursive Bayer 8x8 ordered-dither threshold matrix.
+#
+# Written out rather than computed because (a) it is the single artefact a
+# reviewer needs to check by eye, and (b) an earlier bit-twiddling construction
+# of this matrix was WRONG in a way that only surfaced as "dither did not
+# reduce banding": every value in a row came out negative, so the dither could
+# only push a pixel down and never across a quantisation boundary. A literal
+# table cannot drift that way.
+const BAYER_8X8 = (
+    (0, 32, 8, 40, 2, 34, 10, 42),
+    (48, 16, 56, 24, 50, 18, 58, 26),
+    (12, 44, 4, 36, 14, 46, 6, 38),
+    (60, 28, 52, 20, 62, 30, 54, 22),
+    (3, 35, 11, 43, 1, 33, 9, 41),
+    (51, 19, 59, 27, 49, 17, 57, 25),
+    (15, 47, 7, 39, 13, 45, 5, 37),
+    (63, 31, 55, 23, 61, 29, 53, 21),
+)
+
+@inline function _bayer8x8(x::Int32, y::Int32)::Float32
+    row = BAYER_8X8[(y & 0x07) + 1]
+    value = Float32(row[(x & 0x07) + 1])
+    return (value + 0.5f0) / 64.0f0 - 0.5f0
+end
+
+@inline function _apply_dither_lsb(value::Float32, x::Int32, y::Int32, amplitude::Float32)::Float32
+    amplitude <= 0.0f0 && return value
+    return clamp(value + _bayer8x8(x, y) * amplitude, 0.0f0, 1.0f0)
+end
+
 function _resolve_fragment()
     uv = Lava.gfx_input(Vec2f, 0)
     texel_size = Lava.gfx_input(Vec2f, 1)
     exposure = Lava.gfx_input(Vec4f, 2)[1]
+    lift = Lava.gfx_input(Vec4f, 3)
+    gain = Lava.gfx_input(Vec4f, 4)
+    gamma_saturation = Lava.gfx_input(Vec4f, 5)
+    bloom = Lava.gfx_input(Vec4f, 6)
+    vignette = Lava.gfx_input(Vec4f, 7)
     offset = 0.5f0 * texel_size
     first = _resolve_sample(uv[1] - offset[1], uv[2] - offset[2])
     second = _resolve_sample(uv[1] + offset[1], uv[2] - offset[2])
@@ -1135,7 +1607,10 @@ function _resolve_fragment()
         0.25f0 * (first[3] + second[3] + third[3] + fourth[3]),
         0.25f0 * (first[4] + second[4] + third[4] + fourth[4]),
     )
-    Lava.gfx_output(0, _tone_map(hdr, exposure))
+    mapped = _tone_map(hdr, exposure)
+    bloomed = _apply_bloom(mapped, bloom, texel_size, uv)
+    graded = _apply_grade(bloomed, lift, gain, gamma_saturation)
+    Lava.gfx_output(0, _apply_vignette(graded, vignette, uv))
     return nothing
 end
 
@@ -1157,6 +1632,7 @@ function _terrain_fragment()
     material_emissive = Lava.gfx_input(Vec4f, 14)
     surface_parameters = Lava.gfx_input(Vec4f, 15)
     tangent = Lava.gfx_input(Vec4f, 16)
+    shadow = Lava.gfx_input(Vec4f, 17)
     light_intensity = lighting_parameters[1]
     fog_density = lighting_parameters[2]
     exposure = lighting_parameters[3]
@@ -1183,7 +1659,7 @@ function _terrain_fragment()
         material[2],
         surface_parameters[1],
         surface_parameters[2],
-        _shadow_visibility(light_space),
+        _shadow_visibility(light_space, shadow[1], shadow[2]),
         view_direction,
         roughness_sample,
         occlusion_sample,
@@ -1324,7 +1800,9 @@ function backend()::LavaBackend
             nothing,
             nothing,
             nothing,
-            Dict{String,MaterialTextureResources}(),
+            Dict{Tuple{String,String,SamplerSpec},MaterialTextureResources}(),
+            Dict{Tuple{String,String},MaterialTextures}(),
+            Dict{SamplerSpec,Lava.LavaSampler}(),
             UInt64(0),
             UInt64(0),
             UInt64(0),
@@ -1354,18 +1832,35 @@ function _validate_dimensions(width_px::Integer, height_px::Integer)
     return (Int(width_px), Int(height_px))
 end
 
-function _gpu_timestamp_capable(context::Lava.VkContext)::Bool
+function _probe_gpu_capabilities(context::Lava.VkContext)::GpuCapabilityProfile
     try
         properties = Vulkan.get_physical_device_properties(context.physical_device)
+        features = Vulkan.get_physical_device_features(context.physical_device)
         queue_properties = Vulkan.get_physical_device_queue_family_properties(
             context.physical_device,
         )[Int(context.queue_family_index) + 1]
-        return isfinite(properties.limits.timestamp_period) &&
-               properties.limits.timestamp_period > 0.0f0 &&
-               queue_properties.timestamp_valid_bits > 0
+        return GpuCapabilityProfile(
+            properties.device_name,
+            Float32(properties.limits.max_sampler_anisotropy),
+            Bool(features.sampler_anisotropy),
+            Bool(properties.limits.timestamp_compute_and_graphics),
+            Float32(properties.limits.timestamp_period),
+            UInt32(queue_properties.timestamp_valid_bits),
+            true,
+        )
     catch
-        return false
+        # An incomplete probe is reported as incomplete. Defaulting an unknown
+        # capability to `true` is precisely how fake capability claims start.
+        return UNKNOWN_CAPABILITY_PROFILE
     end
+end
+
+function _gpu_timestamp_capable(context::Lava.VkContext)::Bool
+    profile = _probe_gpu_capabilities(context)
+    return profile.probe_complete &&
+           profile.timestamp_compute_and_graphics &&
+           profile.timestamp_period > 0.0f0 &&
+           profile.timestamp_valid_bits > 0
 end
 
 function _framebuffer!(
@@ -1402,12 +1897,41 @@ function _srgb_to_linear(value::Float32)::Float32
 end
 
 function _rgba8(value::NTuple{4,<:Real})::NTuple{4,UInt8}
+    return _rgba8(value, 0.0f0, 0, 0)
+end
+
+"""Quantise one RGBA sample, optionally dithered.
+
+`dither_amplitude_lsb` is in quantisation steps (1.0 == 1 LSB peak-to-peak).
+The dither is added to the sRGB-ENCODED value, because the banding being
+attacked is created by quantising an encoded gradient to 8 bits; dithering the
+linear value would break a different artefact that does not exist.
+
+Alpha is never dithered: it is a coverage/identity channel here, and dithering
+it would make `artifact_rate` (which counts non-opaque pixels) meaningless.
+`x`/`y` are CAPTURE pixel coordinates, so the pattern is anchored to the image
+rather than to the readback buffer's layout.
+"""
+function _rgba8(
+    value::NTuple{4,<:Real},
+    dither_amplitude_lsb::Float32,
+    x::Integer,
+    y::Integer,
+)::NTuple{4,UInt8}
     return ntuple(
         index -> begin
             channel = Float32(value[index])
             isfinite(channel) && 0.0f0 <= channel <= 1.0f0 ||
                 throw(AdapterError("invalid_capture", "RGBA channel is outside [0, 1]"))
             encoded = index == 4 ? channel : _linear_to_srgb(channel)
+            if index != 4 && dither_amplitude_lsb > 0.0f0
+                # amplitude is in LSB; one LSB in encoded [0,1] space is 1/255.
+                encoded = clamp(
+                    encoded + _bayer8x8(Int32(x), Int32(y)) * (dither_amplitude_lsb / 255.0f0),
+                    0.0f0,
+                    1.0f0,
+                )
+            end
             # Rust's authority quantizer rounds positive half-way values away
             # from zero; Julia's default `round` is ties-to-even.
             UInt8(clamp(floor(Int, encoded * 255.0f0 + 0.5f0), 0, 255))
@@ -1421,11 +1945,18 @@ function _rgba8(value::NTuple{4,UInt8})::NTuple{4,UInt8}
 end
 
 function _capture_bytes(pixels::AbstractMatrix{<:NTuple{4,<:Real}})::Vector{UInt8}
+    return _capture_bytes(pixels, 0.0f0)
+end
+
+function _capture_bytes(
+    pixels::AbstractMatrix{<:NTuple{4,<:Real}},
+    dither_amplitude_lsb::Float32,
+)::Vector{UInt8}
     bytes = Vector{UInt8}(undef, 4 * length(pixels))
     offset = 1
     # Lava readback is indexed as (x, y); the contract stores rows top-to-bottom.
     for row in axes(pixels, 2), column in axes(pixels, 1)
-        rgba = _rgba8(pixels[column, row])
+        rgba = _rgba8(pixels[column, row], dither_amplitude_lsb, column - 1, row - 1)
         for component in 1:4
             bytes[offset+component-1] = rgba[component]
         end
@@ -1638,9 +2169,7 @@ texture; the pinned Lava rev owns destruction through finalizers, so nothing
 is destroyed manually."""
 function _lava_texture2d!(
     state::LavaBackend,
-    levels::Vector{Matrix{NTuple{4,Float32}}};
-    filter::Symbol=:linear,
-    wrap::Symbol=:clamp,
+    levels::Vector{Matrix{NTuple{4,Float32}}},
 )
     isempty(levels) &&
         throw(AdapterError("malformed_texture", "texture needs at least one level"))
@@ -1970,17 +2499,22 @@ function _texture_payload(
     )
 end
 
-function _material_texture_resources!(
+"""GPU textures for a material, uploaded once per (content, material).
+
+Split from the binding construction so that a second sampling spec for the same
+material reuses the uploaded image instead of re-uploading it. Before this split
+the sampler and the upload were fused, which is precisely why tiling a material
+would have multiplied `upload_bytes` — and that counter is independently
+validated on the Rust side.
+"""
+function _material_textures!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
-    shadow::ShadowResources,
     material::WGEGraphics.MaterialPacket,
-)
-    cache = state.material_texture_resources
-    if any(resource -> resource.cache_key != packet.content_sha256, values(cache))
-        empty!(cache)
-    end
-    haskey(cache, material.material_id) && return cache[material.material_id]
+)::MaterialTextures
+    key = (packet.content_sha256, material.material_id)
+    existing = get(state.material_textures, key, nothing)
+    existing === nothing || return existing
     roles = (
         Val{:albedo}(),
         Val{:normal}(),
@@ -1993,40 +2527,80 @@ function _material_texture_resources!(
         roles,
     )
     levels = map(_texture_levels, payloads)
-    textures = map(
-        texture_levels -> _lava_texture2d!(state, texture_levels; filter=:linear, wrap=:clamp),
-        levels,
-    )
+    textures = map(texture_levels -> _lava_texture2d!(state, texture_levels), levels)
     max_sampler_lod = UInt32(maximum(
         maximum(length(texture_levels) - 1, init=0) for texture_levels in levels
     ))
-    sampler = _lod_sampler!(state, max_sampler_lod; filter=:linear, wrap=:clamp)
-    bindings = Lava.bind_textures([
-        textures[1] * sampler,
-        textures[2] * sampler,
-        textures[3] * sampler,
-        textures[4] * sampler,
-        textures[5] * sampler,
-        shadow.texture * shadow.sampler,
-    ])
     for texture_levels in levels
         state.upload_bytes += UInt64(sum(
             16 * size(level, 2) * size(level, 1) for level in texture_levels; init=0
         ))
     end
-    created = MaterialTextureResources(
-        packet.content_sha256,
-        material.material_id,
+    created = MaterialTextures(
         textures[1],
         textures[2],
         textures[3],
         textures[4],
         textures[5],
-        sampler,
-        bindings,
         max_sampler_lod,
     )
-    cache[material.material_id] = created
+    state.material_textures[key] = created
+    return created
+end
+
+"""Sampler for a sampling spec, built once and shared.
+
+Samplers carry no per-material state, so one per spec is enough for the whole
+scene no matter how many materials use it.
+"""
+function _surface_sampler!(
+    state::LavaBackend,
+    spec::SamplerSpec,
+    max_lod::UInt32,
+)::Lava.LavaSampler
+    existing = get(state.surface_samplers, spec, nothing)
+    existing === nothing || return existing
+    created = _lod_sampler!(state, max_lod; filter=spec.filter, wrap=spec.wrap)
+    state.surface_samplers[spec] = created
+    return created
+end
+
+function _material_texture_resources!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    shadow::ShadowResources,
+    material::WGEGraphics.MaterialPacket,
+    spec::SamplerSpec,
+)
+    cache = state.material_texture_resources
+    if any(resource -> resource.cache_key != packet.content_sha256, values(cache))
+        empty!(cache)
+        empty!(state.material_textures)
+        empty!(state.surface_samplers)
+    end
+    key = (packet.content_sha256, material.material_id, spec)
+    cached = get(cache, key, nothing)
+    cached === nothing || return cached
+    textures = _material_textures!(state, packet, material)
+    sampler = _surface_sampler!(state, spec, textures.max_sampler_lod)
+    bindings = Lava.bind_textures([
+        textures.albedo_texture * sampler,
+        textures.normal_texture * sampler,
+        textures.roughness_texture * sampler,
+        textures.occlusion_texture * sampler,
+        textures.emissive_texture * sampler,
+        shadow.texture * shadow.sampler,
+    ])
+    created = MaterialTextureResources(
+        packet.content_sha256,
+        material.material_id,
+        spec,
+        textures,
+        sampler,
+        bindings,
+        textures.max_sampler_lod,
+    )
+    cache[key] = created
     return created
 end
 
@@ -3379,7 +3953,17 @@ function _record_scene_passes!(
     prepare_gpu_timing_slot = _begin_gpu_pass_timing(state, GPU_PASS_TIMING_LABELS.prepare)
     resources = _terrain_resources!(state, packet)
     shadow_resources = _shadow_resources!(state, packet, lighting)
-    texture_resources = _material_texture_resources!(state, packet, shadow_resources, material)
+    # Refuse an unhonourable policy axis before any GPU work, so the failure is
+    # a clean typed error rather than a frame that quietly ignored its policy.
+    _assert_render_policy_supported(packet.render_policy, _probe_gpu_capabilities(state.context))
+    shadow_uniform = _shadow_uniform(packet.render_policy)
+    texture_resources = _material_texture_resources!(
+        state,
+        packet,
+        shadow_resources,
+        material,
+        _surface_sampler_spec(packet.render_policy, :terrain),
+    )
     visibility = _mesh_visibility(packet, camera_frame)
     mesh_resources = _mesh_resources!(state, packet, camera_frame, visibility)
     _end_gpu_pass_timing!(state, prepare_gpu_timing_slot)
@@ -3448,6 +4032,8 @@ function _record_scene_passes!(
             packet.environment.exposure,
             texture_enabled,
             Vec4f(material.emissive_factor_rgb..., 1.0f0),
+            shadow_uniform,
+            Float32(packet.render_policy.terrain_surface.uv_repeat_scale_milli) / 1000.0f0,
         ),
         descriptor_set_layout=texture_resources.bindings.layout,
         descriptor_set=texture_resources.bindings.set,
@@ -3466,6 +4052,7 @@ function _record_scene_passes!(
                 packet,
                 shadow_resources,
                 batch_material,
+                _surface_sampler_spec(packet.render_policy, :mesh),
             )
             batch_texture_enabled = _material_texture_enabled(batch_material)
             draw!(
@@ -3507,6 +4094,7 @@ function _record_scene_passes!(
                     packet.environment.fog_density,
                     packet.environment.exposure,
                     batch_texture_enabled,
+                    shadow_uniform,
                 ),
                 instances=batch.instance_count,
                 descriptor_set_layout=batch_texture_resources.bindings.layout,
@@ -3556,6 +4144,7 @@ function _composite_capture!(
     capture_framebuffer = _framebuffer!(state, width, height, false, :capture)
     capture_target = OffscreenTarget(capture_framebuffer)
     resolve_resources = _resolve_resources!(state, scene_framebuffer)
+    resolve_policy = _resolve_policy(packet.render_policy)
     draw!(
         state.queue,
         state.resolve_pipeline,
@@ -3564,6 +4153,12 @@ function _composite_capture!(
         args=(
             Vec2f(1.0f0 / Float32(render_width), 1.0f0 / Float32(render_height)),
             packet.environment.exposure,
+            resolve_policy.grade_lift_rgb,
+            resolve_policy.grade_gain_rgb,
+            resolve_policy.grade_gamma_saturation,
+            resolve_policy.bloom,
+            resolve_policy.vignette,
+            resolve_policy.dither,
         ),
         descriptor_set_layout=resolve_resources.bindings.layout,
         descriptor_set=resolve_resources.bindings.set,
@@ -3680,7 +4275,10 @@ function _render_scene(
         ),
     )
     flush_readback_time_us = _elapsed_us(flush_readback_started_ns)
-    capture_bytes = _capture_bytes(pixels)
+    capture_bytes = _capture_bytes(
+        pixels,
+        _resolve_policy(packet.render_policy).dither[1],
+    )
     state.readback_bytes += length(capture_bytes)
     return (
         schema="wge.lava-frame/v1",

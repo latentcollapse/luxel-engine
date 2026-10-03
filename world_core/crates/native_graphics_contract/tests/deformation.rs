@@ -75,6 +75,7 @@ fn conifer_body(deformation: Option<DeformationIntent>) -> GraphicsScenePacketBo
     GraphicsScenePacketBody {
         schema_version: SCENE_PACKET_SCHEMA.into(),
         deformation,
+        render_policy: None,
         packet_id: "conifer-wind-packet".into(),
         scene_artifact_id: None,
         scene_artifact_sha256: None,

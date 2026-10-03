@@ -7,6 +7,12 @@ using SHA
 export GraphicsScenePacket, ProtocolError, validate_scene_packet, packet_summary
 
 const SCENE_PACKET_SCHEMA = "wge.graphics-scene-packet/v6"
+# Scene packet v7 adds the TetCage deformation section (P1). v7 and v6 are
+# MUTUALLY EXCLUSIVE: a receiver that ignores `deformation` renders a static
+# mesh, one that honours it does not, so they must not share a version string.
+# Kept in lockstep with native_graphics_contract::deformation.
+const SCENE_PACKET_SCHEMA_V7 = "wge.graphics-scene-packet/v7"
+const DEFORMATION_V7_ENV = "WGE_TETCAGE_DEFORM_V7"
 const MAX_PACKET_ELEMENTS = 16 * 1024 * 1024
 const MAX_CAPTURE_DIMENSION = 8192
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
@@ -169,6 +175,102 @@ struct EnvironmentPacket
     exposure::Float32
 end
 
+# ---------------------------------------------------------------------------
+# RenderPolicy (graphical parity sprint §4)
+#
+# Kept in lockstep with native_graphics_contract::render_policy. Absent means
+# "the renderer used its declared defaults", so a packet without a policy
+# section must behave EXACTLY as before this type existed — the defaults below
+# are the frozen baseline renderer behaviour, and they are asserted against
+# the Rust side by tests/render_policy.rs. A default that lives only in the
+# adapter is a constant nobody can audit.
+# ---------------------------------------------------------------------------
+
+const POLICY_SCALE = 10_000
+
+struct GradePolicy
+    lift_rgb_bp::NTuple{3,Int32}
+    gamma_bp::Int32
+    gain_rgb_bp::NTuple{3,Int32}
+    saturation_bp::Int32
+end
+
+GradePolicy() = GradePolicy((0, 0, 0), POLICY_SCALE, (POLICY_SCALE, POLICY_SCALE, POLICY_SCALE), POLICY_SCALE)
+
+struct BloomPolicy
+    threshold_bp::Int32
+    intensity_bp::Int32
+end
+
+BloomPolicy() = BloomPolicy(9000, 0)
+
+struct VignettePolicy
+    strength_bp::Int32
+    radius_bp::Int32
+    softness_bp::Int32
+end
+
+VignettePolicy() = VignettePolicy(0, 6000, 3000)
+
+struct DitherPolicy
+    amplitude_milli_lsb::Int32
+end
+
+DitherPolicy() = DitherPolicy(0)
+
+struct TerrainSurfacePolicy
+    uv_repeat_scale_milli::Int32
+    wrap_repeat::Bool
+    macro_variation_bp::Int32
+    macro_frequency_milli::Int32
+end
+
+# 1000 milli == exactly one repeat across the whole extent == the baseline
+# whole-world 0..1 terrain UV, and clamp == the baseline CLAMP_TO_EDGE sampler.
+# Both defaults together are byte-identical to the frozen captures.
+#
+# The name changed from `uv_scale_milli`, which was documented as "repeats per
+# world metre" while the adapter applied it as a multiplier on the whole-field
+# UV. The two are different units: the documented 1000 would have meant 96 tiles
+# on a 96 m field, while the real baseline is one stretch. See the Rust
+# `TerrainSurfacePolicy` doc for the full derivation.
+TerrainSurfacePolicy() = TerrainSurfacePolicy(1000, false, 0, 40)
+
+struct SamplerPolicy
+    anisotropy::Int32
+end
+
+SamplerPolicy() = SamplerPolicy(1)
+
+struct ShadowPolicy
+    darkness_bp::Int32
+    filter_radius_milli::Int32
+end
+
+# darkness 7500 reproduces the adapter's historical `0.25 + 0.75 * pcf`
+# exactly, so an absent policy keeps the frozen baseline shadow.
+ShadowPolicy() = ShadowPolicy(7500, 1000)
+
+struct RenderPolicy
+    grade::GradePolicy
+    bloom::BloomPolicy
+    vignette::VignettePolicy
+    dither::DitherPolicy
+    terrain_surface::TerrainSurfacePolicy
+    sampler::SamplerPolicy
+    shadow::ShadowPolicy
+end
+
+RenderPolicy() = RenderPolicy(
+    GradePolicy(),
+    BloomPolicy(),
+    VignettePolicy(),
+    DitherPolicy(),
+    TerrainSurfacePolicy(),
+    SamplerPolicy(),
+    ShadowPolicy(),
+)
+
 abstract type OverlayPacket end
 
 struct PointOverlay <: OverlayPacket
@@ -218,6 +320,7 @@ struct GraphicsScenePacket
     width_px::UInt32
     height_px::UInt32
     include_depth::Bool
+    render_policy::RenderPolicy
 end
 
 struct PacketSummary
@@ -282,11 +385,17 @@ function _validate_scene_packet(value::JSON3.Object)::GraphicsScenePacket
             "overlays",
             "capture",
         ),
-        ("scene_artifact_id", "scene_artifact_sha256"),
+        ("scene_artifact_id", "scene_artifact_sha256", "deformation", "render_policy"),
         "packet.body",
     )
-    _string(body["schema_version"], "packet.body.schema_version") == SCENE_PACKET_SCHEMA ||
+    schema = _string(body["schema_version"], "packet.body.schema_version")
+    schema in (SCENE_PACKET_SCHEMA, SCENE_PACKET_SCHEMA_V7) ||
         throw(ProtocolError("unsupported_schema", "scene packet schema is unsupported"))
+    # P1: v7 exists to carry a deformation section and v6 must not, so a
+    # receiver never has to guess whether `deformation` was ignored. Enforced
+    # BEFORE content validation so every later message about the deformation
+    # actually means something.
+    _validate_deformation_presence(schema, body)
     packet_sha256 = _sha(body_value=value, path="packet_sha256")
     content_sha256 = _packet_content_sha256(value)
     _valid_sha(packet_sha256, "packet_sha256")
@@ -347,7 +456,135 @@ function _validate_scene_packet(value::JSON3.Object)::GraphicsScenePacket
         UInt32(_integer(capture["width_px"], "capture.width_px")),
         UInt32(_integer(capture["height_px"], "capture.height_px")),
         _bool(capture["include_depth"], "capture.include_depth"),
+        _parse_render_policy(body),
     )
+end
+
+function _parse_render_policy(body::JSON3.Object)::RenderPolicy
+    haskey(body, "render_policy") || return RenderPolicy()
+    value = _object(body["render_policy"], "packet.body.render_policy")
+    grade = if haskey(value, "grade")
+        g = _object(value["grade"], "render_policy.grade")
+        GradePolicy(
+            (
+                _bounded_bp(g["lift_r_bp"], "grade.lift_r_bp", -1000, 1000),
+                _bounded_bp(g["lift_g_bp"], "grade.lift_g_bp", -1000, 1000),
+                _bounded_bp(g["lift_b_bp"], "grade.lift_b_bp", -1000, 1000),
+            ),
+            _bounded_bp(g["gamma_bp"], "grade.gamma_bp", 2500, 40000),
+            (
+                _bounded_bp(g["gain_r_bp"], "grade.gain_r_bp", 0, 20000),
+                _bounded_bp(g["gain_g_bp"], "grade.gain_g_bp", 0, 20000),
+                _bounded_bp(g["gain_b_bp"], "grade.gain_b_bp", 0, 20000),
+            ),
+            _bounded_bp(g["saturation_bp"], "grade.saturation_bp", 0, 20000),
+        )
+    else
+        GradePolicy()
+    end
+    bloom = if haskey(value, "bloom")
+        b = _object(value["bloom"], "render_policy.bloom")
+        BloomPolicy(
+            _bounded_bp(b["threshold_bp"], "bloom.threshold_bp", 0, POLICY_SCALE),
+            _bounded_bp(b["intensity_bp"], "bloom.intensity_bp", 0, 8000),
+        )
+    else
+        BloomPolicy()
+    end
+    vignette = if haskey(value, "vignette")
+        v = _object(value["vignette"], "render_policy.vignette")
+        parsed = VignettePolicy(
+            _bounded_bp(v["strength_bp"], "vignette.strength_bp", 0, 8000),
+            _bounded_bp(v["radius_bp"], "vignette.radius_bp", 1000, 10000),
+            _bounded_bp(v["softness_bp"], "vignette.softness_bp", 0, 8000),
+        )
+        (parsed.strength_bp > 0 && parsed.radius_bp >= 10000) && throw(ProtocolError(
+            "malformed",
+            "render policy vignette is fully engaged but its radius leaves no falloff",
+        ))
+        parsed
+    else
+        VignettePolicy()
+    end
+    dither = if haskey(value, "dither")
+        d = _object(value["dither"], "render_policy.dither")
+        DitherPolicy(
+            _bounded_bp(
+                d["amplitude_milli_lsb"],
+                "dither.amplitude_milli_lsb",
+                0,
+                2000,
+            ),
+        )
+    else
+        DitherPolicy()
+    end
+    terrain_surface = if haskey(value, "terrain_surface")
+        t = _object(value["terrain_surface"], "render_policy.terrain_surface")
+        TerrainSurfacePolicy(
+            _bounded_bp(
+                t["uv_repeat_scale_milli"],
+                "terrain_surface.uv_repeat_scale_milli",
+                1,
+                32000,
+            ),
+            _boolean(t["wrap_repeat"], "terrain_surface.wrap_repeat"),
+            _bounded_bp(t["macro_variation_bp"], "terrain_surface.macro_variation_bp", 0, 5000),
+            _bounded_bp(
+                t["macro_frequency_milli"],
+                "terrain_surface.macro_frequency_milli",
+                1,
+                4000,
+            ),
+        )
+    else
+        TerrainSurfacePolicy()
+    end
+    sampler = if haskey(value, "sampler")
+        s = _object(value["sampler"], "render_policy.sampler")
+        anisotropy = Int32(_integer(s["anisotropy"], "sampler.anisotropy"))
+        (anisotropy < 1 || anisotropy > 16) && throw(ProtocolError(
+            "malformed",
+            "render policy sampler.anisotropy is $anisotropy, outside [1, 16]",
+        ))
+        SamplerPolicy(anisotropy)
+    else
+        SamplerPolicy()
+    end
+    shadow = if haskey(value, "shadow")
+        sh = _object(value["shadow"], "render_policy.shadow")
+        ShadowPolicy(
+            _bounded_bp(sh["darkness_bp"], "shadow.darkness_bp", 0, POLICY_SCALE),
+            _bounded_bp(sh["filter_radius_milli"], "shadow.filter_radius_milli", 100, 8000),
+        )
+    else
+        ShadowPolicy()
+    end
+    return RenderPolicy(grade, bloom, vignette, dither, terrain_surface, sampler, shadow)
+end
+
+"""Strictly-typed boolean reader for policy fields.
+
+`Bool(x)` in Julia would happily accept `1`, `0`, `"true"` and `2`, so a packet
+carrying `wrap_repeat: 2` would validate as `true` on the Julia side while Rust
+rejected it — a receiver/producer disagreement, which is the exact class of bug
+the duplicated Julia validation exists to prevent.
+"""
+function _boolean(value, label::String)::Bool
+    value isa Bool && return value
+    throw(ProtocolError(
+        "malformed",
+        "render policy $label is $(repr(value)), not a JSON boolean",
+    ))
+end
+
+function _bounded_bp(value, label::String, low::Integer, high::Integer)::Int32
+    parsed = Int32(_integer(value, "render policy $label"))
+    (parsed < low || parsed > high) && throw(ProtocolError(
+        "malformed",
+        "render policy $label is $parsed, outside [$low, $high]",
+    ))
+    return parsed
 end
 
 function _parse_terrain(value::JSON3.Object, materials::Vector{MaterialPacket})::TerrainPacket
@@ -1197,6 +1434,23 @@ function _exact_keys(
 )::Nothing
     length(value) == length(expected) && all(key -> haskey(value, key), expected) ||
         throw(ProtocolError("malformed_packet", "$label has an unexpected or missing field"))
+    return nothing
+end
+
+function _validate_deformation_presence(schema::String, body::JSON3.Object)::Nothing
+    has_deformation = haskey(body, "deformation")
+    if schema == SCENE_PACKET_SCHEMA_V7 && !has_deformation
+        throw(ProtocolError(
+            "malformed_packet",
+            "packet declares schema v7 but carries no deformation section; v7 exists to carry one",
+        ))
+    end
+    if schema == SCENE_PACKET_SCHEMA && has_deformation
+        throw(ProtocolError(
+            "malformed_packet",
+            "packet declares schema v6 but carries a deformation section; v7 is required to carry deformation",
+        ))
+    end
     return nothing
 end
 
