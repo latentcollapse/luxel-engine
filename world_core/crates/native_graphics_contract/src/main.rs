@@ -761,7 +761,8 @@ fn run() -> Result<(), String> {
 fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
     use wge_asset_contract::{PreparationStatus, RenderPreparationStatus, condition_render_asset, prepare_asset};
     use wge_native_graphics_contract::calibration::{
-        GREY_CARD_TARGET_SRGB8, grey_card_local_center, project_local_point, render_request, runtime_request,
+        GREY_CARD_TARGET_SRGB8, grey_card_local_center, local_sphere, project_local_point, project_local_sphere,
+        render_request, runtime_request,
     };
     use wge_native_graphics_contract::{
         BoundSceneRenderAuthorization, CalibrationPlacement, CalibrationRig, CalibrationView,
@@ -913,9 +914,27 @@ fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
                     "relative_error": (mean - f64::from(GREY_CARD_TARGET_SRGB8)) / f64::from(GREY_CARD_TARGET_SRGB8),
                 })
             });
+            // N-2 acceptance probes: the specimen spheres a close view frames.
+            let probe_ids: Vec<String> = match view {
+                CalibrationView::Close(column) if column == "calibration" => {
+                    vec!["ball_chrome".into(), "ball_grey_018".into()]
+                }
+                CalibrationView::Close(column) => vec![format!("{column}_sphere")],
+                _ => Vec::new(),
+            };
+            let mut spheres = serde_json::Map::new();
+            for id in probe_ids {
+                let Ok((center, radius)) = local_sphere(package, &id) else { continue };
+                if let Some((cx, cy, r)) = project_local_sphere(&camera, placement, center, radius)
+                    && let Some(stats) = sphere_probe(&promoted.capture_bytes, width, height, cx, cy, r * 0.85)
+                {
+                    spheres.insert(id, stats);
+                }
+            }
             let entry = serde_json::json!({
                 "rig": rig.name(),
                 "view": view.name(),
+                "spheres": spheres,
                 "packet_sha256": packet.packet_sha256,
                 "packet_bytes": serde_json::to_vec(&packet).map(|bytes| bytes.len()).unwrap_or(0),
                 "capture_sha256": sha256_prefixed(&promoted.capture_bytes),
@@ -925,8 +944,9 @@ fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
             });
             eprintln!("calibration {} {} {}", rig.name(), view.name(), entry["capture_sha256"]);
             // Contract §3 gate: the 18% card within ±5% of middle grey under
-            // the rigs whose exposure is calibrated on it (sun, overcast).
-            if matches!(rig, CalibrationRig::Sun | CalibrationRig::Overcast)
+            // the rigs whose exposure is calibrated on it (sun and overcast,
+            // with and without IBL).
+            if rig.exposure_calibrated()
                 && let Some(error) = entry["grey_card"]["relative_error"].as_f64()
                 && error.abs() > 0.05
             {
@@ -1131,4 +1151,55 @@ mod tests {
         assert_eq!(summary.p95_us, 40);
         assert_eq!(summary.mean_us, 25);
     }
+}
+
+/// Linear-light statistics of the capture pixels inside a screen circle:
+/// mean RGB and its chromaticity, median and 99th-percentile luminance, and
+/// the upper / lower half means (a chrome ball reflects sky above, ground below).
+fn sphere_probe(capture: &[u8], width: u32, height: u32, cx: f32, cy: f32, r: f32) -> Option<serde_json::Value> {
+    let decode = |v: u8| {
+        let c = f64::from(v) / 255.0;
+        if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    };
+    let (mut sum, mut upper, mut lower) = ([0.0f64; 3], [0.0f64; 4], [0.0f64; 4]);
+    let mut lums = Vec::new();
+    let (x0, x1) = ((cx - r).floor().max(0.0) as u32, (cx + r).ceil().min(width as f32 - 1.0) as u32);
+    let (y0, y1) = ((cy - r).floor().max(0.0) as u32, (cy + r).ceil().min(height as f32 - 1.0) as u32);
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+            if dx * dx + dy * dy > r * r {
+                continue;
+            }
+            let i = ((y * width + x) * 4) as usize;
+            let rgb = [decode(capture[i]), decode(capture[i + 1]), decode(capture[i + 2])];
+            for k in 0..3 {
+                sum[k] += rgb[k];
+            }
+            let half = if dy < 0.0 { &mut upper } else { &mut lower };
+            for k in 0..3 {
+                half[k] += rgb[k];
+            }
+            half[3] += 1.0;
+            lums.push(0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]);
+        }
+    }
+    if lums.len() < 16 {
+        return None;
+    }
+    let n = lums.len() as f64;
+    let mean = sum.map(|v| v / n);
+    let total = (mean[0] + mean[1] + mean[2]).max(1e-12);
+    lums.sort_by(|a, b| a.total_cmp(b));
+    let pct = |p: f64| lums[((lums.len() - 1) as f64 * p).round() as usize];
+    let half_mean = |h: [f64; 4]| [0, 1, 2].map(|k| h[k] / h[3].max(1.0));
+    Some(serde_json::json!({
+        "pixels": lums.len(),
+        "mean_linear_rgb": mean,
+        "chromaticity_rg": [mean[0] / total, mean[1] / total],
+        "luminance_median": pct(0.5),
+        "luminance_p99": pct(0.99),
+        "upper_mean_linear_rgb": half_mean(upper),
+        "lower_mean_linear_rgb": half_mean(lower),
+    }))
 }

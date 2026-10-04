@@ -45,6 +45,7 @@ const MAX_REFERENCE_FOG_DENSITY: f64 = 0.006;
 pub mod asset_projection;
 pub mod calibration;
 pub mod deformation;
+pub mod ibl;
 pub mod input_session;
 pub mod live;
 pub mod material_maps;
@@ -65,7 +66,7 @@ pub use deformation::{
 
 pub use render_policy::{
     validate_packet_render_policy, validate_render_policy, AtmospherePolicy, BloomPolicy,
-    DebugPolicy, DitherPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, ResolvedRenderPolicy,
+    DebugPolicy, DitherPolicy, IblPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, ResolvedRenderPolicy,
     SamplerPolicy, ShadowFitPolicy, ShadowPolicy, SkyModel, SkyPolicy, TerrainSurfacePolicy,
     VignettePolicy,
     POLICY_SCALE,
@@ -2563,7 +2564,7 @@ impl BeaconMeshBuffers {
     }
 }
 
-fn procedural_texture(
+pub(crate) fn procedural_texture(
     texture_id: &str,
     source_artifact_id: &str,
     color_space: TextureColorSpace,

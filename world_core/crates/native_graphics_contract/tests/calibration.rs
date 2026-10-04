@@ -68,7 +68,7 @@ fn rigs_are_valid_distinct_policies() {
     .unwrap();
     let lit = |rig: CalibrationRig| {
         let mut body = reference.body.clone();
-        rig.apply(&mut body);
+        rig.apply(&mut body).unwrap();
         body
     };
     for rig in CalibrationRig::ALL {
@@ -81,11 +81,25 @@ fn rigs_are_valid_distinct_policies() {
         assert_eq!(body.lights.len(), 1);
         let LightKind::Directional { direction_xyz } = body.lights[0].kind else { panic!("directional") };
         let elevation = (-direction_xyz[1] / direction_xyz.iter().map(|v| v * v).sum::<f32>().sqrt()).asin().to_degrees();
-        match rig {
+        match rig.lighting() {
             CalibrationRig::Sun | CalibrationRig::SunAlbedoGrey => assert!((elevation - 35.0).abs() < 0.05, "{elevation}"),
             CalibrationRig::Grazing => assert!((elevation - 10.0).abs() < 0.05, "{elevation}"),
             CalibrationRig::Overcast => assert_eq!(body.lights[0].intensity, 0.0, "overcast has no sun"),
+            other => panic!("lighting() returned an IBL rig {other:?}"),
         }
+        let ibl_textures = body.textures.iter().filter(|t| t.texture_id.starts_with("wge-ibl-")).count();
+        assert_eq!(ibl_textures, if rig.ibl() { 2 } else { 0 }, "{rig:?}");
+        assert_eq!(policy.ibl.is_some_and(|i| i.enabled), rig.ibl(), "{rig:?}");
+    }
+    // An IBL rig is its base rig plus the IBL axis, its textures and its exposure.
+    for rig in CalibrationRig::ALL.into_iter().filter(|r| r.ibl()) {
+        let mut with = lit(rig);
+        let without = lit(rig.lighting());
+        with.render_policy.as_mut().unwrap().ibl = None;
+        with.textures.retain(|t| !t.texture_id.starts_with("wge-ibl-"));
+        with.environment.exposure = without.environment.exposure;
+        with.lights[0].light_id = without.lights[0].light_id.clone();
+        assert_eq!(with, without, "{rig:?}");
     }
     // The albedo-grey rig is the sun rig plus the debug axis and nothing else.
     let mut grey = lit(CalibrationRig::SunAlbedoGrey);

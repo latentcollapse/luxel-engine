@@ -257,7 +257,7 @@ fn calibration_rig_seam_changes_only_lighting_and_is_enumerated() {
         let lit = compose_bound_scene_with_view(&mut body(), &scene(), &[asset()], None, Some(rig)).unwrap();
         let mut expected = plain.body.clone();
         expected.packet_id = format!("{}-rig-{}", plain.body.packet_id, rig.name());
-        rig.apply(&mut expected);
+        rig.apply(&mut expected).unwrap();
         assert_eq!(lit.body, expected, "{rig:?} must change only lights, environment, policy and id");
         assert_eq!(CalibrationRig::parse(rig.name()), Some(rig));
         assert!(digests.insert(lit.packet_sha256.clone()), "{rig:?} is not distinct");

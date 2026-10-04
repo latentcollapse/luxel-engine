@@ -31,7 +31,7 @@ use crate::{
     GraphicsScenePacketBody, LightIntent, LightKind, sha256_prefixed,
 };
 use crate::render_policy::{
-    DebugPolicy, MeshSurfacePolicy, RenderPolicy, ShadowFitPolicy, ShadowPolicy, SkyModel,
+    DebugPolicy, IblPolicy, MeshSurfacePolicy, RenderPolicy, ShadowFitPolicy, ShadowPolicy, SkyModel,
     SkyPolicy,
 };
 
@@ -49,10 +49,25 @@ pub enum CalibrationRig {
     /// `Sun` with every albedo forced to 0.5 (render_policy.debug), so
     /// material identity can be judged with colour removed.
     SunAlbedoGrey,
+    /// The four rigs above with N-2 image-based lighting (render_policy.ibl).
+    /// The originals stay as they were, so pre-IBL frames remain reproducible.
+    SunIbl,
+    OvercastIbl,
+    GrazingIbl,
+    SunAlbedoGreyIbl,
 }
 
 impl CalibrationRig {
-    pub const ALL: [Self; 4] = [Self::Sun, Self::Overcast, Self::Grazing, Self::SunAlbedoGrey];
+    pub const ALL: [Self; 8] = [
+        Self::Sun,
+        Self::Overcast,
+        Self::Grazing,
+        Self::SunAlbedoGrey,
+        Self::SunIbl,
+        Self::OvercastIbl,
+        Self::GrazingIbl,
+        Self::SunAlbedoGreyIbl,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -60,7 +75,31 @@ impl CalibrationRig {
             Self::Overcast => "overcast",
             Self::Grazing => "grazing",
             Self::SunAlbedoGrey => "sun-albedo-grey",
+            Self::SunIbl => "sun-ibl",
+            Self::OvercastIbl => "overcast-ibl",
+            Self::GrazingIbl => "grazing-ibl",
+            Self::SunAlbedoGreyIbl => "sun-albedo-grey-ibl",
         }
+    }
+
+    /// The lighting setup without the IBL switch.
+    pub fn lighting(self) -> Self {
+        match self {
+            Self::SunIbl => Self::Sun,
+            Self::OvercastIbl => Self::Overcast,
+            Self::GrazingIbl => Self::Grazing,
+            Self::SunAlbedoGreyIbl => Self::SunAlbedoGrey,
+            other => other,
+        }
+    }
+
+    pub fn ibl(self) -> bool {
+        self.lighting() != self
+    }
+
+    /// Rigs whose fixed exposure is set on the grey card (the ±5% gate).
+    pub fn exposure_calibrated(self) -> bool {
+        matches!(self.lighting(), Self::Sun | Self::Overcast)
     }
 
     pub fn parse(name: &str) -> Option<Self> {
@@ -68,15 +107,20 @@ impl CalibrationRig {
     }
 
     /// Overwrite the body's lights, environment and render policy with this
-    /// rig's constants. Everything else in the body is untouched.
-    pub fn apply(self, body: &mut GraphicsScenePacketBody) {
-        let (direction_xyz, color_rgb, intensity) = match self {
+    /// rig's constants (and, for an IBL rig, the baked IBL textures).
+    /// Everything else in the body is untouched.
+    pub fn apply(self, body: &mut GraphicsScenePacketBody) -> Result<(), GraphicsContractError> {
+        let ibl = self.ibl();
+        let rig = self.lighting();
+        let (direction_xyz, color_rgb, intensity) = match rig {
             // Toward the sun: camera-right (−X, the cameras look +Z) and toward
             // the camera (−Z), 35° up. The light travels the other way.
-            Self::Sun | Self::SunAlbedoGrey => ([0.579_228, -0.573_576, 0.579_228], [1.0, 0.96, 0.90], 3.0),
-            Self::Overcast => ([0.0, -1.0, 0.0], [1.0, 1.0, 1.0], 0.0),
+            Self::Sun | Self::SunAlbedoGrey | Self::SunIbl | Self::SunAlbedoGreyIbl => {
+                ([0.579_228, -0.573_576, 0.579_228], [1.0, 0.96, 0.90], 3.0)
+            }
+            Self::Overcast | Self::OvercastIbl => ([0.0, -1.0, 0.0], [1.0, 1.0, 1.0], 0.0),
             // Toward the sun: behind the row (+Z), 15° to camera-right, 10° up.
-            Self::Grazing => ([0.254_887, -0.173_648, -0.951_251], [1.0, 0.86, 0.70], 3.0),
+            Self::Grazing | Self::GrazingIbl => ([0.254_887, -0.173_648, -0.951_251], [1.0, 0.86, 0.70], 3.0),
         };
         body.lights = vec![LightIntent {
             light_id: format!("calibration-{}", self.name()),
@@ -84,14 +128,14 @@ impl CalibrationRig {
             color_rgb,
             intensity,
         }];
-        body.environment = match self {
-            Self::Overcast => EnvironmentIntent {
+        body.environment = match rig {
+            Self::Overcast | Self::OvercastIbl => EnvironmentIntent {
                 sky_top_rgb: OVERCAST_SKY_RGB,
                 sky_horizon_rgb: OVERCAST_SKY_RGB,
                 ground_rgb: [0.14, 0.14, 0.14],
                 fog_color_rgb: OVERCAST_SKY_RGB,
                 fog_density: 0.0,
-                exposure: OVERCAST_EXPOSURE,
+                exposure: if ibl { OVERCAST_IBL_EXPOSURE } else { OVERCAST_EXPOSURE },
             },
             _ => EnvironmentIntent {
                 sky_top_rgb: [0.16, 0.30, 0.58],
@@ -99,11 +143,11 @@ impl CalibrationRig {
                 ground_rgb: [0.11, 0.12, 0.085],
                 fog_color_rgb: [0.62, 0.66, 0.72],
                 fog_density: 0.0,
-                exposure: SUN_EXPOSURE,
+                exposure: if ibl { SUN_IBL_EXPOSURE } else { SUN_EXPOSURE },
             },
         };
-        let sky = match self {
-            Self::Overcast => SkyPolicy {
+        let sky = match rig {
+            Self::Overcast | Self::OvercastIbl => SkyPolicy {
                 sun_disc_radius_milli_deg: 0,
                 sun_disc_gain_bp: 0,
                 sun_glow_gain_bp: 0,
@@ -126,9 +170,11 @@ impl CalibrationRig {
             mesh_surface: Some(MeshSurfacePolicy { wrap_repeat: true }),
             shadow_fit: Some(ShadowFitPolicy { view_distance_m: CALIBRATION_SHADOW_DISTANCE_M }),
             sky: Some(sky),
-            debug: (self == Self::SunAlbedoGrey).then_some(DebugPolicy { albedo_override_bp: 5000 }),
+            debug: (rig == Self::SunAlbedoGrey).then_some(DebugPolicy { albedo_override_bp: 5000 }),
+            ibl: ibl.then_some(IblPolicy { enabled: true }),
             ..RenderPolicy::default()
         });
+        crate::ibl::apply_ibl(body)
     }
 }
 
@@ -140,6 +186,12 @@ impl CalibrationRig {
 /// same sun from behind, and a backlit card SHOULD read dark.
 pub const SUN_EXPOSURE: f32 = 1.0;
 pub const CALIBRATION_SHADOW_DISTANCE_M: i32 = 22;
+/// IBL rigs: same rule, set on the card under IBL. Normalised sky light is
+/// brighter than the historical 0.52 constant: at the non-IBL exposures the
+/// card measured sRGB 159 (sun, 1.0 → 0.231 linear) and 174 (overcast,
+/// 2.57 → 0.112 before exposure), so 0.78 and 1.60.
+pub const SUN_IBL_EXPOSURE: f32 = 0.78;
+pub const OVERCAST_IBL_EXPOSURE: f32 = 1.60;
 pub const OVERCAST_EXPOSURE: f32 = 2.57;
 pub const OVERCAST_SKY_RGB: [f32; 3] = [0.72, 0.73, 0.75];
 
@@ -513,3 +565,28 @@ pub fn grey_card_local_center(package: &RenderAssetPackage) -> Result<[f32; 3], 
 /// renderer's ACES fit (`LavaAdapter._tone_map`) and the sRGB transfer:
 /// f(0.18) = 0.2669 → sRGB 0.5534 → 141.1 of 255.
 pub const GREY_CARD_TARGET_SRGB8: f32 = 141.1;
+
+/// A sphere's centre and radius in the local frame, from its conditioned mesh.
+pub fn local_sphere(package: &RenderAssetPackage, mesh_id: &str) -> Result<([f32; 3], f32), GraphicsContractError> {
+    let (lo, hi) = mesh_bounds(package, mesh_id)?;
+    Ok(([0, 1, 2].map(|a| (lo[a] + hi[a]) * 0.5), (hi[0] - lo[0]) * 0.5))
+}
+
+/// Screen-space centre and radius (pixels) of a local-frame sphere.
+pub fn project_local_sphere(
+    camera: &GraphicsCamera,
+    placement: CalibrationPlacement,
+    center: [f32; 3],
+    radius: f32,
+) -> Option<(f32, f32, f32)> {
+    let CameraProjection::Perspective { fov_y_degrees } = camera.projection else {
+        return None;
+    };
+    let (px, py) = project_local_point(camera, placement, center)?;
+    let p = placement.point(center);
+    let rel = [0, 1, 2].map(|a| p[a] - camera.position_xyz_m[a]);
+    let depth = rel[0] * camera.forward_xyz[0] + rel[1] * camera.forward_xyz[1] + rel[2] * camera.forward_xyz[2];
+    let tan_y = (fov_y_degrees.to_radians() * 0.5).tan();
+    let r_px = radius / (depth * tan_y) * 0.5 * camera.height_px as f32;
+    Some((px as f32 + 0.5, py as f32 + 0.5, r_px))
+}

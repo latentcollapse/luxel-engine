@@ -1,6 +1,8 @@
 # WGE CONVERGE-1 Contracts
 
-Status: **closed recipes, not implemented**, 2026-10-03
+Status: **CONVERGE-1 CLOSED, 2026-10-04.** N-1, CALIBRATION-1 and N-2 implemented,
+human acceptance met for all three; measured shortfalls and carried items in
+"CONVERGE-1 closeout" at the end. (Recipes written 2026-10-03.)
 Source: `WGE_GRAPHICS_CONVERGENCE_AUDIT.md` §H step 10, revised by the CONVERGE-0 run
 (`artifacts/parity/CONVERGE0_SPIRAL_LEDGER.md`).
 
@@ -146,6 +148,25 @@ was measured. Control: converge0 = 1.21 (fails, as it should).
 
 ## 2. N-2 — Prefiltered image-based lighting
 
+> **Status: IMPLEMENTED (2026-10-04), human acceptance open.** `render_policy.ibl`
+> and the `*-ibl` calibration rigs. Measured in CALIBRATION-1 (run3, 88 frames;
+> pre-IBL → IBL, sun rig): chrome ball reflects sky over ground (upper/lower
+> luminance 1.63, upper blue/red 1.62 vs lower 1.05): met. Metal vs rough metal
+> chromaticity Δ 0.0154 → **0.0102** (target ≤ 0.01): missed by 0.0002. Wet vs
+> dry: median luminance Δ 57% → 46% (target ≤ 25%) and specular lobe
+> (p99 − median) 1.59x → 1.80x (target ≥ 2x): NOT met — and the luminance
+> target contradicts §3's own wet recipe (albedo x 0.6 makes the body ~40%
+> darker by construction). Grey card under IBL: −0.1% (sun), −0.3% / −0.1%
+> (overcast). With IBL absent, frames are byte-identical to HEAD + the
+> transpose fix alone (12/12; see "Renderer defects" below). Sheets:
+> `artifacts/calibration/run3/sheets/{sun,sun-ibl,overcast,overcast-ibl,...}.png`.
+>
+> **Human acceptance (2026-10-04): met.** Metal: "That looks like metal to me.
+> Highest quality representation? Not really, but it does, in fact, look like
+> metal." Blind wet vs dry (sun-ibl row): identified correctly; wet close-up:
+> "very wet stone. Beginning of Nioh 1 lookin stone." Chrome: "mostly polished
+> metal".
+
 ### Why it is next
 
 Metals and wet surfaces cannot read correctly without something to reflect.
@@ -181,6 +202,80 @@ gradient at different brightness.
 - **Acceptance (human, mandatory):** blind identification of wet vs dry stone;
   "the metal looks like metal".
 - **Non-goals:** local reflection probes, SSR, planar reflections, GI.
+
+### Implementation (N-2)
+
+- **Bake (`src/ibl.rs`).** From the packet's own sky: gradient or N-1 analytic,
+  plus the sky pass's sun glow and the atmosphere's sun lobe, ground below the
+  horizon; WITHOUT the sun disc (the key light is lit directly). Leaving the
+  glow out was tried first and was wrong: the analytic sky's near-sun luminance
+  spike carries the authored blue hue (2.88 in blue at 20° from the sun), and
+  the drawn sky reads white-warm there only because the glow is added on top.
+  Irradiance/π by SH9 (4096 Fibonacci samples); GGX prefilter (split-sum,
+  N = V = R, 128 Hammersley samples) at perceptual roughness k/5; split-sum
+  BRDF table (Karis, k = α/2, 256 samples).
+- **Format.** Lava samples with implicit LOD only, so the roughness levels are
+  not a mip chain: one single-level 298 x 130 RGBA8 atlas of octahedral tiles
+  (128² … 4², then 32² irradiance) with fold-mirrored gutters, stored
+  sRGB(radiance / 8), and a 64² table (R = A, G = B). The shader blends two
+  adjacent roughness tiles itself.
+- **Binding.** Ordinary packet textures with reserved ids; packet validation
+  re-bakes and requires an exact match, refuses them when the axis is off, and
+  `apply_ibl` is called by every producer after lights, environment and policy
+  are final (the calibration rigs). Every surface descriptor set now has 16
+  bindings (IBL at 14/15; 1x1 stand-ins when off) so pipelines share a layout.
+- **Shader.** `_material_response` IBL branch: diffuse (1 − F)(1 − metal)·albedo
+  ·irradiance/π, specular prefiltered·(F0·A + B) with roughness-aware Schlick F,
+  clear coat from the prefiltered tile at coat roughness, all × AO. Placed
+  before the historical expression, which is textually unchanged.
+- **Calibration rigs.** `sun-ibl`, `overcast-ibl`, `grazing-ibl`,
+  `sun-albedo-grey-ibl`; the originals still reproduce pre-IBL frames. Exposure
+  set on the grey card again: normalised sky light is brighter than the 0.52
+  constant (sun 0.78, overcast 1.60). `render-calibration` now records sphere
+  probes (mean linear RGB, chromaticity, median / p99 luminance, upper / lower
+  halves); `tools/ibl_acceptance.py` computes the measured criteria.
+- **Tests (`tests/ibl.rs`, Julia render_policy).** Bake bit-identical across
+  runs; Rust sky equals the Julia shader function within 2e-4; white furnace:
+  white rough dielectric sphere = albedo ±3%; split-sum energy (A + B ≤ 1;
+  F0·A + B ≤ F0 + 0.01 near normal incidence); stale / tampered / smuggled IBL
+  textures refused; octahedral and atlas layout parity across languages.
+
+### Correction to this contract (N-2)
+
+"Metal sphere reflectance never exceeds F0 × environment" is false at grazing
+incidence, where Fresnel rises toward 1 for every material. The tests assert
+what holds: no energy creation (A + B ≤ 1 at F0 = 1) and reflectance ≈ F0 near
+normal incidence.
+
+### Renderer defects found on the way (fixed at source)
+
+1. **Every packet texture reached the GPU transposed.** The decoder builds a
+   (height, width) Julia matrix, which is column-major; the upload copied its
+   raw memory into a tightly packed Vulkan image, which reads x-fastest. Square
+   textures rendered mirrored across the diagonal (planks and bark furrows at
+   90°; normal maps lit across swapped tangent axes); the non-square IBL atlas
+   came out as zebra stripes, which is how it was found. Now `permutedims`
+   before upload; regression test on a 3 x 2 payload. This changes every
+   textured frame, so the byte-identity chain was re-established: frames from
+   HEAD + the fix alone (git worktree) vs this change with IBL absent are
+   byte-identical for null, `full`, converge0 and converge1 (12/12), and the
+   fix-only frames differ from the old captures in all 12 (expected). The
+   CALIBRATION-1 review (run2) was made on transposed textures: the bark the
+   reviewer flagged had its furrows horizontal.
+2. **Surface sampler cache kept the first material's mip range** (the latent
+   N-4 finding): now keyed by (mode, max LOD).
+3. **`_material_response` stopped compiling on the CPU** once it sampled IBL
+   textures (the CPU clearcoat test segfaulted on the missing GPU intrinsic).
+   The IBL source is now statically dispatched (`NoIbl` default, `TextureIbl`
+   in shaders, `ConstantIbl` for tests), and the real shader arithmetic is
+   tested on the CPU. Re-proven after the change: 12/12 parity frames still
+   equal fix-only, 9/9 IBL calibration frames reproduce run3.
+
+**Recorded, not changed:** the supervisor's authorized-projection check reads
+`WGE_PARITY_RENDER_POLICY` / `WGE_PARITY_CONTENT` from the process
+environment, so a leftover export makes an unrelated `render-calibration`
+fail authorization (seen once in a test script). Authorization should take
+the parity arm as an explicit input, as lowering already does.
 
 ---
 
@@ -451,3 +546,46 @@ Findings:
 - The meadow reads olive/tan at distance; the base scan is litter-heavy. A
   greener base set is a content choice, not machinery.
 - Tree crowns and props are untouched placeholders (CONVERGE-2).
+
+---
+
+## CONVERGE-1 closeout (2026-10-04)
+
+Commits: `d217e33` N-1 · `5be9da5` CALIBRATION-1 · `86b279a` texture-transpose fix ·
+N-2 (next commit).
+
+| Contract | Human acceptance | Measured acceptance |
+|---|---|---|
+| N-1 sky + atmosphere | Met: "it's reading as distance" ("foggy zone, not milky"); 45 bp preferred over 70 | Sun-side horizon 2.72x (≥ 1.15x) met; ridge/foreground contrast 0.65 (≤ 0.40) NOT met — the 480 m world is too small for the target without milking the near field |
+| CALIBRATION-1 | Met: materials distinct; wet vs dry identified | Zero findings; grey card ±5% met (all calibrated rigs); 34 MB packet |
+| N-2 IBL | Met: metal reads as metal; blind wet/dry correct; chrome reads as polished metal | Chrome sky/ground met; metal chromaticity 0.0102 (≤ 0.01) missed by 0.0002; wet/dry luminance 46% (≤ 25%) and lobe 1.80x (≥ 2x) NOT met — the luminance target contradicts §3's wet recipe |
+
+Identity discipline held throughout: every new axis is absent-by-default and
+byte-identical when absent. The one deliberate break is the transpose fix,
+whose renders are the new references (`artifacts/parity/ab-*-tfix`), and N-2
+with IBL absent reproduces them exactly (12/12).
+
+**Defects found and fixed in CONVERGE-1** (beyond the contracts): textures
+uploaded transposed (since the first textured packet); imported PBR materials
+could not render at all (`texture_ids`); vertical sun failed shadow basis;
+alpha overshoot at grazing; sampler cache kept the first material's mip range;
+`_material_response` lost CPU testability; serde accepted stray fields on unit
+variants.
+
+**Carried into CONVERGE-2** (from reviews and findings):
+
+1. Material varieties: several scans per family plus per-instance tint, scale,
+   rotation and wear / wetness blends ("there needs to be a way to make
+   different varieties of all of these").
+2. The hero prop ("the odd fire-hydrant shrine") and the tree balls: imported
+   kit + alpha foliage (audit N-6), as planned.
+3. Bark depth: parallax / displacement for deep relief; recheck bark now that
+   textures upload the right way round.
+4. Channel semantics in render conditioning: metallic (B), `normalTexture.scale`,
+   `occlusionTexture.strength`.
+5. Authorization should take the parity arm as an explicit input, not read it
+   from the process environment.
+6. A larger world (km-scale backdrop) for aerial perspective that reads as
+   distance without fogging the near field; and restate N-2's wet/dry target
+   against the wet recipe it measures.
+

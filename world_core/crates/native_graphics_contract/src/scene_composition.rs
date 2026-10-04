@@ -165,7 +165,7 @@ pub fn compose_bound_scene_with_view(
     }
     if let Some(rig) = rig {
         body.packet_id = format!("{}-rig-{}", body.packet_id, rig.name());
-        rig.apply(&mut body);
+        rig.apply(&mut body)?;
     }
     seal_scene_packet(body)
 }

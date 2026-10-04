@@ -316,6 +316,12 @@ struct AtmospherePolicy
     sun_scatter_gain_bp::Int32
 end
 
+# Prefiltered image-based lighting (N-2). Absent or disabled is the historical
+# ambient; enabled requires the Rust-baked textures in the packet.
+struct IblPolicy
+    enabled::Bool
+end
+
 # Diagnostic albedo override (CALIBRATION-1). Absence renders authored albedo.
 struct DebugPolicy
     albedo_override_bp::Int32
@@ -334,6 +340,7 @@ struct RenderPolicy
     sky::Union{Nothing,SkyPolicy}
     atmosphere::Union{Nothing,AtmospherePolicy}
     debug::Union{Nothing,DebugPolicy}
+    ibl::Union{Nothing,IblPolicy}
 end
 
 RenderPolicy() = RenderPolicy(
@@ -345,6 +352,7 @@ RenderPolicy() = RenderPolicy(
     SamplerPolicy(),
     ShadowPolicy(),
     MeshSurfacePolicy(),
+    nothing,
     nothing,
     nothing,
     nothing,
@@ -365,7 +373,7 @@ RenderPolicy(
     shadow_fit::Union{Nothing,ShadowFitPolicy},
     sky::Union{Nothing,SkyPolicy},
 ) = RenderPolicy(
-    grade, bloom, vignette, dither, terrain_surface, sampler, shadow, mesh_surface, shadow_fit, sky, nothing, nothing,
+    grade, bloom, vignette, dither, terrain_surface, sampler, shadow, mesh_surface, shadow_fit, sky, nothing, nothing, nothing,
 )
 
 # The seven-axis form predates CONVERGE-0; the three newer axes default to
@@ -391,6 +399,7 @@ RenderPolicy(
     nothing,
     nothing,
     nothing,
+    nothing,
 )
 
 const RENDER_POLICY_KEYS = (
@@ -406,6 +415,7 @@ const RENDER_POLICY_KEYS = (
     "sky",
     "atmosphere",
     "debug",
+    "ibl",
 )
 
 abstract type OverlayPacket end
@@ -782,6 +792,13 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     else
         nothing
     end
+    ibl = if haskey(value, "ibl")
+        i = _object(value["ibl"], "render_policy.ibl")
+        _exact_keys(i, ("enabled",), "render_policy.ibl")
+        IblPolicy(_boolean(i["enabled"], "render_policy.ibl.enabled"))
+    else
+        nothing
+    end
     atmosphere !== nothing && sky === nothing && throw(ProtocolError(
         "malformed_packet",
         "render_policy.atmosphere requires the view-direction sky (render_policy.sky)",
@@ -799,6 +816,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
         sky,
         atmosphere,
         debug,
+        ibl,
     )
 end
 

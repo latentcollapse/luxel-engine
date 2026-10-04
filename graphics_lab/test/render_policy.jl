@@ -812,11 +812,37 @@ end
     refuses(Dict("debug" => Dict("albedo_override_bp" => -1)))
     refuses(Dict("debug" => Dict("albedo_override_bp" => 5000, "normals" => true)))
     # Absent: zeros, and the override is the identity (packets keep their bytes).
-    @test LavaAdapter._debug_parameters(WGEGraphics.RenderPolicy()) == N1_ZERO
+    @test LavaAdapter._surface_options(WGEGraphics.RenderPolicy()) == N1_ZERO
     color = Vec4f(0.3f0, 0.6f0, 0.1f0, 0.8f0)
     @test LavaAdapter._albedo_override(color, N1_ZERO) === color
-    forced = LavaAdapter._albedo_override(color, LavaAdapter._debug_parameters(parsed))
+    forced = LavaAdapter._albedo_override(color, LavaAdapter._surface_options(parsed))
     @test forced == Vec4f(0.5f0, 0.5f0, 0.5f0, 0.8f0)  # alpha is kept
+end
+
+@testset "N-2 IBL axis, layout and octahedral parity" begin
+    on = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("ibl" => Dict("enabled" => true))))
+    @test on.ibl.enabled
+    @test WGEGraphics.RenderPolicy().ibl === nothing
+    @test LavaAdapter._surface_options(on) == Vec4f(0.0f0, 0.0f0, 1.0f0, 0.0f0)
+    off = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("ibl" => Dict("enabled" => false))))
+    @test LavaAdapter._surface_options(off) == N1_ZERO
+    refuses(overrides) = @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(N1_POLICY_JSON(overrides))
+    refuses(Dict("ibl" => Dict("enabled" => 1)))
+    refuses(Dict("ibl" => Dict("enabled" => true, "probes" => 4)))
+    # Atlas layout mirrors ibl::atlas_layout(): tiles of 128..4 then 32, +2 gutter each.
+    origins = cumsum([0; [128, 64, 32, 16, 8, 4, 32] .+ 2])
+    for level in 0:5
+        @test LavaAdapter._ibl_level_origin(Int32(level)) == Float32(origins[level + 1])
+        @test LavaAdapter._ibl_level_size(Int32(level)) == Float32(128 >> level)
+    end
+    @test LavaAdapter.IBL_IRRADIANCE_ORIGIN == Float32(origins[7])
+    @test LavaAdapter.IBL_ATLAS_WIDTH == Float32(origins[8])
+    @test LavaAdapter.IBL_ATLAS_HEIGHT == 130.0f0
+    # Octahedral encode agrees with Rust's (same formula, hand-checked points).
+    @test LavaAdapter._octahedral_uv(Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0)) == Vec2f(0.5f0, 0.5f0)
+    @test LavaAdapter._octahedral_uv(Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)) == Vec2f(1.0f0, 0.5f0)
+    @test LavaAdapter._octahedral_uv(Vec4f(0.0f0, -1.0f0, 0.0f0, 0.0f0)) == Vec2f(1.0f0, 1.0f0)
+    @test LavaAdapter._octahedral_uv(Vec4f(0.0f0, 0.0f0, -1.0f0, 0.0f0)) == Vec2f(0.5f0, 0.0f0)
 end
 
 @testset "texture upload order is row-major (transpose regression)" begin
@@ -834,4 +860,24 @@ end
         x, y = (index - 1) % width, (index - 1) ÷ width
         @test round(Int, texel[1] * 255) == 10x && round(Int, texel[2] * 255) == 10y
     end
+end
+
+@testset "N-2 IBL arithmetic in the real shader function (CPU)" begin
+    # Light off, occlusion 1: the result is the IBL term alone.
+    respond(base, metallic, roughness, source; ibl=1.0f0) = LavaAdapter._material_response(
+        Vec4f(base, base, base, 1.0f0), Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0), Vec4f(0.0f0, -1.0f0, 0.0f0, 0.0f0),
+        Vec4f(1.0f0, 1.0f0, 1.0f0, 1.0f0), 0.0f0, N1_TOP, N1_HORIZON, N1_GROUND, metallic, roughness, 0.0f0, 0.5f0,
+        1.0f0, Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0), 1.0f0, 1.0f0, 0.0f0, N1_ZERO, N1_ZERO, N1_ZERO, ibl, source,
+    )
+    white = Vec4f(1.0f0, 1.0f0, 1.0f0, 1.0f0)
+    # Head-on (N·V = 1), so F = F0: a white dielectric returns (1 − 0.04)·E + (0.04 A + B)·L.
+    a, b = 0.6f0, 0.02f0
+    dielectric = respond(1.0f0, 0.0f0, 1.0f0, LavaAdapter.ConstantIbl(white, white, Vec2f(a, b)))
+    @test dielectric[1] ≈ (1.0f0 - 0.04f0) + (0.04f0 * a + b) atol = 1.0f-5
+    # A white metal has no diffuse term: it reflects (F0·A + B)·L with F0 = 1.
+    metal = respond(1.0f0, 1.0f0, 0.2f0, LavaAdapter.ConstantIbl(white, white, Vec2f(0.95f0, 0.01f0)))
+    @test metal[1] ≈ 0.96f0 atol = 1.0f-5
+    # With the flag off the IBL source is ignored: the historical path.
+    @test respond(0.5f0, 0.0f0, 0.6f0, LavaAdapter.ConstantIbl(white, white, Vec2f(a, b)); ibl=0.0f0) ==
+          respond(0.5f0, 0.0f0, 0.6f0, LavaAdapter.NoIbl(); ibl=0.0f0)
 end

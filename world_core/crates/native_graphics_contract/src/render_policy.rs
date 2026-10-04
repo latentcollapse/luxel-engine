@@ -377,6 +377,20 @@ pub struct AtmospherePolicy {
     pub sun_scatter_gain_bp: i32,
 }
 
+/// Prefiltered image-based lighting (N-2, `ibl.rs`).
+///
+/// ENABLED replaces the historical ambient constants (`0.52` diffuse and
+/// `0.08 + 0.16(1 − r)` specular, sampled from the sharp sky gradient
+/// whatever the roughness) with irradiance and GGX-prefiltered radiance baked
+/// from this packet's sky, and the split-sum BRDF table. The baked textures
+/// travel in the packet and validation re-bakes them. ABSENT or disabled is
+/// the historical path, byte-identical.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct IblPolicy {
+    pub enabled: bool,
+}
+
 /// Diagnostic overrides for calibration views (CALIBRATION-1).
 ///
 /// PRESENT forces the albedo of every lit surface (terrain, layers and meshes)
@@ -420,6 +434,8 @@ pub struct RenderPolicy {
     pub atmosphere: Option<AtmospherePolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debug: Option<DebugPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ibl: Option<IblPolicy>,
 }
 
 impl RenderPolicy {
@@ -440,6 +456,7 @@ impl RenderPolicy {
             sky: self.sky,
             atmosphere: self.atmosphere,
             debug: self.debug,
+            ibl: self.ibl,
         }
     }
 }
@@ -464,6 +481,7 @@ pub struct ResolvedRenderPolicy {
     pub sky: Option<SkyPolicy>,
     pub atmosphere: Option<AtmospherePolicy>,
     pub debug: Option<DebugPolicy>,
+    pub ibl: Option<IblPolicy>,
 }
 
 impl Default for ResolvedRenderPolicy {
@@ -607,6 +625,9 @@ pub fn validate_render_policy(policy: &RenderPolicy) -> Result<(), GraphicsContr
 pub fn validate_packet_render_policy(
     body: &GraphicsScenePacketBody,
 ) -> Result<(), GraphicsContractError> {
+    // IBL textures must be exactly the bake of this packet's environment, and
+    // absent unless the axis is enabled (checked with or without a policy).
+    crate::ibl::validate_packet_ibl(body)?;
     if let Some(policy) = &body.render_policy {
         validate_render_policy(policy)?;
         // Macro variation samples the layer set's macro noise texture; on a

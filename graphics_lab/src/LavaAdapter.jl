@@ -210,6 +210,17 @@ struct TerrainLayerResources
     uniforms::NTuple{7,Vec4f}
 end
 
+"""N-2 IBL textures for one packet: the baked environment atlas and BRDF table
+(1x1 stand-ins when the packet has no IBL, so every material descriptor set has
+the same layout), sampled with clamp and no mips."""
+struct IblResources
+    cache_key::String
+    environment::Lava.LavaTexture2D
+    brdf_lut::Lava.LavaTexture2D
+    placeholder::Lava.LavaTexture2D
+    sampler::Lava.LavaSampler
+end
+
 mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,TXP,DP,TSP,MSP,RP}
     context::C
     queue::Q
@@ -236,7 +247,8 @@ mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,TXP,DP,TSP,MSP,RP}
     texture_resources::Union{Nothing,TextureProbeResources}
     material_texture_resources::Dict{Tuple{String,String,SamplerSpec},MaterialTextureResources}
     material_textures::Dict{Tuple{String,String},MaterialTextures}
-    surface_samplers::Dict{SamplerSpec,Lava.LavaSampler}
+    surface_samplers::Dict{Tuple{SamplerSpec,UInt32},Lava.LavaSampler}
+    ibl_resources::Union{Nothing,IblResources}
     upload_bytes::UInt64
     draw_calls::UInt64
     readback_bytes::UInt64
@@ -498,12 +510,20 @@ function _sky_parameters(
     return Vec4f(turbidity, zenith_luminance / _perez(turbidity, 1.0f0, theta_s, cos(theta_s)), 0.0f0, 0.0f0)
 end
 
-"""Lower `render_policy.debug` into `(enabled, linear albedo, 0, 0)`; absent is zeros."""
-function _debug_parameters(policy::WGEGraphics.RenderPolicy)::Vec4f
+"""Per-surface options in vertex-output slot 20: `(albedo override enabled,
+override albedo, IBL enabled, 0)` from `render_policy.debug` and
+`render_policy.ibl`. Absent axes are zeros: the historical paths."""
+function _surface_options(policy::WGEGraphics.RenderPolicy)::Vec4f
     debug = policy.debug
-    debug === nothing && return Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
-    return Vec4f(1.0f0, Float32(debug.albedo_override_bp) / POLICY_SCALE_F32, 0.0f0, 0.0f0)
+    return Vec4f(
+        debug === nothing ? 0.0f0 : 1.0f0,
+        debug === nothing ? 0.0f0 : Float32(debug.albedo_override_bp) / POLICY_SCALE_F32,
+        _ibl_enabled(policy) ? 1.0f0 : 0.0f0,
+        0.0f0,
+    )
 end
+
+_ibl_enabled(policy::WGEGraphics.RenderPolicy) = policy.ibl !== nothing && policy.ibl.enabled
 
 """Lower `render_policy.atmosphere` into `(enabled, k [1/m], σ₀ [1/m], sun gain)`.
 Absent is all zeros, which the shaders read as the historical linear fog."""
@@ -784,6 +804,87 @@ function _apply_aerial_perspective(
     )
 end
 
+# N-2 image-based lighting (render_policy.ibl). The environment atlas and BRDF
+# table are baked in Rust (`world_core/.../src/ibl.rs`), which documents the
+# layout these constants mirror: six GGX-prefiltered octahedral tiles (perceptual
+# roughness k/5, 128² down to 4²) and a 32² irradiance tile, each with a one-texel
+# gutter, in one single-level 298 x 130 texture. Lava samples with implicit LOD
+# only, so roughness levels are tiles blended here, not a mip chain.
+const IBL_RADIANCE_SCALE = 8.0f0
+const IBL_ATLAS_WIDTH = 298.0f0
+const IBL_ATLAS_HEIGHT = 130.0f0
+const IBL_IRRADIANCE_ORIGIN = 264.0f0
+const IBL_ENVIRONMENT_BINDING = UInt32(14)
+const IBL_LUT_BINDING = UInt32(15)
+
+"""Octahedral encode (+Y up) of a unit direction to [0, 1]²; mirrors `ibl::octahedral_encode`."""
+@inline function _octahedral_uv(d::Vec4f)::Vec2f
+    s = abs(d[1]) + abs(d[2]) + abs(d[3])
+    x = d[1] / s
+    z = d[3] / s
+    if d[2] < 0.0f0
+        sign_x = x >= 0.0f0 ? 1.0f0 : -1.0f0
+        sign_z = z >= 0.0f0 ? 1.0f0 : -1.0f0
+        folded_x = (1.0f0 - abs(z)) * sign_x
+        z = (1.0f0 - abs(x)) * sign_z
+        x = folded_x
+    end
+    return Vec2f(x * 0.5f0 + 0.5f0, z * 0.5f0 + 0.5f0)
+end
+
+@inline function _ibl_tile(origin::Float32, size::Float32, uv::Vec2f)::Vec4f
+    sampled = _sample_texture(
+        IBL_ENVIRONMENT_BINDING,
+        Vec2f((origin + 1.0f0 + uv[1] * size) / IBL_ATLAS_WIDTH, (1.0f0 + uv[2] * size) / IBL_ATLAS_HEIGHT),
+    )
+    return Vec4f(sampled[1] * IBL_RADIANCE_SCALE, sampled[2] * IBL_RADIANCE_SCALE, sampled[3] * IBL_RADIANCE_SCALE, 1.0f0)
+end
+
+@inline _ibl_level_origin(level::Int32)::Float32 =
+    level == Int32(0) ? 0.0f0 : level == Int32(1) ? 130.0f0 : level == Int32(2) ? 196.0f0 :
+    level == Int32(3) ? 230.0f0 : level == Int32(4) ? 248.0f0 : 258.0f0
+
+@inline _ibl_level_size(level::Int32)::Float32 = Float32(Int32(128) >> level)
+
+# Where `_material_response` gets IBL values from. Static dispatch keeps the
+# texture intrinsics out of every compiled function that does not ask for
+# them, so `_material_response` stays callable on the CPU (tests) with the
+# default `NoIbl`, and tests can drive the real IBL arithmetic with
+# `ConstantIbl`. Shaders pass `TextureIbl()`.
+struct NoIbl end
+struct TextureIbl end
+struct ConstantIbl
+    irradiance::Vec4f
+    prefiltered::Vec4f
+    brdf::Vec2f
+end
+@inline _ibl_irradiance(::NoIbl, ::Vec4f)::Vec4f = Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
+@inline _ibl_prefiltered(::NoIbl, ::Vec4f, ::Float32)::Vec4f = Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
+@inline _ibl_brdf(::NoIbl, ::Float32, ::Float32)::Vec2f = Vec2f(0.0f0, 0.0f0)
+@inline _ibl_irradiance(source::ConstantIbl, ::Vec4f)::Vec4f = source.irradiance
+@inline _ibl_prefiltered(source::ConstantIbl, ::Vec4f, ::Float32)::Vec4f = source.prefiltered
+@inline _ibl_brdf(source::ConstantIbl, ::Float32, ::Float32)::Vec2f = source.brdf
+
+"""GGX-prefiltered radiance along `reflection` at perceptual `roughness`: the
+two bracketing tiles, blended linearly in roughness."""
+@inline function _ibl_prefiltered(::TextureIbl, reflection::Vec4f, roughness::Float32)::Vec4f
+    uv = _octahedral_uv(_normalize_vector(reflection))
+    level = clamp(roughness, 0.0f0, 1.0f0) * 5.0f0
+    lower = min(Int32(floor(level)), Int32(4))
+    t = level - Float32(lower)
+    a = _ibl_tile(_ibl_level_origin(lower), _ibl_level_size(lower), uv)
+    b = _ibl_tile(_ibl_level_origin(lower + Int32(1)), _ibl_level_size(lower + Int32(1)), uv)
+    return _mix4(a, b, t)
+end
+
+@inline _ibl_irradiance(::TextureIbl, normal::Vec4f)::Vec4f = _ibl_tile(IBL_IRRADIANCE_ORIGIN, 32.0f0, _octahedral_uv(normal))
+
+"""Split-sum (A, B) for (N·V, roughness) from the baked 64² table."""
+@inline function _ibl_brdf(::TextureIbl, normal_view::Float32, roughness::Float32)::Vec2f
+    sampled = _sample_texture(IBL_LUT_BINDING, Vec2f(clamp(normal_view, 0.0f0, 1.0f0), clamp(roughness, 0.0f0, 1.0f0)))
+    return Vec2f(sampled[1], sampled[2])
+end
+
 """Diagnostic albedo override (render_policy.debug): `debug = (enabled, albedo)`.
 Disabled returns `color` unchanged, so packets without the axis keep their bytes."""
 @inline function _albedo_override(color::Vec4f, debug::Vec4f)::Vec4f
@@ -879,6 +980,8 @@ function _material_response(
     emissive_factor::Vec4f,
     emissive_sample::Vec4f,
     sky::Vec4f,
+    ibl::Float32=0.0f0,
+    ibl_source=NoIbl(),
 )::Vec4f
     surface_normal = _normalize_vector(normal)
     light_vector = _normalize_vector(
@@ -980,6 +1083,38 @@ function _material_response(
     emissive_red = emissive_factor[1] * emissive_sample[1]
     emissive_green = emissive_factor[2] * emissive_sample[2]
     emissive_blue = emissive_factor[3] * emissive_sample[3]
+    if ibl > 0.5f0
+        # N-2: diffuse (1 − F)(1 − metal)·albedo·irradiance/π and specular
+        # prefiltered·(F0·A + B), F the roughness-aware Schlick term at N·V
+        # (Karis 2013 / Fdez-Agüera 2019), all scaled by occlusion. Replaces
+        # the un-normalised 0.52 and 0.08 + 0.16(1 − r) constants.
+        nv = max(normal_view, 1.0f-4)
+        grazing = (1.0f0 - nv) * (1.0f0 - nv)
+        grazing = grazing * grazing * (1.0f0 - nv)
+        smooth = 1.0f0 - surface_roughness
+        fr_red = f0_red + (max(smooth, f0_red) - f0_red) * grazing
+        fr_green = f0_green + (max(smooth, f0_green) - f0_green) * grazing
+        fr_blue = f0_blue + (max(smooth, f0_blue) - f0_blue) * grazing
+        irradiance = _ibl_irradiance(ibl_source, surface_normal)
+        specular_radiance = _ibl_prefiltered(ibl_source, reflection, surface_roughness)
+        brdf = _ibl_brdf(ibl_source, nv, surface_roughness)
+        coat_radiance = _ibl_prefiltered(ibl_source, reflection, coat_roughness)
+        coat_scale = coat * coat_fresnel * occlusion
+        diffuse_weight = (1.0f0 - metalness) * occlusion
+        ibl_red = base_color[1] * (1.0f0 - fr_red) * diffuse_weight * irradiance[1] +
+            specular_radiance[1] * (f0_red * brdf[1] + brdf[2]) * occlusion + coat_scale * coat_radiance[1]
+        ibl_green = base_color[2] * (1.0f0 - fr_green) * diffuse_weight * irradiance[2] +
+            specular_radiance[2] * (f0_green * brdf[1] + brdf[2]) * occlusion + coat_scale * coat_radiance[2]
+        ibl_blue = base_color[3] * (1.0f0 - fr_blue) * diffuse_weight * irradiance[3] +
+            specular_radiance[3] * (f0_blue * brdf[1] + brdf[2]) * occlusion + coat_scale * coat_radiance[3]
+        lit_red = (base_color[1] * diffuse_scale + fresnel_red * specular_scale) * light_color[1] * direct_scale +
+            coat_specular_scale * light_color[1] * direct_scale + ibl_red + emissive_red
+        lit_green = (base_color[2] * diffuse_scale + fresnel_green * specular_scale) * light_color[2] * direct_scale +
+            coat_specular_scale * light_color[2] * direct_scale + ibl_green + emissive_green
+        lit_blue = (base_color[3] * diffuse_scale + fresnel_blue * specular_scale) * light_color[3] * direct_scale +
+            coat_specular_scale * light_color[3] * direct_scale + ibl_blue + emissive_blue
+        return Vec4f(max(lit_red, 0.0f0), max(lit_green, 0.0f0), max(lit_blue, 0.0f0), base_color[4])
+    end
     red = (
         (base_color[1] * diffuse_scale + fresnel_red * specular_scale) *
                 light_color[1] * direct_scale +
@@ -1270,7 +1405,7 @@ and the layered terrain pipelines so their geometry cannot drift apart."""
     uv_repeat::Float32,
     sky_parameters::Vec4f,
     atmosphere_parameters::Vec4f,
-    debug_parameters::Vec4f,
+    surface_options::Vec4f,
 )
     vertex_id = Lava.vertex_index() - Int32(1)
     cells_per_axis = resolution - Int32(1)
@@ -1345,7 +1480,7 @@ and the layered terrain pipelines so their geometry cannot drift apart."""
     Lava.gfx_output(17, shadow)
     Lava.gfx_output(18, sky_parameters)
     Lava.gfx_output(19, atmosphere_parameters)
-    Lava.gfx_output(20, debug_parameters)
+    Lava.gfx_output(20, surface_options)
     return nothing
 end
 
@@ -1390,9 +1525,9 @@ function _terrain_vertex(
     uv_repeat::Float32,
     sky_parameters::Vec4f,
     atmosphere_parameters::Vec4f,
-    debug_parameters::Vec4f,
+    surface_options::Vec4f,
 )
-    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters, debug_parameters)
+    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters, surface_options)
     return nothing
 end
 
@@ -1440,7 +1575,7 @@ function _terrain_layered_vertex(
     uv_repeat::Float32,
     sky_parameters::Vec4f,
     atmosphere_parameters::Vec4f,
-    debug_parameters::Vec4f,
+    surface_options::Vec4f,
     layer0_a::Vec4f,
     layer0_b::Vec4f,
     layer1_a::Vec4f,
@@ -1449,7 +1584,7 @@ function _terrain_layered_vertex(
     layer2_b::Vec4f,
     macro_parameters::Vec4f,
 )
-    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters, debug_parameters)
+    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters, surface_options)
     Lava.gfx_output(21, layer0_a)
     Lava.gfx_output(22, layer0_b)
     Lava.gfx_output(23, layer1_a)
@@ -1497,7 +1632,7 @@ function _mesh_vertex(
     shadow::Vec4f,
     sky_parameters::Vec4f,
     atmosphere_parameters::Vec4f,
-    debug_parameters::Vec4f,
+    surface_options::Vec4f,
 )
     vertex_id = Lava.vertex_index()
     instance_id = Lava.instance_index()
@@ -1573,7 +1708,7 @@ function _mesh_vertex(
     Lava.gfx_output(17, shadow)
     Lava.gfx_output(18, sky_parameters)
     Lava.gfx_output(19, atmosphere_parameters)
-    Lava.gfx_output(20, debug_parameters)
+    Lava.gfx_output(20, surface_options)
     return nothing
 end
 
@@ -2193,7 +2328,7 @@ function _terrain_fragment()
     shadow = Lava.gfx_input(Vec4f, 17)
     sky_parameters = Lava.gfx_input(Vec4f, 18)
     atmosphere_parameters = Lava.gfx_input(Vec4f, 19)
-    debug_parameters = Lava.gfx_input(Vec4f, 20)
+    surface_options = Lava.gfx_input(Vec4f, 20)
     light_intensity = lighting_parameters[1]
     fog_density = lighting_parameters[2]
     exposure = lighting_parameters[3]
@@ -2216,7 +2351,7 @@ function _terrain_fragment()
     occlusion_sample = _sample_texture(UInt32(3), uv)[1]
     emissive_sample = _sample_texture(UInt32(4), uv)
     lit_color = _material_response(
-        _albedo_override(_textured_color(base_color, uv, texture_enabled), debug_parameters),
+        _albedo_override(_textured_color(base_color, uv, texture_enabled), surface_options),
         _perturbed_normal(normal, tangent, uv, material[3]),
         light_direction,
         light_color,
@@ -2236,6 +2371,8 @@ function _terrain_fragment()
         material_emissive,
         emissive_sample,
         sky_parameters,
+        surface_options[3],
+        TextureIbl(),
     )
     fogged_color = _apply_aerial_perspective(
         lit_color,
@@ -2342,7 +2479,7 @@ function _terrain_layered_fragment()
     shadow = Lava.gfx_input(Vec4f, 17)
     sky_parameters = Lava.gfx_input(Vec4f, 18)
     atmosphere_parameters = Lava.gfx_input(Vec4f, 19)
-    debug_parameters = Lava.gfx_input(Vec4f, 20)
+    surface_options = Lava.gfx_input(Vec4f, 20)
     layer0_a = Lava.gfx_input(Vec4f, 21)
     layer0_b = Lava.gfx_input(Vec4f, 22)
     layer1_a = Lava.gfx_input(Vec4f, 23)
@@ -2403,7 +2540,7 @@ function _terrain_layered_fragment()
     macro_scale = 1.0f0 + macro_parameters[2] * (macro_value * 2.0f0 - 1.0f0)
     surface_color = _albedo_override(
         Vec4f(albedo[1] * macro_scale, albedo[2] * macro_scale, albedo[3] * macro_scale, 1.0f0),
-        debug_parameters,
+        surface_options,
     )
     view_direction = Vec4f(
         camera_position[1] - world_position[1],
@@ -2432,6 +2569,8 @@ function _terrain_layered_fragment()
         Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0),
         Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0),
         sky_parameters,
+        surface_options[3],
+        TextureIbl(),
     )
     Lava.gfx_output(0, _apply_aerial_perspective(
         lit_color,
@@ -2595,7 +2734,8 @@ function backend()::LavaBackend
             nothing,
             Dict{Tuple{String,String,SamplerSpec},MaterialTextureResources}(),
             Dict{Tuple{String,String},MaterialTextures}(),
-            Dict{SamplerSpec,Lava.LavaSampler}(),
+            Dict{Tuple{SamplerSpec,UInt32},Lava.LavaSampler}(),
+            nothing,
             UInt64(0),
             UInt64(0),
             UInt64(0),
@@ -3369,10 +3509,35 @@ function _surface_sampler!(
     spec::SamplerSpec,
     max_lod::UInt32,
 )::Lava.LavaSampler
-    existing = get(state.surface_samplers, spec, nothing)
+    # Keyed by the mip range too. Keyed by mode alone, the first material to
+    # ask fixed the max LOD for every later one (the latent defect recorded in
+    # N-4): a single-level texture first would strip every later chain.
+    key = (spec, max_lod)
+    existing = get(state.surface_samplers, key, nothing)
     existing === nothing || return existing
     created = _lod_sampler!(state, max_lod; filter=spec.filter, wrap=spec.wrap)
-    state.surface_samplers[spec] = created
+    state.surface_samplers[key] = created
+    return created
+end
+
+const IBL_ENVIRONMENT_TEXTURE_ID = "wge-ibl-environment"
+const IBL_BRDF_LUT_TEXTURE_ID = "wge-ibl-brdf-lut"
+
+function _ibl_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)::IblResources
+    current = state.ibl_resources
+    current !== nothing && current.cache_key == packet.content_sha256 && return current
+    enabled = _ibl_enabled(packet.render_policy)
+    upload(payload) = begin
+        levels = _texture_levels(payload)
+        state.upload_bytes += UInt64(sum(16 * size(level, 2) * size(level, 1) for level in levels; init=0))
+        _lava_texture2d!(state, levels)
+    end
+    placeholder = upload(_default_texture_payload(Val{:occlusion}()))
+    environment = enabled ? upload(_texture_payload(packet, IBL_ENVIRONMENT_TEXTURE_ID, Val{:albedo}())) : placeholder
+    brdf_lut = enabled ? upload(_texture_payload(packet, IBL_BRDF_LUT_TEXTURE_ID, Val{:roughness}())) : placeholder
+    sampler = _surface_sampler!(state, CLAMPED_LINEAR_SPEC, UInt32(0))
+    created = IblResources(packet.content_sha256, environment, brdf_lut, placeholder, sampler)
+    state.ibl_resources = created
     return created
 end
 
@@ -3394,6 +3559,9 @@ function _material_texture_resources!(
     cached === nothing || return cached
     textures = _material_textures!(state, packet, material)
     sampler = _surface_sampler!(state, spec, textures.max_sampler_lod)
+    ibl = _ibl_resources!(state, packet)
+    # Bindings 6..13 are stand-ins so the IBL textures sit at 14/15 in every
+    # surface pipeline (the layered terrain uses 0..13 for its layers).
     bindings = Lava.bind_textures([
         textures.albedo_texture * sampler,
         textures.normal_texture * sampler,
@@ -3401,6 +3569,9 @@ function _material_texture_resources!(
         textures.occlusion_texture * sampler,
         textures.emissive_texture * sampler,
         shadow.texture * shadow.sampler,
+        (ibl.placeholder * ibl.sampler for _ in 6:13)...,
+        ibl.environment * ibl.sampler,
+        ibl.brdf_lut * ibl.sampler,
     ])
     created = MaterialTextureResources(
         packet.content_sha256,
@@ -3475,6 +3646,7 @@ function _terrain_layer_resources!(
     # created it first, which would silently strip the layers' mips.
     max_lod = max(maximum(set.max_sampler_lod for set in sets), UInt32(length(macro_levels) - 1))
     sampler = _lod_sampler!(state, max_lod; filter=:linear, wrap=:repeat)
+    ibl = _ibl_resources!(state, packet)
     base, middle, top = sets
     bindings = Lava.bind_textures([
         base.albedo_texture * sampler,
@@ -3491,6 +3663,8 @@ function _terrain_layer_resources!(
         top.roughness_texture * sampler,
         top.occlusion_texture * sampler,
         macro_texture * sampler,
+        ibl.environment * ibl.sampler,
+        ibl.brdf_lut * ibl.sampler,
     ])
     created = TerrainLayerResources(packet.content_sha256, bindings, sampler, _terrain_layer_uniforms(packet))
     state.terrain_layer_resources = created
@@ -4940,7 +5114,7 @@ function _record_scene_passes!(
     shadow_uniform = _shadow_uniform(packet.render_policy)
     sky_parameters = _sky_parameters(packet.render_policy, lighting, packet.environment)
     atmosphere_parameters = _atmosphere_parameters(packet.render_policy)
-    debug_parameters = _debug_parameters(packet.render_policy)
+    surface_options = _surface_options(packet.render_policy)
     texture_resources = _material_texture_resources!(
         state,
         packet,
@@ -5032,7 +5206,7 @@ function _record_scene_passes!(
             Float32(packet.render_policy.terrain_surface.uv_repeat_scale_milli) / 1000.0f0,
             sky_parameters,
             atmosphere_parameters,
-            debug_parameters,
+            surface_options,
     )
     if packet.terrain.layers === nothing
         draw!(
@@ -5121,7 +5295,7 @@ function _record_scene_passes!(
                     shadow_uniform,
                     sky_parameters,
                     atmosphere_parameters,
-                    debug_parameters,
+                    surface_options,
                 ),
                 instances=batch.instance_count,
                 descriptor_set_layout=batch_texture_resources.bindings.layout,
