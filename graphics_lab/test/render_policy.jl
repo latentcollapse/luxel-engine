@@ -818,3 +818,20 @@ end
     forced = LavaAdapter._albedo_override(color, LavaAdapter._debug_parameters(parsed))
     @test forced == Vec4f(0.5f0, 0.5f0, 0.5f0, 0.8f0)  # alpha is kept
 end
+
+@testset "texture upload order is row-major (transpose regression)" begin
+    # A 3-wide, 2-high payload whose pixels encode their own (x, y): every
+    # packet texture used to reach Vulkan transposed (non-square: scrambled).
+    width, height = 3, 2
+    bytes = UInt8[]
+    for y in 0:height-1, x in 0:width-1
+        append!(bytes, (UInt8(10x), UInt8(10y), 0x00, 0xff))
+    end
+    matrix = LavaAdapter._texture_matrix(bytes, UInt32(width), UInt32(height), :data)
+    uploaded = vec(LavaAdapter._upload_layout(matrix))
+    @test length(uploaded) == width * height
+    for (index, texel) in enumerate(uploaded)
+        x, y = (index - 1) % width, (index - 1) ÷ width
+        @test round(Int, texel[1] * 255) == 10x && round(Int, texel[2] * 255) == 10y
+    end
+end

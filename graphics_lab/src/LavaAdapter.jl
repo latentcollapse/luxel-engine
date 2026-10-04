@@ -2962,6 +2962,11 @@ function _texture_levels(payload)
     return levels
 end
 
+"""A (height, width) texel matrix in Vulkan upload order: x fastest, then y.
+`permutedims` gives the (width, height) matrix whose column-major memory is
+exactly that; the matrix itself runs down columns (see `_lava_texture2d!`)."""
+_upload_layout(level::Matrix{NTuple{4,Float32}}) = permutedims(level)
+
 """Create a Vulkan image with one mip level per validated CPU level, copy each
 level through a single shared staging buffer, and return the resident texture.
 The view spans every level so sampler LOD range 0..levels-1 is backed by real
@@ -3038,16 +3043,20 @@ function _lava_texture2d!(
     staging_buf, _, mapped_ptr, _ = Lava.get_staging(bq, offsets[end])
     for (index, level) in enumerate(levels)
         write_ptr = Ptr{UInt8}(mapped_ptr) + offsets[index]
-        # A Julia column-major Matrix{NTuple{4,Float32}} is already an
-        # interleaved RGBA32F buffer, so its pointer is the upload payload.
-        # The matrix must be GC-preserved across the raw copy; a temporary
-        # view whose pointer is the last use would be collectible mid-copy.
-        # unsafe_copyto! requires both pointers to share an element type, so
-        # the staging slice is reinterpreted to the matrix's own element type
-        # and the copy length is in 16-byte RGBA elements (staging offsets are
-        # 16-byte multiples, so alignment holds).
-        GC.@preserve level unsafe_copyto!(
-            Ptr{NTuple{4,Float32}}(write_ptr), pointer(level), length(level)
+        # `level` is (height, width), indexed [row, column]. Julia stores it
+        # column-major, so its raw memory runs DOWN a column; a tightly packed
+        # Vulkan buffer copy reads ACROSS a row (x fastest). Copying `level`
+        # directly therefore uploaded every square texture transposed (and
+        # would scramble a non-square one): planks and bark furrows rendered at
+        # 90° and normal maps lit across the wrong tangent axes, from the first
+        # textured packet until N-2's non-square IBL atlas exposed it.
+        packed = _upload_layout(level)
+        # Both buffers must be GC-preserved across the raw copy. unsafe_copyto!
+        # needs matching element types, so the staging slice is reinterpreted
+        # to RGBA32F and the length is in 16-byte elements (staging offsets
+        # are 16-byte multiples, so alignment holds).
+        GC.@preserve packed unsafe_copyto!(
+            Ptr{NTuple{4,Float32}}(write_ptr), pointer(packed), length(packed)
         )
     end
 
