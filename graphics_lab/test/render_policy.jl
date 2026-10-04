@@ -621,3 +621,183 @@ end
     )
     @test_throws LavaAdapter.AdapterError LavaAdapter._assert_render_policy_supported(clamped, caps; layered_terrain=true)
 end
+
+# ---------------------------------------------------------------------------
+# CONVERGE-1 N-1: analytic sky and exponential height-dependent atmosphere.
+# ---------------------------------------------------------------------------
+
+const N1_POLICY_JSON(overrides) = JSON3.read(JSON3.write(Dict{String,Any}("render_policy" => overrides)))
+const N1_SKY = Dict{String,Any}("sun_disc_radius_milli_deg" => 650, "sun_disc_gain_bp" => 120000, "sun_glow_gain_bp" => 2400)
+const N1_AIR = Dict{String,Any}("height_falloff_milli_per_m" => 10, "density_at_ground_bp" => 70, "sun_scatter_gain_bp" => 300)
+# converge0 content: environment and the 25°-elevation key light.
+const N1_ENVIRONMENT = WGEGraphics.EnvironmentPacket(
+    (0.16f0, 0.30f0, 0.58f0), (0.62f0, 0.66f0, 0.72f0), (0.11f0, 0.12f0, 0.085f0),
+    (0.52f0, 0.58f0, 0.67f0), 0.0011f0, 1.08f0,
+)
+const N1_LIGHT = LavaAdapter.DirectionalLighting(Vec4f(1.6407f0, -1.0f0, -1.381f0, 0.0f0), Vec4f(1.0f0, 0.82f0, 0.62f0, 1.0f0), 5.0f0)
+const N1_SUN = LavaAdapter._normalize_vector(Vec4f(-1.6407f0, 1.0f0, 1.381f0, 0.0f0))
+const N1_TOP = Vec4f(N1_ENVIRONMENT.sky_top_rgb..., 1.0f0)
+const N1_HORIZON = Vec4f(N1_ENVIRONMENT.sky_horizon_rgb..., 1.0f0)
+const N1_GROUND = Vec4f(N1_ENVIRONMENT.ground_rgb..., 1.0f0)
+const N1_ZERO = Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
+
+n1_sky_with(model) = merge(N1_SKY, Dict{String,Any}("model" => model))
+n1_luminance(c) = 0.2126f0 * c[1] + 0.7152f0 * c[2] + 0.0722f0 * c[3]
+
+function n1_analytic_parameters(turbidity_milli=3000)
+    policy = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict(
+        "sky" => n1_sky_with(Dict("kind" => "analytic", "turbidity_milli" => turbidity_milli)),
+    )))
+    return LavaAdapter._sky_parameters(policy, N1_LIGHT, N1_ENVIRONMENT)
+end
+
+n1_sky(direction, sky=n1_analytic_parameters()) = LavaAdapter._analytic_sky(direction, N1_SUN, sky, N1_TOP, N1_HORIZON)
+
+@testset "N-1 sky model and atmosphere parse and fail closed" begin
+    analytic = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict(
+        "sky" => n1_sky_with(Dict("kind" => "analytic", "turbidity_milli" => 3000)),
+        "atmosphere" => N1_AIR,
+    )))
+    @test analytic.sky.model === :analytic
+    @test analytic.sky.turbidity_milli == 3000
+    @test analytic.atmosphere.height_falloff_milli_per_m == 10
+    @test analytic.atmosphere.density_at_ground_bp == 70
+    @test analytic.atmosphere.sun_scatter_gain_bp == 300
+    # Absent model and explicit gradient are the same CONVERGE-0 sky.
+    absent_model = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => N1_SKY)))
+    explicit = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => n1_sky_with(Dict("kind" => "gradient")))))
+    @test absent_model.sky == explicit.sky
+    @test absent_model.sky.model === :gradient
+    @test absent_model.atmosphere === nothing
+    @test WGEGraphics.RenderPolicy().atmosphere === nothing
+    # k = 0 is a homogeneous haze, accepted.
+    @test WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict(
+        "sky" => N1_SKY, "atmosphere" => merge(N1_AIR, Dict("height_falloff_milli_per_m" => 0)),
+    ))).atmosphere.height_falloff_milli_per_m == 0
+
+    refuses(overrides) = @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(N1_POLICY_JSON(overrides))
+    refuses(Dict("sky" => n1_sky_with(Dict("kind" => "hosek", "turbidity_milli" => 3000))))
+    refuses(Dict("sky" => n1_sky_with(Dict("kind" => "analytic"))))
+    refuses(Dict("sky" => n1_sky_with(Dict("turbidity_milli" => 3000))))
+    refuses(Dict("sky" => n1_sky_with(Dict("kind" => "gradient", "turbidity_milli" => 3000))))
+    refuses(Dict("sky" => n1_sky_with(Dict("kind" => "analytic", "turbidity_milli" => 1999))))
+    refuses(Dict("sky" => n1_sky_with(Dict("kind" => "analytic", "turbidity_milli" => 10001))))
+    refuses(Dict("sky" => N1_SKY, "atmosphere" => merge(N1_AIR, Dict("height_falloff_milli_per_m" => -1))))
+    refuses(Dict("sky" => N1_SKY, "atmosphere" => merge(N1_AIR, Dict("height_falloff_milli_per_m" => 1001))))
+    refuses(Dict("sky" => N1_SKY, "atmosphere" => merge(N1_AIR, Dict("density_at_ground_bp" => 1001))))
+    refuses(Dict("sky" => N1_SKY, "atmosphere" => merge(N1_AIR, Dict("sun_scatter_gain_bp" => 20001))))
+    refuses(Dict("sky" => N1_SKY, "atmosphere" => merge(N1_AIR, Dict("mie_g" => 7600))))
+    # Haze fades into the per-pixel sky; without one there is nothing to fade into.
+    refuses(Dict("atmosphere" => N1_AIR))
+end
+
+@testset "N-1 absent axes take the historical shader paths exactly" begin
+    for direction in (Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0), Vec4f(0.6f0, 0.1f0, -0.79f0, 0.0f0), Vec4f(0.3f0, -0.5f0, 0.81f0, 0.0f0))
+        @test LavaAdapter._sky_environment(direction, N1_TOP, N1_HORIZON, N1_GROUND, N1_SUN, N1_ZERO) ===
+              LavaAdapter._environment_color(direction, N1_TOP, N1_HORIZON, N1_GROUND)
+    end
+    color = Vec4f(0.3f0, 0.25f0, 0.2f0, 1.0f0)
+    fog = Vec4f(N1_ENVIRONMENT.fog_color_rgb..., 1.0f0)
+    point, camera = Vec4f(10.0f0, 12.0f0, -40.0f0, 1.0f0), Vec4f(54.5f0, 23.4f0, 49.0f0, 1.0f0)
+    distance = LavaAdapter._distance_between(point, camera)
+    @test LavaAdapter._apply_aerial_perspective(
+        color, point, camera, distance, fog, 0.0011f0, N1_LIGHT.direction, N1_LIGHT.color, N1_LIGHT.intensity,
+        N1_TOP, N1_HORIZON, N1_ZERO, N1_ZERO,
+    ) === LavaAdapter._apply_fog(color, fog, distance, 0.0011f0)
+    @test LavaAdapter._sky_parameters(WGEGraphics.RenderPolicy(), N1_LIGHT, N1_ENVIRONMENT) == N1_ZERO
+    @test LavaAdapter._sky_parameters(WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => N1_SKY))), N1_LIGHT, N1_ENVIRONMENT) == N1_ZERO
+    @test LavaAdapter._atmosphere_parameters(WGEGraphics.RenderPolicy()) == N1_ZERO
+    # The gradient model's sky radiance is the CONVERGE-0 sky-pass formula.
+    for direction in (Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0), LavaAdapter._normalize_vector(Vec4f(0.6f0, 0.1f0, -0.79f0, 0.0f0)), Vec4f(0.6f0, -0.2f0, 0.77f0, 0.0f0))
+        weight = direction[2] > 0.0f0 ? sqrt(direction[2]) : 0.0f0
+        expected = Vec4f((N1_HORIZON[c] * (1.0f0 - weight) + N1_TOP[c] * weight for c in 1:3)..., 1.0f0)
+        @test LavaAdapter._sky_radiance(direction, N1_TOP, N1_HORIZON, N1_SUN, N1_ZERO) === expected
+    end
+end
+
+@testset "N-1 haze weight is the exact optical-depth integral" begin
+    air = Vec4f(1.0f0, 0.015f0, 0.005f0, 0.03f0)
+    # Midpoint-rule quadrature of σ₀·exp(−k·h) along the segment, in Float64.
+    function quadrature(hc, hp, d, k=Float64(air[2]); n=200_000)
+        s0 = Float64(air[3])
+        tau = sum(s0 * exp(-k * (hc + (hp - hc) * (i - 0.5) / n)) for i in 1:n) * d / n
+        return 1 - exp(-tau)
+    end
+    for (hc, hp, d) in ((23.4, 12.0, 32.0), (23.4, 40.0, 300.0), (20.0, 20.0, 150.0), (17.6, 13.1, 14.3), (23.4, 23.40001, 80.0))
+        @test isapprox(LavaAdapter._haze_weight(Float32(hc), Float32(hp), Float32(d), air), quadrature(hc, hp, d); atol=2e-5)
+    end
+    # k = 0: homogeneous haze, 1 − exp(−σ₀·d).
+    homogeneous = Vec4f(1.0f0, 0.0f0, 0.005f0, 0.0f0)
+    @test isapprox(LavaAdapter._haze_weight(23.4f0, 40.0f0, 300.0f0, homogeneous), 1 - exp(-0.005 * 300); atol=1e-5)
+    # The series branch (|k·Δh| < 1e-3) joins the closed form without a step.
+    near = LavaAdapter._haze_weight(23.4f0, 23.4f0 + 0.0666f0, 100.0f0, air)
+    far = LavaAdapter._haze_weight(23.4f0, 23.4f0 + 0.0668f0, 100.0f0, air)
+    @test abs(near - far) < 1e-5
+    # Valleys are hazier than ridges at the same distance.
+    @test LavaAdapter._haze_weight(23.4f0, 10.0f0, 200.0f0, air) > LavaAdapter._haze_weight(23.4f0, 40.0f0, 200.0f0, air)
+end
+
+@testset "N-1 analytic sky: scale, sun-side horizon, one function" begin
+    sky = n1_analytic_parameters()
+    @test sky[1] == 3.0f0
+    # The zenith is the authored zenith colour, exactly in hue and luminance.
+    zenith = n1_sky(Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0))
+    @test all(isapprox.(zenith[1:3], N1_TOP[1:3]; rtol=1e-4))
+    horizontal_sun = LavaAdapter._normalize_vector(Vec4f(N1_SUN[1], 0.0f0, N1_SUN[3], 0.0f0))
+    anti = Vec4f(-horizontal_sun[1], 0.0f0, -horizontal_sun[3], 0.0f0)
+    sun_side = n1_luminance(n1_sky(horizontal_sun))
+    anti_side = n1_luminance(n1_sky(anti))
+    # Contract §1 acceptance (measured): sun-side horizon ≥ 15% above anti-sun.
+    @test sun_side >= 1.15f0 * anti_side
+    # Hue is the authored horizon's: no Preetham salmon/magenta cast.
+    horizon_hue = n1_sky(anti)
+    @test isapprox(horizon_hue[3] / horizon_hue[1], N1_HORIZON[3] / N1_HORIZON[1]; rtol=1e-4)
+    @info "N-1 analytic horizon" sun_side anti_side ratio = sun_side / anti_side zenith = n1_luminance(zenith)
+    for turbidity in (2000, 6000, 10000)
+        p = n1_analytic_parameters(turbidity)
+        for direction in (Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0), horizontal_sun, anti, N1_SUN, Vec4f(0.3f0, -0.6f0, 0.74f0, 0.0f0))
+            c = n1_sky(direction, p)
+            @test all(isfinite, c) && all(>=(0.0f0), c)
+        end
+    end
+    # Ambient and the sky pass use the same function as the drawn sky.
+    up_ish = LavaAdapter._normalize_vector(Vec4f(0.2f0, 0.7f0, -0.3f0, 0.0f0))
+    @test LavaAdapter._sky_environment(up_ish, N1_TOP, N1_HORIZON, N1_GROUND, N1_SUN, sky) == n1_sky(up_ish)
+    @test LavaAdapter._sky_radiance(up_ish, N1_TOP, N1_HORIZON, N1_SUN, sky) == n1_sky(up_ish)
+    straight_down = LavaAdapter._sky_environment(Vec4f(0.0f0, -1.0f0, 0.0f0, 0.0f0), N1_TOP, N1_HORIZON, N1_GROUND, N1_SUN, sky)
+    @test straight_down[1:3] == N1_GROUND[1:3]
+    # A sun at or below the horizon is outside the Preetham fit: refused.
+    low = LavaAdapter.DirectionalLighting(Vec4f(1.0f0, 0.1f0, 0.0f0, 0.0f0), N1_LIGHT.color, 5.0f0)
+    policy = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => n1_sky_with(Dict("kind" => "analytic", "turbidity_milli" => 3000)))))
+    @test_throws LavaAdapter.AdapterError LavaAdapter._sky_parameters(policy, low, N1_ENVIRONMENT)
+end
+
+@testset "N-1 haze converges on the sky behind it and warms toward the sun" begin
+    horizontal_sun = LavaAdapter._normalize_vector(Vec4f(N1_SUN[1], 0.0f0, N1_SUN[3], 0.0f0))
+    away = Vec4f(-horizontal_sun[1], 0.0f0, -horizontal_sun[3], 0.0f0)
+    radiance = Vec4f(5.0f0, 4.1f0, 3.1f0, 0.0f0)
+    for sky in (N1_ZERO, n1_analytic_parameters())
+        hot = LavaAdapter._inscattered_light(horizontal_sun, N1_SUN, radiance, N1_TOP, N1_HORIZON, sky, 0.03f0)
+        cold = LavaAdapter._inscattered_light(away, N1_SUN, radiance, N1_TOP, N1_HORIZON, sky, 0.03f0)
+        @test n1_luminance(hot) > n1_luminance(cold)
+        @test hot[1] / hot[3] > cold[1] / cold[3]  # warmer: more red per blue
+        # With no sun lobe the haze IS the sky radiance along the ray.
+        for direction in (away, LavaAdapter._normalize_vector(Vec4f(-0.6f0, 0.05f0, -0.77f0, 0.0f0)))
+            @test LavaAdapter._inscattered_light(direction, N1_SUN, radiance, N1_TOP, N1_HORIZON, sky, 0.0f0)[1:3] ==
+                  LavaAdapter._sky_radiance(direction, N1_TOP, N1_HORIZON, N1_SUN, sky)[1:3]
+        end
+    end
+    # A very distant surface converges on the sky behind it (the ridge test).
+    air = Vec4f(1.0f0, 0.01f0, 0.007f0, 0.03f0)
+    camera = Vec4f(54.5f0, 23.4f0, 49.0f0, 1.0f0)
+    ridge = Vec4f(54.5f0 - 0.6f0 * 5000.0f0, 30.0f0, 49.0f0 - 0.77f0 * 5000.0f0, 1.0f0)
+    dark = Vec4f(0.02f0, 0.02f0, 0.02f0, 1.0f0)
+    sky = n1_analytic_parameters()
+    fogged = LavaAdapter._apply_aerial_perspective(
+        dark, ridge, camera, LavaAdapter._distance_between(ridge, camera), N1_ZERO, 0.0f0,
+        N1_LIGHT.direction, N1_LIGHT.color, N1_LIGHT.intensity, N1_TOP, N1_HORIZON, sky, air,
+    )
+    ray = LavaAdapter._normalize_vector(Vec4f(ridge[1] - camera[1], ridge[2] - camera[2], ridge[3] - camera[3], 0.0f0))
+    behind = LavaAdapter._inscattered_light(ray, N1_SUN, Vec4f(5.0f0, 4.1f0, 3.1f0, 0.0f0), N1_TOP, N1_HORIZON, sky, 0.03f0)
+    @test all(isapprox.(fogged[1:3], behind[1:3]; rtol=1e-3))
+end

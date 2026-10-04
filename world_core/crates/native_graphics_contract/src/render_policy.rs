@@ -307,6 +307,74 @@ pub struct SkyPolicy {
     /// Forward-scattering glow around the sun as a multiple of the key light's
     /// colour × intensity, basis points. Range [0, 20000] (0–2×).
     pub sun_glow_gain_bp: i32,
+    /// Sky radiance model. ABSENT means `Gradient`, and the key is omitted
+    /// from canonical JSON, so CONVERGE-0 packets keep their bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<SkyModel>,
+}
+
+/// How the sky's radiance is computed along a view ray.
+///
+/// `Gradient` is the CONVERGE-0 sky: horizon→zenith along `sqrt(ray.y)`, two
+/// authored colours. It has no horizon glow and no anti-solar darkening, so it
+/// reads as a backdrop. `Analytic` takes the sky's LUMINANCE from the Perez
+/// distribution with the Preetham et al. (1999) turbidity fit, driven by the
+/// sun's elevation: brighter toward the sun along the horizon, darker opposite
+/// it. Its HUE stays the authored gradient: Preetham's chromaticity fits give a
+/// salmon-to-magenta horizon at low turbidity (Zotti et al. 2007), measured
+/// here at r/g/b 0.51/0.44/0.43 across the sun at T = 3.
+///
+/// Under `Analytic` the environment's `sky_top_rgb` is the zenith colour and
+/// sets the brightness every other direction is relative to. The same function
+/// drives ambient light and the atmosphere's in-scattering, so the sky the eye
+/// sees and the light the materials receive cannot diverge.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SkyModel {
+    /// An empty struct variant, not a unit variant: serde does not apply
+    /// `deny_unknown_fields` to unit variants of an internally tagged enum, so
+    /// `{"kind": "gradient", "turbidity_milli": 3000}` would be accepted.
+    Gradient {},
+    Analytic {
+        /// Atmospheric turbidity, milli-units. Range [2000, 10000]: the span
+        /// the Preetham fit was made over (2 = very clear, 10 = hazy). Outside
+        /// it the fitted coefficients produce negative radiance.
+        turbidity_milli: i32,
+    },
+}
+
+/// Exponential, height-dependent aerial perspective (N-1).
+///
+/// ABSENT means the historical linear fog: `w = min(distance × fog_density,
+/// 0.92)` toward a constant `fog_color_rgb`, which never converges on the sky
+/// behind a distant surface.
+///
+/// PRESENT replaces it with extinction σ(h) = σ₀·exp(−k·h) above the world
+/// datum (y = 0). Along a ray of length d from height h_c to h_p the optical
+/// depth integrates in closed form:
+///
+/// τ = σ₀·exp(−k·h_c)·d·(1 − exp(−k·Δh))/(k·Δh),  Δh = h_p − h_c
+///
+/// and a surface fades by `1 − exp(−τ)` toward the light scattered into its
+/// ray: the sky radiance along that same ray plus a Henyey–Greenstein forward
+/// lobe toward the sun (`sun_scatter_gain_bp`). The sky is drawn with the same
+/// lobe and is not itself fogged, since it already is the atmosphere along an
+/// infinite ray. So a distant ridge converges on exactly the sky behind it,
+/// haze toward the sun is warmer and brighter, and the zenith keeps its colour
+/// however dense the ground haze is. `fog_color_rgb` and `fog_density` are not
+/// used when this axis is present.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct AtmospherePolicy {
+    /// k, milli per metre. Range [0, 1000]: 0 is a homogeneous haze, 1000 a
+    /// 1 m scale height.
+    pub height_falloff_milli_per_m: i32,
+    /// σ₀, extinction at the datum in basis points per metre (1 bp = 1e-4 m⁻¹,
+    /// so 30 bp ≈ a 1 km visual range). Range [0, 1000].
+    pub density_at_ground_bp: i32,
+    /// Forward in-scattering toward the sun as a multiple of the key light's
+    /// colour × intensity, basis points. Range [0, 20000] (0–2×).
+    pub sun_scatter_gain_bp: i32,
 }
 
 /// The complete typed policy set. Every field is `Option`, so an absent field
@@ -335,6 +403,8 @@ pub struct RenderPolicy {
     pub shadow_fit: Option<ShadowFitPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sky: Option<SkyPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub atmosphere: Option<AtmospherePolicy>,
 }
 
 impl RenderPolicy {
@@ -353,15 +423,17 @@ impl RenderPolicy {
             mesh_surface: self.mesh_surface.unwrap_or_default(),
             shadow_fit: self.shadow_fit,
             sky: self.sky,
+            atmosphere: self.atmosphere,
         }
     }
 }
 
 /// A `RenderPolicy` with every field resolved. This is what the adapter binds.
 ///
-/// `shadow_fit` and `sky` stay optional after resolution: their absence selects
-/// a different code path (the historical whole-world fit and screen-space sky),
-/// not a default parameter value, so there is no honest default to resolve to.
+/// `shadow_fit`, `sky` and `atmosphere` stay optional after resolution: their
+/// absence selects a different code path (the historical whole-world fit,
+/// screen-space sky, linear fog), not a default parameter value, so there is
+/// no honest default to resolve to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedRenderPolicy {
     pub grade: GradePolicy,
@@ -374,6 +446,7 @@ pub struct ResolvedRenderPolicy {
     pub mesh_surface: MeshSurfacePolicy,
     pub shadow_fit: Option<ShadowFitPolicy>,
     pub sky: Option<SkyPolicy>,
+    pub atmosphere: Option<AtmospherePolicy>,
 }
 
 impl Default for ResolvedRenderPolicy {
@@ -486,6 +559,26 @@ pub fn validate_render_policy(policy: &RenderPolicy) -> Result<(), GraphicsContr
         )?;
         bounded_i32(sky.sun_disc_gain_bp, 0, 400_000, "sky.sun_disc_gain_bp")?;
         bounded_i32(sky.sun_glow_gain_bp, 0, 20000, "sky.sun_glow_gain_bp")?;
+        if let Some(SkyModel::Analytic { turbidity_milli }) = sky.model {
+            bounded_i32(turbidity_milli, 2000, 10000, "sky.model.turbidity_milli")?;
+        }
+    }
+    if let Some(atmosphere) = &policy.atmosphere {
+        bounded_i32(
+            atmosphere.height_falloff_milli_per_m,
+            0,
+            1000,
+            "atmosphere.height_falloff_milli_per_m",
+        )?;
+        bounded_i32(atmosphere.density_at_ground_bp, 0, 1000, "atmosphere.density_at_ground_bp")?;
+        bounded_i32(atmosphere.sun_scatter_gain_bp, 0, 20000, "atmosphere.sun_scatter_gain_bp")?;
+        // The haze fades distance into the sky actually behind it, which needs
+        // a per-pixel sky to fade into; the screen-space sky has no view ray.
+        if policy.sky.is_none() {
+            return Err(GraphicsContractError::malformed(
+                "render policy atmosphere requires the view-direction sky (render_policy.sky)",
+            ));
+        }
     }
     Ok(())
 }

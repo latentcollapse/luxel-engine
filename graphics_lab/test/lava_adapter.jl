@@ -111,6 +111,7 @@ end
         common.occlusion_strength,
         common.emissive_factor,
         common.emissive_sample,
+        Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0),
     )
     without_coat = response(0.0f0, 0.25f0)
     with_coat = response(1.0f0, 0.12f0)

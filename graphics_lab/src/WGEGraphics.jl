@@ -295,10 +295,25 @@ struct ShadowFitPolicy
 end
 
 # View-direction sky. Absence selects the historical screen-space sky draw.
+# `model` is :gradient (CONVERGE-0, also what an absent `model` key means) or
+# :analytic (Preetham, N-1); `turbidity_milli` is 0 under :gradient.
 struct SkyPolicy
     sun_disc_radius_milli_deg::Int32
     sun_disc_gain_bp::Int32
     sun_glow_gain_bp::Int32
+    model::Symbol
+    turbidity_milli::Int32
+end
+
+SkyPolicy(radius::Integer, disc::Integer, glow::Integer) =
+    SkyPolicy(Int32(radius), Int32(disc), Int32(glow), :gradient, Int32(0))
+
+# Exponential height-dependent aerial perspective (N-1). Absence selects the
+# historical linear fog. Units and bounds mirror `render_policy.rs`.
+struct AtmospherePolicy
+    height_falloff_milli_per_m::Int32
+    density_at_ground_bp::Int32
+    sun_scatter_gain_bp::Int32
 end
 
 struct RenderPolicy
@@ -312,6 +327,7 @@ struct RenderPolicy
     mesh_surface::MeshSurfacePolicy
     shadow_fit::Union{Nothing,ShadowFitPolicy}
     sky::Union{Nothing,SkyPolicy}
+    atmosphere::Union{Nothing,AtmospherePolicy}
 end
 
 RenderPolicy() = RenderPolicy(
@@ -325,6 +341,23 @@ RenderPolicy() = RenderPolicy(
     MeshSurfacePolicy(),
     nothing,
     nothing,
+    nothing,
+)
+
+# The ten-axis form predates N-1: no atmosphere means linear fog.
+RenderPolicy(
+    grade::GradePolicy,
+    bloom::BloomPolicy,
+    vignette::VignettePolicy,
+    dither::DitherPolicy,
+    terrain_surface::TerrainSurfacePolicy,
+    sampler::SamplerPolicy,
+    shadow::ShadowPolicy,
+    mesh_surface::MeshSurfacePolicy,
+    shadow_fit::Union{Nothing,ShadowFitPolicy},
+    sky::Union{Nothing,SkyPolicy},
+) = RenderPolicy(
+    grade, bloom, vignette, dither, terrain_surface, sampler, shadow, mesh_surface, shadow_fit, sky, nothing,
 )
 
 # The seven-axis form predates CONVERGE-0; the three newer axes default to
@@ -348,6 +381,7 @@ RenderPolicy(
     MeshSurfacePolicy(),
     nothing,
     nothing,
+    nothing,
 )
 
 const RENDER_POLICY_KEYS = (
@@ -361,6 +395,7 @@ const RENDER_POLICY_KEYS = (
     "mesh_surface",
     "shadow_fit",
     "sky",
+    "atmosphere",
 )
 
 abstract type OverlayPacket end
@@ -686,16 +721,54 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
         _exact_keys(
             k,
             ("sun_disc_radius_milli_deg", "sun_disc_gain_bp", "sun_glow_gain_bp"),
+            ("model",),
             "render_policy.sky",
         )
+        model, turbidity = if haskey(k, "model")
+            m = _object(k["model"], "render_policy.sky.model")
+            haskey(m, "kind") || throw(ProtocolError("malformed_packet", "render_policy.sky.model needs a kind"))
+            kind = _string(m["kind"], "sky.model.kind")
+            if kind == "gradient"
+                _exact_keys(m, ("kind",), "render_policy.sky.model")
+                (:gradient, Int32(0))
+            elseif kind == "analytic"
+                _exact_keys(m, ("kind", "turbidity_milli"), "render_policy.sky.model")
+                (:analytic, _bounded_bp(m["turbidity_milli"], "sky.model.turbidity_milli", 2000, 10000))
+            else
+                throw(ProtocolError("malformed_packet", "render_policy.sky.model.kind `$kind` is unknown"))
+            end
+        else
+            (:gradient, Int32(0))
+        end
         SkyPolicy(
             _bounded_bp(k["sun_disc_radius_milli_deg"], "sky.sun_disc_radius_milli_deg", 0, 5000),
             _bounded_bp(k["sun_disc_gain_bp"], "sky.sun_disc_gain_bp", 0, 400_000),
             _bounded_bp(k["sun_glow_gain_bp"], "sky.sun_glow_gain_bp", 0, 20000),
+            model,
+            turbidity,
         )
     else
         nothing
     end
+    atmosphere = if haskey(value, "atmosphere")
+        a = _object(value["atmosphere"], "render_policy.atmosphere")
+        _exact_keys(
+            a,
+            ("height_falloff_milli_per_m", "density_at_ground_bp", "sun_scatter_gain_bp"),
+            "render_policy.atmosphere",
+        )
+        AtmospherePolicy(
+            _bounded_bp(a["height_falloff_milli_per_m"], "atmosphere.height_falloff_milli_per_m", 0, 1000),
+            _bounded_bp(a["density_at_ground_bp"], "atmosphere.density_at_ground_bp", 0, 1000),
+            _bounded_bp(a["sun_scatter_gain_bp"], "atmosphere.sun_scatter_gain_bp", 0, 20000),
+        )
+    else
+        nothing
+    end
+    atmosphere !== nothing && sky === nothing && throw(ProtocolError(
+        "malformed_packet",
+        "render_policy.atmosphere requires the view-direction sky (render_policy.sky)",
+    ))
     return RenderPolicy(
         grade,
         bloom,
@@ -707,6 +780,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
         mesh_surface,
         shadow_fit,
         sky,
+        atmosphere,
     )
 end
 

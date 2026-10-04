@@ -101,7 +101,7 @@ fn new_policy_axes_are_bounded() {
     fit.shadow_fit = Some(ShadowFitPolicy { view_distance_m: 60 });
     assert!(validate_render_policy(&fit).is_ok());
     let sky = |radius, disc, glow| RenderPolicy {
-        sky: Some(SkyPolicy { sun_disc_radius_milli_deg: radius, sun_disc_gain_bp: disc, sun_glow_gain_bp: glow }),
+        sky: Some(SkyPolicy { sun_disc_radius_milli_deg: radius, sun_disc_gain_bp: disc, sun_glow_gain_bp: glow, model: None }),
         ..RenderPolicy::default()
     };
     assert!(validate_render_policy(&sky(650, 120_000, 2400)).is_ok());

@@ -336,6 +336,8 @@ function _sky_view_vertex(
     sun_direction::Vec4f,
     sun_radiance::Vec4f,
     sun_parameters::Vec4f,
+    sky_parameters::Vec4f,
+    atmosphere_parameters::Vec4f,
 )
     vertex_id = Lava.vertex_index() - Int32(1)
     x = Float32(Int32(vertex_id & Int32(1)) * 4 - 1)
@@ -355,6 +357,8 @@ function _sky_view_vertex(
     Lava.gfx_output(3, sun_direction)
     Lava.gfx_output(4, sun_radiance)
     Lava.gfx_output(5, sun_parameters)
+    Lava.gfx_output(6, sky_parameters)
+    Lava.gfx_output(7, atmosphere_parameters)
     return nothing
 end
 
@@ -369,6 +373,12 @@ dark ground term and read as a hole in the world.
 `sun_parameters = (cos outer disc edge, cos inner disc edge, disc gain, glow gain)`.
 The glow is `0.8 cos^32 + 0.2 cos^4` of the angle to the sun — a narrow
 forward-scattering halo plus a broad warm cast on the sun side of the sky.
+
+Under the analytic model (`sky_parameters[1] > 0`, N-1) the base is
+`_analytic_sky`, the same function ambient light samples. With
+`render_policy.atmosphere` the sun lobe of `_sun_scatter` is added, the same
+lobe distant surfaces receive, so haze and sky stay matched toward the sun.
+The sky itself is not hazed: it already is the atmosphere along an infinite ray.
 """
 function _sky_view_fragment()
     ray = _normalize_vector(Lava.gfx_input(Vec4f, 0))
@@ -377,11 +387,12 @@ function _sky_view_fragment()
     sun_direction = Lava.gfx_input(Vec4f, 3)
     sun_radiance = Lava.gfx_input(Vec4f, 4)
     parameters = Lava.gfx_input(Vec4f, 5)
-    vertical = ray[2]
-    weight = vertical > 0.0f0 ? sqrt(vertical) : 0.0f0
-    base_red = sky_horizon[1] * (1.0f0 - weight) + sky_top[1] * weight
-    base_green = sky_horizon[2] * (1.0f0 - weight) + sky_top[2] * weight
-    base_blue = sky_horizon[3] * (1.0f0 - weight) + sky_top[3] * weight
+    sky_parameters = Lava.gfx_input(Vec4f, 6)
+    atmosphere_parameters = Lava.gfx_input(Vec4f, 7)
+    base = _sky_radiance(ray, sky_top, sky_horizon, sun_direction, sky_parameters)
+    base_red = base[1]
+    base_green = base[2]
+    base_blue = base[3]
     alignment = max(_dot_vector(ray, sun_direction), 0.0f0)
     disc_t = clamp(
         (alignment - parameters[1]) / max(parameters[2] - parameters[1], 1.0f-7),
@@ -395,15 +406,17 @@ function _sky_view_fragment()
     power16 = power8 * power8
     power32 = power16 * power16
     sun = parameters[3] * disc + parameters[4] * (0.8f0 * power32 + 0.2f0 * power4)
-    Lava.gfx_output(
-        0,
-        Vec4f(
-            base_red + sun_radiance[1] * sun,
-            base_green + sun_radiance[2] * sun,
-            base_blue + sun_radiance[3] * sun,
-            1.0f0,
-        ),
+    sky_color = Vec4f(
+        base_red + sun_radiance[1] * sun,
+        base_green + sun_radiance[2] * sun,
+        base_blue + sun_radiance[3] * sun,
+        1.0f0,
     )
+    if atmosphere_parameters[1] > 0.5f0
+        scattered = _sun_scatter(ray, sun_direction, sun_radiance, atmosphere_parameters[4])
+        sky_color = Vec4f(sky_color[1] + scattered[1], sky_color[2] + scattered[2], sky_color[3] + scattered[3], 1.0f0)
+    end
+    Lava.gfx_output(0, sky_color)
     return nothing
 end
 
@@ -450,10 +463,53 @@ function _sky_view_arguments(
         toward_sun,
         radiance,
         Vec4f(cos_outer, cos_inner, disc_gain, Float32(sky.sun_glow_gain_bp) / POLICY_SCALE_F32),
+        _sky_parameters(packet.render_policy, lighting, packet.environment),
+        _atmosphere_parameters(packet.render_policy),
     )
 end
 
 const POLICY_SCALE_F32 = 10_000.0f0
+
+"""Lower `render_policy.sky.model` into the shader's `sky = (T, Ŷ, 0, 0)`.
+
+Zero means the gradient model (absent sky, or `model` gradient). Under the
+analytic model Ŷ = luminance(sky_top_rgb) / F(0, θs), so the zenith keeps the
+authored brightness and the Perez distribution sets everything relative to it.
+
+The Preetham fit is undefined for a sun at or below the horizon, so that is a
+typed refusal rather than a clamped sky.
+"""
+function _sky_parameters(
+    policy::WGEGraphics.RenderPolicy,
+    lighting::DirectionalLighting,
+    environment::WGEGraphics.EnvironmentPacket,
+)::Vec4f
+    sky = policy.sky
+    (sky === nothing || sky.model !== :analytic) && return Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
+    toward_sun = _normalize_vector(Vec4f(-lighting.direction[1], -lighting.direction[2], -lighting.direction[3], 0.0f0))
+    toward_sun[2] > 0.0f0 || throw(AdapterError(
+        "unsupported_render_policy",
+        "render_policy.sky.model analytic requires the key light above the horizon",
+    ))
+    turbidity = Float32(sky.turbidity_milli) / 1000.0f0
+    theta_s = acos(clamp(toward_sun[2], -1.0f0, 1.0f0))
+    top = environment.sky_top_rgb
+    zenith_luminance = 0.2126f0 * top[1] + 0.7152f0 * top[2] + 0.0722f0 * top[3]
+    return Vec4f(turbidity, zenith_luminance / _perez(turbidity, 1.0f0, theta_s, cos(theta_s)), 0.0f0, 0.0f0)
+end
+
+"""Lower `render_policy.atmosphere` into `(enabled, k [1/m], σ₀ [1/m], sun gain)`.
+Absent is all zeros, which the shaders read as the historical linear fog."""
+function _atmosphere_parameters(policy::WGEGraphics.RenderPolicy)::Vec4f
+    atmosphere = policy.atmosphere
+    atmosphere === nothing && return Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
+    return Vec4f(
+        1.0f0,
+        Float32(atmosphere.height_falloff_milli_per_m) / 1000.0f0,
+        Float32(atmosphere.density_at_ground_bp) / POLICY_SCALE_F32,
+        Float32(atmosphere.sun_scatter_gain_bp) / POLICY_SCALE_F32,
+    )
+end
 
 function _texture_probe_vertex()
     vertex_id = Lava.vertex_index() - Int32(1)
@@ -523,6 +579,201 @@ function _environment_color(
         sky_horizon[2] * (1.0f0 - weight) + ground[2] * weight,
         sky_horizon[3] * (1.0f0 - weight) + ground[3] * weight,
         1.0f0,
+    )
+end
+
+# Preetham, Shirley & Smits (1999), "A Practical Analytic Model for Daylight",
+# Appendix: Perez luminance distribution coefficients A..E as linear functions
+# of turbidity T, each row (slope, offset). Only the LUMINANCE fit is used. The
+# paper's chromaticity fits give a salmon-to-magenta horizon at low turbidity
+# (measured here: r/g/b 0.51/0.44/0.43 across the sun at T = 3; Zotti et al.
+# 2007, "A Critical Review of the Preetham Skylight Model"), so hue comes from
+# the packet's authored gradient instead.
+const PREETHAM_Y = ((0.1787f0, -1.4630f0), (-0.3554f0, 0.4275f0), (-0.0227f0, 5.3251f0), (0.1206f0, -2.5771f0), (-0.0670f0, 0.3703f0))
+
+"""Perez sky luminance distribution F(θ, γ) at turbidity T.
+
+`cos_theta` is the cosine of the view ray's zenith angle, `gamma` the angle
+between the ray and the sun. For T in [2, 10] B is negative, so
+`exp(B / cos_theta)` tends to 0 at the horizon rather than overflowing.
+"""
+@inline function _perez(turbidity::Float32, cos_theta::Float32, gamma::Float32, cos_gamma::Float32)::Float32
+    a = PREETHAM_Y[1][1] * turbidity + PREETHAM_Y[1][2]
+    b = PREETHAM_Y[2][1] * turbidity + PREETHAM_Y[2][2]
+    c = PREETHAM_Y[3][1] * turbidity + PREETHAM_Y[3][2]
+    d = PREETHAM_Y[4][1] * turbidity + PREETHAM_Y[4][2]
+    e = PREETHAM_Y[5][1] * turbidity + PREETHAM_Y[5][2]
+    return (1.0f0 + a * exp(b / cos_theta)) * (1.0f0 + c * exp(d * gamma) + e * cos_gamma * cos_gamma)
+end
+
+"""The CONVERGE-0 gradient sky along `direction`: horizon→zenith along
+`sqrt(ray.y)`, the horizon colour held below the horizon."""
+@inline function _gradient_sky(direction::Vec4f, sky_top::Vec4f, sky_horizon::Vec4f)::Vec4f
+    vertical = direction[2]
+    weight = vertical > 0.0f0 ? sqrt(vertical) : 0.0f0
+    return Vec4f(
+        sky_horizon[1] * (1.0f0 - weight) + sky_top[1] * weight,
+        sky_horizon[2] * (1.0f0 - weight) + sky_top[2] * weight,
+        sky_horizon[3] * (1.0f0 - weight) + sky_top[3] * weight,
+        1.0f0,
+    )
+end
+
+"""Analytic clear sky along `direction` (render_policy.sky.model = analytic).
+
+Luminance is Ŷ·F(θ, γ), the Perez distribution at turbidity T = `sky[1]`, with
+Ŷ = `sky[2]` = luminance(sky_top_rgb) / F(0, θs) so the zenith keeps the
+authored brightness (`_sky_parameters`). That is where the horizon glow toward
+the sun and the darker sky opposite it come from. Hue is the authored gradient
+along the same ray, normalised to unit luminance. Rays below the horizon are
+flattened onto it, holding the horizon value at that azimuth.
+"""
+function _analytic_sky(direction::Vec4f, toward_sun::Vec4f, sky::Vec4f, sky_top::Vec4f, sky_horizon::Vec4f)::Vec4f
+    flattened = _normalize_vector(Vec4f(direction[1], max(direction[2], 0.0f0), direction[3], 0.0f0))
+    cos_gamma = clamp(_dot_vector(flattened, toward_sun), -1.0f0, 1.0f0)
+    luminance = sky[2] * _perez(sky[1], max(flattened[2], 0.001f0), acos(cos_gamma), cos_gamma)
+    hue = _gradient_sky(flattened, sky_top, sky_horizon)
+    scale = luminance / max(0.2126f0 * hue[1] + 0.7152f0 * hue[2] + 0.0722f0 * hue[3], 1.0f-6)
+    return Vec4f(hue[1] * scale, hue[2] * scale, hue[3] * scale, 1.0f0)
+end
+
+"""Sky radiance along a view ray: the analytic model when `sky[1] > 0`, the
+gradient otherwise. The sky pass draws this; the atmosphere fades distant
+surfaces toward it; ambient light samples it (`_sky_environment`)."""
+@inline function _sky_radiance(direction::Vec4f, sky_top::Vec4f, sky_horizon::Vec4f, toward_sun::Vec4f, sky::Vec4f)::Vec4f
+    return sky[1] > 0.0f0 ?
+        _analytic_sky(direction, toward_sun, sky, sky_top, sky_horizon) :
+        _gradient_sky(direction, sky_top, sky_horizon)
+end
+
+"""Environment radiance for ambient light along `direction`.
+
+`sky[1] == 0` is the gradient model and returns `_environment_color` exactly,
+so packets without the analytic model keep their bytes. Under the analytic
+model the sky above the horizon is `_analytic_sky`; below it the horizon value
+at that azimuth blends toward `ground` along the same `sqrt` the gradient uses.
+"""
+function _sky_environment(
+    direction::Vec4f,
+    sky_top::Vec4f,
+    sky_horizon::Vec4f,
+    ground::Vec4f,
+    toward_sun::Vec4f,
+    sky::Vec4f,
+)::Vec4f
+    sky[1] > 0.0f0 || return _environment_color(direction, sky_top, sky_horizon, ground)
+    radiance = _analytic_sky(direction, toward_sun, sky, sky_top, sky_horizon)
+    vertical = clamp(direction[2], -1.0f0, 1.0f0)
+    vertical >= 0.0f0 && return radiance
+    weight = sqrt(-vertical)
+    return Vec4f(
+        radiance[1] * (1.0f0 - weight) + ground[1] * weight,
+        radiance[2] * (1.0f0 - weight) + ground[2] * weight,
+        radiance[3] * (1.0f0 - weight) + ground[3] * weight,
+        1.0f0,
+    )
+end
+
+# Henyey–Greenstein asymmetry for the atmosphere's sun lobe: a moderately
+# forward aerosol phase (haze, not molecules). Normalised so the sphere average
+# is 1: 10x toward the sun, 0.16x away from it.
+const ATMOSPHERE_PHASE_G = 0.6f0
+
+"""Forward-scattered sunlight along a ray: key light × gain × Henyey–Greenstein
+phase. Added to the sky AND to the haze, so both brighten and warm toward the
+sun by the same amount and a distant ridge still meets the sky behind it."""
+@inline function _sun_scatter(direction::Vec4f, toward_sun::Vec4f, sun_radiance::Vec4f, gain::Float32)::Vec4f
+    g = ATMOSPHERE_PHASE_G
+    denominator = max(1.0f0 + g * g - 2.0f0 * g * _dot_vector(direction, toward_sun), 1.0f-4)
+    lobe = gain * (1.0f0 - g * g) / (denominator * sqrt(denominator))
+    return Vec4f(sun_radiance[1] * lobe, sun_radiance[2] * lobe, sun_radiance[3] * lobe, 0.0f0)
+end
+
+"""Light the haze scatters into a view ray (render_policy.atmosphere): the sky
+radiance along that same ray plus the sun lobe. This is the aerial-perspective
+asymptote: as distance grows a surface converges on exactly the sky drawn
+behind it, so distance reads as fading into the sky rather than into a grey."""
+function _inscattered_light(
+    direction::Vec4f,
+    toward_sun::Vec4f,
+    sun_radiance::Vec4f,
+    sky_top::Vec4f,
+    sky_horizon::Vec4f,
+    sky::Vec4f,
+    sun_scatter_gain::Float32,
+)::Vec4f
+    base = _sky_radiance(direction, sky_top, sky_horizon, toward_sun, sky)
+    sun = _sun_scatter(direction, toward_sun, sun_radiance, sun_scatter_gain)
+    return Vec4f(base[1] + sun[1], base[2] + sun[2], base[3] + sun[3], 1.0f0)
+end
+
+"""Haze weight `1 − exp(−τ)` between the camera and a point.
+
+σ(h) = σ₀·exp(−k·h) above the datum y = 0; `atmosphere = (enabled, k, σ₀,
+sun gain)`. The optical depth along the segment integrates exactly:
+τ = σ₀·exp(−k·h_c)·d·(1 − exp(−k·Δh))/(k·Δh). For |k·Δh| < 1e-3 (including
+k = 0, a homogeneous haze) the ratio is replaced by its first-order series,
+which is exact to float precision there and avoids the 0/0.
+"""
+function _haze_weight(
+    camera_height::Float32,
+    point_height::Float32,
+    distance::Float32,
+    atmosphere::Vec4f,
+)::Float32
+    falloff = atmosphere[2]
+    rise = falloff * (point_height - camera_height)
+    ratio = abs(rise) < 1.0f-3 ? 1.0f0 - 0.5f0 * rise : (1.0f0 - exp(-rise)) / rise
+    depth = atmosphere[3] * exp(-falloff * camera_height) * distance * ratio
+    return 1.0f0 - exp(-depth)
+end
+
+"""Fog for one shaded surface point.
+
+`atmosphere[1] < 0.5` is the historical linear fog (`_apply_fog`, unchanged),
+so packets without `render_policy.atmosphere` keep their bytes. With it, the
+surface fades toward `_inscattered_light` by `_haze_weight`; the packet's
+`fog_color_rgb` and `fog_density` are not used, because the haze IS the sky.
+"""
+function _apply_aerial_perspective(
+    color::Vec4f,
+    world_position::Vec4f,
+    camera_position::Vec4f,
+    distance::Float32,
+    fog_color::Vec4f,
+    fog_density::Float32,
+    light_direction::Vec4f,
+    light_color::Vec4f,
+    light_intensity::Float32,
+    sky_top::Vec4f,
+    sky_horizon::Vec4f,
+    sky::Vec4f,
+    atmosphere::Vec4f,
+)::Vec4f
+    atmosphere[1] > 0.5f0 || return _apply_fog(color, fog_color, distance, fog_density)
+    weight = _haze_weight(camera_position[2], world_position[2], distance, atmosphere)
+    direction = _normalize_vector(Vec4f(
+        world_position[1] - camera_position[1],
+        world_position[2] - camera_position[2],
+        world_position[3] - camera_position[3],
+        0.0f0,
+    ))
+    toward_sun = _normalize_vector(Vec4f(-light_direction[1], -light_direction[2], -light_direction[3], 0.0f0))
+    haze = _inscattered_light(
+        direction,
+        toward_sun,
+        Vec4f(light_color[1] * light_intensity, light_color[2] * light_intensity, light_color[3] * light_intensity, 0.0f0),
+        sky_top,
+        sky_horizon,
+        sky,
+        atmosphere[4],
+    )
+    clear = 1.0f0 - weight
+    return Vec4f(
+        color[1] * clear + haze[1] * weight,
+        color[2] * clear + haze[2] * weight,
+        color[3] * clear + haze[3] * weight,
+        color[4],
     )
 end
 
@@ -613,6 +864,7 @@ function _material_response(
     occlusion_strength::Float32,
     emissive_factor::Vec4f,
     emissive_sample::Vec4f,
+    sky::Vec4f,
 )::Vec4f
     surface_normal = _normalize_vector(normal)
     light_vector = _normalize_vector(
@@ -684,21 +936,25 @@ function _material_response(
         specular_denominator
     diffuse_scale = (1.0f0 - metalness) * 0.31830987f0
     direct_scale = light_intensity * normal_light * shadow_visibility
-    environment_diffuse = _environment_color(
+    environment_diffuse = _sky_environment(
         surface_normal,
         environment_top,
         environment_horizon,
         environment_ground,
+        light_vector,
+        sky,
     )
     reflection = _reflect_vector(
         Vec4f(-view_vector[1], -view_vector[2], -view_vector[3], 0.0f0),
         surface_normal,
     )
-    environment_specular = _environment_color(
+    environment_specular = _sky_environment(
         reflection,
         environment_top,
         environment_horizon,
         environment_ground,
+        light_vector,
+        sky,
     )
     occlusion = 1.0f0 -
         clamp(occlusion_strength, 0.0f0, 1.0f0) *
@@ -995,6 +1251,8 @@ and the layered terrain pipelines so their geometry cannot drift apart."""
     emissive_factor::Vec4f,
     shadow::Vec4f,
     uv_repeat::Float32,
+    sky_parameters::Vec4f,
+    atmosphere_parameters::Vec4f,
 )
     vertex_id = Lava.vertex_index() - Int32(1)
     cells_per_axis = resolution - Int32(1)
@@ -1067,6 +1325,8 @@ and the layered terrain pipelines so their geometry cannot drift apart."""
         _terrain_tangent(heights, resolution, sample_x, sample_z, width_m, length_m),
     )
     Lava.gfx_output(17, shadow)
+    Lava.gfx_output(18, sky_parameters)
+    Lava.gfx_output(19, atmosphere_parameters)
     return nothing
 end
 
@@ -1109,8 +1369,10 @@ function _terrain_vertex(
     emissive_factor::Vec4f,
     shadow::Vec4f,
     uv_repeat::Float32,
+    sky_parameters::Vec4f,
+    atmosphere_parameters::Vec4f,
 )
-    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat)
+    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters)
     return nothing
 end
 
@@ -1156,6 +1418,8 @@ function _terrain_layered_vertex(
     emissive_factor::Vec4f,
     shadow::Vec4f,
     uv_repeat::Float32,
+    sky_parameters::Vec4f,
+    atmosphere_parameters::Vec4f,
     layer0_a::Vec4f,
     layer0_b::Vec4f,
     layer1_a::Vec4f,
@@ -1164,14 +1428,14 @@ function _terrain_layered_vertex(
     layer2_b::Vec4f,
     macro_parameters::Vec4f,
 )
-    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat)
-    Lava.gfx_output(18, layer0_a)
-    Lava.gfx_output(19, layer0_b)
-    Lava.gfx_output(20, layer1_a)
-    Lava.gfx_output(21, layer1_b)
-    Lava.gfx_output(22, layer2_a)
-    Lava.gfx_output(23, layer2_b)
-    Lava.gfx_output(24, macro_parameters)
+    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters)
+    Lava.gfx_output(20, layer0_a)
+    Lava.gfx_output(21, layer0_b)
+    Lava.gfx_output(22, layer1_a)
+    Lava.gfx_output(23, layer1_b)
+    Lava.gfx_output(24, layer2_a)
+    Lava.gfx_output(25, layer2_b)
+    Lava.gfx_output(26, macro_parameters)
     return nothing
 end
 
@@ -1210,6 +1474,8 @@ function _mesh_vertex(
     exposure::Float32,
     texture_enabled::Float32,
     shadow::Vec4f,
+    sky_parameters::Vec4f,
+    atmosphere_parameters::Vec4f,
 )
     vertex_id = Lava.vertex_index()
     instance_id = Lava.instance_index()
@@ -1283,6 +1549,8 @@ function _mesh_vertex(
     Lava.gfx_output(15, surface_parameters[instance_id])
     Lava.gfx_output(16, tangent)
     Lava.gfx_output(17, shadow)
+    Lava.gfx_output(18, sky_parameters)
+    Lava.gfx_output(19, atmosphere_parameters)
     return nothing
 end
 
@@ -1900,6 +2168,8 @@ function _terrain_fragment()
     surface_parameters = Lava.gfx_input(Vec4f, 15)
     tangent = Lava.gfx_input(Vec4f, 16)
     shadow = Lava.gfx_input(Vec4f, 17)
+    sky_parameters = Lava.gfx_input(Vec4f, 18)
+    atmosphere_parameters = Lava.gfx_input(Vec4f, 19)
     light_intensity = lighting_parameters[1]
     fog_density = lighting_parameters[2]
     exposure = lighting_parameters[3]
@@ -1941,12 +2211,22 @@ function _terrain_fragment()
         material[4],
         material_emissive,
         emissive_sample,
+        sky_parameters,
     )
-    fogged_color = _apply_fog(
+    fogged_color = _apply_aerial_perspective(
         lit_color,
-        fog_color,
+        world_position,
+        camera_position,
         _distance_between(world_position, camera_position),
+        fog_color,
         fog_density,
+        light_direction,
+        light_color,
+        light_intensity,
+        environment_top,
+        environment_horizon,
+        sky_parameters,
+        atmosphere_parameters,
     )
     Lava.gfx_output(0, fogged_color)
     return nothing
@@ -2036,13 +2316,15 @@ function _terrain_layered_fragment()
     surface_parameters = Lava.gfx_input(Vec4f, 15)
     tangent = Lava.gfx_input(Vec4f, 16)
     shadow = Lava.gfx_input(Vec4f, 17)
-    layer0_a = Lava.gfx_input(Vec4f, 18)
-    layer0_b = Lava.gfx_input(Vec4f, 19)
-    layer1_a = Lava.gfx_input(Vec4f, 20)
-    layer1_b = Lava.gfx_input(Vec4f, 21)
-    layer2_a = Lava.gfx_input(Vec4f, 22)
-    layer2_b = Lava.gfx_input(Vec4f, 23)
-    macro_parameters = Lava.gfx_input(Vec4f, 24)
+    sky_parameters = Lava.gfx_input(Vec4f, 18)
+    atmosphere_parameters = Lava.gfx_input(Vec4f, 19)
+    layer0_a = Lava.gfx_input(Vec4f, 20)
+    layer0_b = Lava.gfx_input(Vec4f, 21)
+    layer1_a = Lava.gfx_input(Vec4f, 22)
+    layer1_b = Lava.gfx_input(Vec4f, 23)
+    layer2_a = Lava.gfx_input(Vec4f, 24)
+    layer2_b = Lava.gfx_input(Vec4f, 25)
+    macro_parameters = Lava.gfx_input(Vec4f, 26)
     u = world_position[1]
     v = -world_position[3]
     slope = 1.0f0 - clamp(_normalize_vector(normal)[2], 0.0f0, 1.0f0)
@@ -2121,8 +2403,23 @@ function _terrain_layered_fragment()
         material[4],
         Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0),
         Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0),
+        sky_parameters,
     )
-    Lava.gfx_output(0, _apply_fog(lit_color, fog_color, distance, lighting_parameters[2]))
+    Lava.gfx_output(0, _apply_aerial_perspective(
+        lit_color,
+        world_position,
+        camera_position,
+        distance,
+        fog_color,
+        lighting_parameters[2],
+        light_direction,
+        light_color,
+        lighting_parameters[1],
+        environment_top,
+        environment_horizon,
+        sky_parameters,
+        atmosphere_parameters,
+    ))
     return nothing
 end
 
@@ -4592,6 +4889,8 @@ function _record_scene_passes!(
         layered_terrain=packet.terrain.layers !== nothing,
     )
     shadow_uniform = _shadow_uniform(packet.render_policy)
+    sky_parameters = _sky_parameters(packet.render_policy, lighting, packet.environment)
+    atmosphere_parameters = _atmosphere_parameters(packet.render_policy)
     texture_resources = _material_texture_resources!(
         state,
         packet,
@@ -4681,6 +4980,8 @@ function _record_scene_passes!(
             Vec4f(material.emissive_factor_rgb..., 1.0f0),
             shadow_uniform,
             Float32(packet.render_policy.terrain_surface.uv_repeat_scale_milli) / 1000.0f0,
+            sky_parameters,
+            atmosphere_parameters,
     )
     if packet.terrain.layers === nothing
         draw!(
@@ -4767,6 +5068,8 @@ function _record_scene_passes!(
                     packet.environment.exposure,
                     batch_texture_enabled,
                     shadow_uniform,
+                    sky_parameters,
+                    atmosphere_parameters,
                 ),
                 instances=batch.instance_count,
                 descriptor_set_layout=batch_texture_resources.bindings.layout,

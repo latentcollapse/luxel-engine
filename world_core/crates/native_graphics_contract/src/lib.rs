@@ -63,9 +63,10 @@ pub use deformation::{
 };
 
 pub use render_policy::{
-    validate_packet_render_policy, validate_render_policy, BloomPolicy, DitherPolicy,
-    GradePolicy, MeshSurfacePolicy, RenderPolicy, ResolvedRenderPolicy, SamplerPolicy,
-    ShadowFitPolicy, ShadowPolicy, SkyPolicy, TerrainSurfacePolicy, VignettePolicy,
+    validate_packet_render_policy, validate_render_policy, AtmospherePolicy, BloomPolicy,
+    DitherPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, ResolvedRenderPolicy,
+    SamplerPolicy, ShadowFitPolicy, ShadowPolicy, SkyModel, SkyPolicy, TerrainSurfacePolicy,
+    VignettePolicy,
     POLICY_SCALE,
 };
 
@@ -3921,6 +3922,10 @@ pub enum ParityPolicyCandidate {
     /// the policy and content are only meaningful together, and
     /// `ParityContent::from_env` refuses converge0 content under any other arm.
     Converge0,
+    /// CONVERGE-1 N-1: `Converge0` plus the analytic (Preetham) sky and the
+    /// exponential height-dependent atmosphere, on the same converge0 content,
+    /// so the only difference from `Converge0` is sky and aerial perspective.
+    Converge1,
 }
 
 /// Content flags for the parity experiments, orthogonal to the render policy.
@@ -3971,11 +3976,11 @@ impl ParityContent {
         if policy == ParityPolicyCandidate::HeroMaterials {
             content.hero_materials = true;
         }
-        if policy == ParityPolicyCandidate::Converge0 {
+        if policy.uses_converge0_content() {
             content.converge0 = true;
         } else if content.converge0 {
             return Err(GraphicsContractError::malformed(format!(
-                "converge0 content requires {PARITY_POLICY_ENV}=converge0: its metric \
+                "converge0 content requires {PARITY_POLICY_ENV}=converge0 or converge1: its metric \
                  UVs need mesh repeat wrap and its extended world needs the \
                  view-relative shadow fit"
             )));
@@ -4019,11 +4024,33 @@ const CONVERGE0_TERRAIN_TILING: TerrainSurfacePolicy = TerrainSurfacePolicy {
     macro_frequency_milli: 15,
 };
 
+/// CONVERGE-1 sky: the converge0 sun disc on the analytic (Preetham) model.
+pub const CONVERGE1_SKY: SkyPolicy = SkyPolicy {
+    sun_disc_radius_milli_deg: 650,
+    sun_disc_gain_bp: 120_000,
+    sun_glow_gain_bp: 2_400,
+    model: Some(SkyModel::Analytic { turbidity_milli: 3000 }),
+};
+
+/// CONVERGE-1 atmosphere (values are tuned by measurement; see
+/// WGE_CONVERGE1_CONTRACTS.md §1 implementation notes).
+pub const CONVERGE1_ATMOSPHERE: AtmospherePolicy = AtmospherePolicy {
+    height_falloff_milli_per_m: 10,
+    density_at_ground_bp: 45,
+    sun_scatter_gain_bp: 300,
+};
+
 /// Shadow distance for the converge0 view-relative fit. 60 m covers every
 /// authored object in the wide view while keeping the 512² map at ~4 texels/m.
 pub const CONVERGE0_SHADOW_DISTANCE_M: i32 = 60;
 
 impl ParityPolicyCandidate {
+    /// Arms that render the converge0 world (extended terrain, metric UVs,
+    /// layered scanned ground). Their content and policy are only valid together.
+    pub fn uses_converge0_content(self) -> bool {
+        matches!(self, Self::Converge0 | Self::Converge1)
+    }
+
     pub fn from_env() -> Self {
         match std::env::var(PARITY_POLICY_ENV).as_deref() {
             Ok("dither") => Self::Dither,
@@ -4034,6 +4061,7 @@ impl ParityPolicyCandidate {
             Ok("terrain") => Self::Terrain,
             Ok("hero-materials") => Self::HeroMaterials,
             Ok("converge0") => Self::Converge0,
+            Ok("converge1") => Self::Converge1,
             _ => Self::Null,
         }
     }
@@ -4111,8 +4139,17 @@ impl ParityPolicyCandidate {
                         sun_disc_radius_milli_deg: 650,
                         sun_disc_gain_bp: 120_000,
                         sun_glow_gain_bp: 2_400,
+                        model: None,
                     }),
                     ..full
+                })
+            }
+            Self::Converge1 => {
+                let converge0 = Self::Converge0.policy().expect("Converge0 always carries a policy");
+                Some(RenderPolicy {
+                    sky: Some(CONVERGE1_SKY),
+                    atmosphere: Some(CONVERGE1_ATMOSPHERE),
+                    ..converge0
                 })
             }
             Self::HeroMaterials => Some(RenderPolicy::default()),
@@ -4344,9 +4381,9 @@ pub fn lower_campaign2_packet_with(
     terrain_layers: Option<&TerrainLayerSet>,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
     validate_scene_packet(packet)?;
-    if parity_content.converge0 != (parity_candidate == ParityPolicyCandidate::Converge0) {
+    if parity_content.converge0 != parity_candidate.uses_converge0_content() {
         return Err(GraphicsContractError::malformed(
-            "converge0 content and the converge0 render policy are only valid together",
+            "converge0 content and the converge0/converge1 render policies are only valid together",
         ));
     }
     // N-4: the converge0 world is surfaced by a scanned layer set, passed in

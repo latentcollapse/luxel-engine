@@ -8,9 +8,28 @@ Three contracts. Each names the owner layer, the permitted files, the tests, the
 acceptance evidence, and the non-goals. None of them may start until the
 CONVERGE-0 human review has answered "what does your eye hit first?"
 
+> **Gate answered 2026-10-03:** "the odd fire-hydrant shrine lookin thing, but
+> also that we have a real landscape and lighting." Not "a test scene", so the gate
+> passes. Order approved: N-1 → CALIBRATION-1 → N-2. The hero prop is CONVERGE-2
+> content. "Distance reads as distance" (C0-3) and tile repetition (N4-2) were not
+> answered; C0-3 is N-1's human acceptance item.
+
 ---
 
 ## 1. N-1 — Sky and atmosphere (remainder)
+
+> **Status: IMPLEMENTED (2026-10-04), human acceptance open.** Arm `converge1`
+> (`WGE_PARITY_RENDER_POLICY=converge1`, converge0 content). Measured: sun-side
+> horizon 2.72x the anti-sun horizon (target >= 1.15x, met); backdrop/foreground
+> contrast ratio 0.65 (target <= 0.40, NOT met; converge0 measures 1.21). Null,
+> `full` and converge0 render byte-identical to before (9/9 views). Edge
+> authority all `good` (657 / 479 / 224 bp). Review sheets:
+> `artifacts/parity/review-converge1/` (vs converge0) and
+> `artifacts/parity/review-converge1-dense/` (vs a denser haze that measures 0.42).
+> Implementation notes at the end of this section.
+> **Human acceptance (2026-10-04, close sheet vs converge0):** distance reads as
+> distance — "it's reading as distance, yeah." Character: "I wouldn't call it
+> milky, I'd call it foggy zone for sure though."
 
 ### What CONVERGE-0 already landed
 
@@ -55,6 +74,71 @@ CONVERGE-0 human review has answered "what does your eye hit first?"
 - **Acceptance (human, mandatory):** "distance reads as distance" on the
   converge0 wide view, side by side with CONVERGE-0.
 - **Non-goals:** volumetric clouds, god rays, multiple scattering, time of day.
+
+### Implementation (N-1)
+
+- **Schema:** `SkyPolicy.model: Option<SkyModel>` (`gradient {}` | `analytic
+  { turbidity_milli in [2000, 10000] }`, absent = gradient, key omitted) and
+  `RenderPolicy.atmosphere: Option<AtmospherePolicy>` (k in [0, 1000] milli/m,
+  σ₀ in [0, 1000] bp/m, sun gain in [0, 20000] bp). Atmosphere requires `sky`.
+  Mirrored and `_exact_keys`-checked in `WGEGraphics.jl`. `Gradient` is an
+  empty struct variant because serde ignores `deny_unknown_fields` on unit
+  variants of internally tagged enums (a test caught `{"kind":"gradient",
+  "turbidity_milli":3000}` being accepted).
+- **Sky:** luminance = Perez distribution with the Preetham turbidity fit,
+  scaled so the zenith keeps `luminance(sky_top_rgb)`. Hue = the authored
+  gradient along the same ray. Preetham's chromaticity fits were implemented
+  first and dropped: measured on CPU they give a salmon horizon at T = 3 (r/g/b
+  0.51/0.44/0.43 across the sun) and magenta at T = 2, the known defect
+  (Zotti et al. 2007); the first render's sky read lavender.
+- **One function:** `_sky_radiance` is what the sky pass draws, what haze fades
+  toward, and (via `_sky_environment`) what ambient samples.
+- **Atmosphere:** closed-form optical depth of σ₀·exp(−k·h) along each
+  camera→surface segment (checked against quadrature to 2e-5). Surfaces fade
+  toward `sky_radiance(ray) + sun lobe` (Henyey–Greenstein, g = 0.6). The sky
+  pass gets the same lobe and is NOT fogged: the first version also fogged the
+  sky along its (finite) column, which turned the whole sky into an overcast
+  sheet at any density that hazed the ridge. With the sky as the asymptote a
+  distant ridge converges on exactly the sky behind it, and `fog_color_rgb` /
+  `fog_density` are unused under this axis.
+- **Plumbing:** two vertex-output slots (18 sky, 19 atmosphere; layered terrain
+  layer uniforms moved to 20–26, 27 of 32 slots). Lava's `frag_args` are typed
+  but never packed, so fragment shaders still receive per-draw values only as
+  vertex outputs.
+
+### Corrections to this contract
+
+1. "Linear fog over-hazes the near field and under-hazes the far field" is
+   backwards at equal density: 1 − exp(−σd) ≤ σd for all d, so exponential haze
+   is always weaker, and tuning it to haze the ridge raises near-field haze too.
+   What N-1 actually gains is (a) haze that converges on the sky behind each
+   pixel instead of a constant grey, (b) a sky with sun-side glow and anti-sun
+   darkening, (c) valleys hazier than ridges.
+2. The ratio target (<= 0.40) was set without measurement. This world's ridge
+   is ~150–500 m away; fogging it that hard needs a ~500 m visual range, which
+   puts ~18% haze on objects 30 m away (`review-converge1-dense/`, 0.42). The
+   chosen setting (σ₀ 45 bp, k 10 milli/m) reaches 0.65 with a clean near
+   field. Real aerial perspective acts over kilometres; a larger world, not a
+   denser fog, is what closes the gap. The threshold was NOT changed and the
+   image was NOT tuned to it.
+
+### Measurement (`tools/atmosphere_measure.py`)
+
+Depth is reconstructed by marching each pixel's ray against the packet's terrain
+with the renderer's triangulation (silhouettes verified against the frame);
+meshes are masked by projected bounding spheres. Michelson contrast across
+terrain occlusion edges, classed by near-side distance: backdrop >= 150 m
+against sky, foreground <= 100 m against terrain. The foreground cut was 60 m
+as first written; the wide view has no terrain occlusion edge nearer than
+~80 m, so it was moved to 100 m from geometry alone before any converge1 frame
+was measured. Control: converge0 = 1.21 (fails, as it should).
+
+| Arm | backdrop | foreground | ratio |
+|---|---|---|---|
+| converge0 | 0.263 | 0.218 | 1.21 |
+| converge1, first design (sky fogged, σ₀ 50, k 15) | 0.114 | 0.169 | 0.67 |
+| converge1, dense (σ₀ 70, k 10) | 0.058 | 0.137 | 0.42 |
+| **converge1 (σ₀ 45, k 10)** | 0.109 | 0.168 | **0.65** |
 
 ---
 
