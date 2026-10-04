@@ -43,6 +43,7 @@ const REFERENCE_FOG_WEIGHT_AT_CAMERA: f64 = 0.16;
 const MAX_REFERENCE_FOG_DENSITY: f64 = 0.006;
 
 pub mod asset_projection;
+pub mod calibration;
 pub mod deformation;
 pub mod input_session;
 pub mod live;
@@ -64,7 +65,7 @@ pub use deformation::{
 
 pub use render_policy::{
     validate_packet_render_policy, validate_render_policy, AtmospherePolicy, BloomPolicy,
-    DitherPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, ResolvedRenderPolicy,
+    DebugPolicy, DitherPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, ResolvedRenderPolicy,
     SamplerPolicy, ShadowFitPolicy, ShadowPolicy, SkyModel, SkyPolicy, TerrainSurfacePolicy,
     VignettePolicy,
     POLICY_SCALE,
@@ -75,7 +76,8 @@ pub use asset_projection::{
     GRAPHICS_ASSET_PROJECTION_SCHEMA, GraphicsAssetMesh, GraphicsAssetProjection,
     GraphicsAssetTexture, project_render_asset, validate_graphics_asset_projection,
 };
-pub use scene_composition::{compose_bound_scene, compose_bound_scene_with_camera};
+pub use scene_composition::{compose_bound_scene, compose_bound_scene_with_camera, compose_bound_scene_with_view};
+pub use calibration::{CalibrationPlacement, CalibrationRig, CalibrationView};
 pub use terrain_layers::{
     LayerCoverage, LayerSource, LayerTextureSizes, MacroRamp, SquareRgba8, TerrainLayer,
     TerrainLayerSet, TerrainLayers, apply_terrain_layers, build_terrain_layer_set,

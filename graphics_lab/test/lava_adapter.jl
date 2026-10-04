@@ -511,8 +511,17 @@ end
 
     @test LavaAdapter._shadow_up_hint(Vec4f(0.0f0, 0.0f0, 1.0f0, 0.0f0)) ==
         Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)
+    # A vertical sun used to get the +Y hint (collinear: basis construction
+    # threw). It now gets +X; every existing light (|y| <= 0.952) keeps +Y.
+    @test LavaAdapter._shadow_up_hint(Vec4f(0.0f0, -1.0f0, 0.0f0, 0.0f0)) ==
+        Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)
     @test LavaAdapter._shadow_up_hint(Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0)) ==
+        Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)
+    @test LavaAdapter._shadow_up_hint(Vec4f(0.1905f0, -0.9524f0, -0.2381f0, 0.0f0)) ==
         Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0)
+    overhead = LavaAdapter._normalize_vector(Vec4f(0.0f0, -1.0f0, 0.0f0, 0.0f0))
+    forward, right, up = LavaAdapter._basis_vectors(overhead, LavaAdapter._shadow_up_hint(overhead), "overhead sun")
+    @test all(isfinite, right) && abs(LavaAdapter._dot_vector(right, forward)) < 1.0f-6
 end
 
 @testset "persistent Lava adapter" begin

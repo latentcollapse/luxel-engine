@@ -30,6 +30,8 @@ CONVERGE-0 human review has answered "what does your eye hit first?"
 > **Human acceptance (2026-10-04, close sheet vs converge0):** distance reads as
 > distance — "it's reading as distance, yeah." Character: "I wouldn't call it
 > milky, I'd call it foggy zone for sure though."
+> Density: the 45 bp setting is preferred over 70 bp ("close_baseline looks
+> better than close_dense").
 
 ### What CONVERGE-0 already landed
 
@@ -184,6 +186,22 @@ gradient at different brightness.
 
 ## 3. CALIBRATION-1 — The material calibration scene
 
+> **Status: IMPLEMENTED (2026-10-04), human acceptance open.** `render-calibration`
+> renders the scene through the authorized bound-scene route under four
+> enumerated rigs: 52 frames (4 rigs x row + 10 close views, 8 sun grazing
+> views). Grey card: sun +2.5%, overcast +0.2% / +0.9% (gate ±5%, met). Null,
+> `full`, converge0 and converge1 byte-identical to before (12/12 views).
+> Review sheets: `artifacts/calibration/run2/sheets/{sun,overcast,grazing,sun-albedo-grey}.png`
+> and `run2/sheets-grazing/sun.png`. As predicted, metal and rough metal read
+> near-black and nearly alike: N-2's first input.
+>
+> **Human review (2026-10-04, sun row and close views):** "These all look really
+> good. The dark rusted metal too. Bark could be a tad better ... I could tell
+> the difference between wet stone and dry stone." Wet vs dry stone: identified
+> (the N-2 blind-identification item, already met on this scene before IBL).
+> Open from the review: bark quality; a way to make different VARIETIES of each
+> material (content tooling, not this contract).
+
 ### Why it was parked from CONVERGE-0
 
 Step 9 assumed a calibration scene was a fixture. Research in CONVERGE-0
@@ -254,6 +272,72 @@ all four maps (≈ 213 MB) does not.
 - **Non-goals:** foliage (until alpha), IBL (N-2 consumes this scene, it does
   not wait for it — metal and wet are EXPECTED to fail before N-2 and that
   failure is the scene's first useful output).
+
+### Implementation (CALIBRATION-1)
+
+- **Content route.** `tools/calibration_materials/calibration1.json` pins 25 Poly
+  Haven CC0 files (URL, bytes, sha256, provider md5 — all 25 matched; the
+  `forrest_ground_01` digests equal the N-4 manifest's). `tools/fetch_calibration_materials.py`
+  downloads and box-reduces them in numpy (albedo in linear light, normals
+  renormalised), deterministically. `tools/build_calibration_glb.py` refuses any
+  set whose digests do not match, and writes one deterministic GLB (8.1 MB,
+  32 meshes, 16 materials, 29 images, 13.4k vertices) to the ignored tree.
+- **Geometry.** Plinth row of nine columns (metal, rough metal, stone, wet
+  stone, bark + cylinder, wood, painted, terrain slab, emissive sphere), each a
+  1 m UV sphere, a 1 m cube with 2.5 cm chamfer and a 2 x 1 m slab leaning 15°;
+  a calibration group (0.03 / 0.18 / 0.85 cards, chrome and 0.18 balls, 1 m
+  checker strip of 5 cm checks); a 34 x 7 m 0.18 ground plane. UVs are metric
+  divided by each scan's measured size. Rough metal remaps roughness to
+  0.45 + 0.55 r; wet stone is albedo x 0.6 linear +10% saturation, normals at
+  0.4 slope, roughness factor 0.25.
+- **Gates (met).** `prepare` and render conditioning: ready, ZERO findings, zero
+  tangent fallbacks, every scan mipped (`tests/calibration.rs`, run with
+  `--include-ignored` after fetching). Packet 34.3 MB of the 64 MB worker frame.
+- **Rig seam.** `CalibrationRig { Sun, Overcast, Grazing, SunAlbedoGrey }`
+  (`src/calibration.rs`) sets lights, environment and render policy from
+  constants; `compose_bound_scene_with_view` applies it and
+  `BoundSceneRenderAuthorization.rig` makes the supervisor re-apply it and
+  require an exact match, exactly like the camera. `None` is byte-identical to
+  the camera-only composition (`tests/scene_composition.rs`). No bloom,
+  vignette, grade, dither or fog; 22 m view-fitted shadows (~4 cm texels; the
+  40 m converge0 fit drew a 0.5 m ball's shadow as a blob).
+- **Debug view.** `render_policy.debug { albedo_override_bp }` (Rust, Julia,
+  shaders); absent = authored albedo, byte-identical.
+- **Host placement.** riverwatch, anchor (−16, −26.5), yawed 180° so cameras
+  look into the world: the 34 x 7 m footprint is clear of all 43 instances
+  (searched, not guessed) with 0.33 m of terrain relief; the ground plane sits
+  3 cm above the highest terrain sample under it. The row view had to move up
+  and in (and to 2.4:1) because from 21 m back the camera stood outside the
+  world and half the frame was void.
+- **Grey card.** Target = middle grey through the renderer's tone map:
+  f(0.18) = 0.2669 → sRGB8 141.1. Fixed exposure per lighting setup, set on the
+  card as a calibration shoot would: sun 1.0 (measured 144.7, +2.5%); overcast
+  2.57 (1.0 measured sRGB 77 = 0.070 linear; now 141.3 / 142.3, +0.2% / +0.9%);
+  grazing keeps the sun's 1.0 (a backlit card should read dark: 58–70).
+  `render-calibration` exits non-zero if a sun or overcast view composed to
+  frame the card measures outside ±5%.
+
+### Defects found and fixed on the way (all byte-identical for existing content)
+
+1. **Imported PBR materials could not render.** `project_render_asset` put every
+   referenced map into `texture_ids`, which the adapter samples as the single
+   albedo slot ("native path supports one albedo texture per material"). The
+   C2.5 log-hut had base-colour maps only, so no imported asset with a full PBR
+   set had ever reached the renderer. Now: base colour only; the validator
+   requires every named slot to resolve (`tests/asset_projection.rs`).
+2. **A vertical sun failed shadow-basis construction.** `_shadow_up_hint` tested
+   z instead of y. Now switches above |y| = 0.99; every existing light
+   (steepest |y| = 0.952) keeps its basis.
+3. **Alpha 1.0000001 at extreme grazing.** Filtering an opaque texture returned
+   one ulp over 1 and the capture check refused the frame; alpha is clamped
+   where it is produced. The capture error now names the pixel and value.
+
+### Findings recorded, not changed
+
+- Render conditioning drops glTF `normalTexture.scale` and
+  `occlusionTexture.strength` (the projection hardcodes 1.0), the same class of
+  channel-semantics gap as the ignored metallic channel; wet stone's normal
+  scale is baked into its own map instead.
 
 ---
 

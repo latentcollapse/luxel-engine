@@ -1,0 +1,239 @@
+{
+  "schema_version": "wge.calibration-material-manifest/v1",
+  "set_id": "calibration1",
+  "provider": "polyhaven.com",
+  "license": "CC0-1.0",
+  "cache_dir": "artifacts/calibration/calibration1",
+  "note": "WGE_CONVERGE1_CONTRACTS.md \u00a73. Sources are the 1K JPGs; sized PNGs are exact box reductions (albedo in linear light, normals renormalised). Physical size comes from the provider's dimensions and sets the UV scale in tools/build_calibration_glb.py.",
+  "texture_sizes_px": {
+    "albedo": 512,
+    "normal_gl": 512,
+    "roughness": 256,
+    "ao": 256,
+    "metal": 256
+  },
+  "materials": [
+    {
+      "source_asset": "metal_plate",
+      "maps": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/metal_plate/metal_plate_diff_1k.jpg",
+          "provider_md5": "bd9daf4c04046ca392a38b8df955ed26",
+          "bytes": 692234,
+          "sha256": "sha256:c6b6739eac2c75ccc898e753d7833df24eafbdb9aa92fb6eabfb92abd1a680a5"
+        },
+        "normal_gl": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/metal_plate/metal_plate_nor_gl_1k.jpg",
+          "provider_md5": "d379e66130ad6ccff217ac9b13de935d",
+          "bytes": 770307,
+          "sha256": "sha256:994f851a84d52b51e97906021a1b7070ee6eac9a789fef041132268de47d8e6b"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/metal_plate/metal_plate_rough_1k.jpg",
+          "provider_md5": "6e1c8672d804b90546a23db621515b16",
+          "bytes": 775206,
+          "sha256": "sha256:756308485ce742a52831453c296452f48cf0adead7d85adfffd34c08dce23ec1"
+        },
+        "ao": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/metal_plate/metal_plate_ao_1k.jpg",
+          "provider_md5": "544f16f963e8904495834a94c71c7078",
+          "bytes": 565996,
+          "sha256": "sha256:715f90d663af5366ff7839369161b6ad42786aed5f3fc1409ba20fa635aaeacd"
+        },
+        "metal": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/metal_plate/metal_plate_metal_1k.jpg",
+          "provider_md5": "d6d59f8873eec1777a0b30985c2534c6",
+          "bytes": 884738,
+          "sha256": "sha256:ad13cd09b12dd7b14efd3796f17d9be969644497620d9351cb7cafb450979b19"
+        }
+      },
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "dimensions_mm": [
+        500,
+        500
+      ]
+    },
+    {
+      "source_asset": "rock_wall_08",
+      "maps": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_wall_08/rock_wall_08_diff_1k.jpg",
+          "provider_md5": "d75a5bea1a06474902c3af8cbfd5960b",
+          "bytes": 768570,
+          "sha256": "sha256:9cd907e8d8ce9317bc51a840a9e87b547fdf768aa61f5288aaee0f6fbcaac2ac"
+        },
+        "normal_gl": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_wall_08/rock_wall_08_nor_gl_1k.jpg",
+          "provider_md5": "9c969040b794c63238577cf770001d8d",
+          "bytes": 1236281,
+          "sha256": "sha256:862f7ed95069bc629d63d0dc18c6c2ad7a96c7c9534b7629e9e90e3896793168"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_wall_08/rock_wall_08_rough_1k.jpg",
+          "provider_md5": "73692fe27411ae16688f7db7e0dc3281",
+          "bytes": 435510,
+          "sha256": "sha256:8f8a1a0fe766fa72f0c8a40443bfa6260a626655137e2be224771c82d4f826d2"
+        },
+        "ao": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_wall_08/rock_wall_08_ao_1k.jpg",
+          "provider_md5": "fbec7faa4446b5844ba5f492d568a1c2",
+          "bytes": 653607,
+          "sha256": "sha256:f9e1a6d40844a9258334050e6d7de908263a4ea76707e1be73db67e78cc2b815"
+        }
+      },
+      "authors": [
+        "Amal Kumar"
+      ],
+      "dimensions_mm": [
+        1800,
+        1800
+      ]
+    },
+    {
+      "source_asset": "bark_willow_02",
+      "maps": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_willow_02/bark_willow_02_diff_1k.jpg",
+          "provider_md5": "384e25dd87b6b606458c9aa5f84735aa",
+          "bytes": 998966,
+          "sha256": "sha256:95e1380566834aab220bd8ea9a5287f3bfff46910c18017fcb46ebbbe832024f"
+        },
+        "normal_gl": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_willow_02/bark_willow_02_nor_gl_1k.jpg",
+          "provider_md5": "eb381e522a4053d6ca4ce7e31c77dcd3",
+          "bytes": 1358916,
+          "sha256": "sha256:7d6f905fe7225d96741d191f6ee61c0681603570d28f14e7678df6a3019bc48d"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_willow_02/bark_willow_02_rough_1k.jpg",
+          "provider_md5": "ab7b9a693d9edcfeaa606b7219c64193",
+          "bytes": 498100,
+          "sha256": "sha256:b9d690f5a5fc411b89c6301273ac03ab0a5910c8a16a96839df223aff4bf794d"
+        },
+        "ao": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_willow_02/bark_willow_02_ao_1k.jpg",
+          "provider_md5": "1ecca1731bf27a555eb5c21339ab16ce",
+          "bytes": 979197,
+          "sha256": "sha256:7fdfd01ee8c13f7c33c640254a6932258b13bc422b658f13625f11f4851df971"
+        }
+      },
+      "authors": [
+        "Charlotte Baglioni"
+      ],
+      "dimensions_mm": [
+        2150,
+        2150
+      ]
+    },
+    {
+      "source_asset": "wood_planks_grey",
+      "maps": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/wood_planks_grey/wood_planks_grey_diff_1k.jpg",
+          "provider_md5": "f2b4a70fed329c13850917c5f2d1498c",
+          "bytes": 228279,
+          "sha256": "sha256:d758be23e8fe7bfbd73bc4ab257cfd59406e1835f6557c12a67cd4fdb15de0d8"
+        },
+        "normal_gl": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/wood_planks_grey/wood_planks_grey_nor_gl_1k.jpg",
+          "provider_md5": "fe633ea606ac22b732d4204a7fa52b03",
+          "bytes": 157419,
+          "sha256": "sha256:5e570e57d688b016b217b9e8e0592f9a8b3364406e22bf6cd775da990452bdb6"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/wood_planks_grey/wood_planks_grey_rough_1k.jpg",
+          "provider_md5": "eb620bf4c075153d9272de00f1bf7633",
+          "bytes": 186804,
+          "sha256": "sha256:ef640502cec94bd2b6500e252891a778a7a721be16b5536d4efc9fe4d99b12aa"
+        },
+        "ao": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/wood_planks_grey/wood_planks_grey_ao_1k.jpg",
+          "provider_md5": "f673336074d6b8c8008a48cfd7757b97",
+          "bytes": 52532,
+          "sha256": "sha256:baee35ae240bd5a39e005b1f40fec7fe3f16d2158e954e913737d73699d4cee9"
+        }
+      },
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "dimensions_mm": [
+        1500,
+        1500
+      ]
+    },
+    {
+      "source_asset": "painted_plaster_wall",
+      "maps": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/painted_plaster_wall/painted_plaster_wall_diff_1k.jpg",
+          "provider_md5": "15ba8c1f63a5ab412b1eabe31728540a",
+          "bytes": 686726,
+          "sha256": "sha256:440310f05af089f2c93353167573403cbc3f805948203237b5d26431eeb9e19c"
+        },
+        "normal_gl": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/painted_plaster_wall/painted_plaster_wall_nor_gl_1k.jpg",
+          "provider_md5": "43fff290583dbdfc9bfa088a2750e840",
+          "bytes": 900461,
+          "sha256": "sha256:8eb01647d126eb5341e2c325821ad48c8ca11349dbef53447c95422c5d91cc9d"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/painted_plaster_wall/painted_plaster_wall_rough_1k.jpg",
+          "provider_md5": "e076a6360329a2bc18c7397dc50c074a",
+          "bytes": 354762,
+          "sha256": "sha256:e0564c297b22ab1cf4ef02a82157b84ce3b92eb4fd49d9c64b7256a8b300af82"
+        },
+        "ao": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/painted_plaster_wall/painted_plaster_wall_ao_1k.jpg",
+          "provider_md5": "53304166d9a6943d41c7bae037fba208",
+          "bytes": 555806,
+          "sha256": "sha256:4f2080ec7cf0f30b3947c54e707507802acb1b4247afc8cdd35f60d34b54e4a0"
+        }
+      },
+      "authors": [
+        "Amal Kumar"
+      ],
+      "dimensions_mm": [
+        2000,
+        2000
+      ]
+    },
+    {
+      "source_asset": "forrest_ground_01",
+      "maps": {
+        "albedo": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forrest_ground_01/forrest_ground_01_diff_1k.jpg",
+          "provider_md5": "236e7d928f5e357a194fd92de189cbe4",
+          "bytes": 833711,
+          "sha256": "sha256:3dd6875cb3908e022a3c45ebbffa5e84c670ff2691fbbb6dc9ea4bff88523800"
+        },
+        "normal_gl": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forrest_ground_01/forrest_ground_01_nor_gl_1k.jpg",
+          "provider_md5": "ba4265df25aea293913d004b69ef9ab0",
+          "bytes": 1428763,
+          "sha256": "sha256:32528a7cdee962cc0b248ee4023a74d0df175737ea90e1eb425122351e0bdab4"
+        },
+        "roughness": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forrest_ground_01/forrest_ground_01_rough_1k.jpg",
+          "provider_md5": "72dacf5b829cafc025f08ca64e92e5eb",
+          "bytes": 257165,
+          "sha256": "sha256:30d8b56a03d7b12da16f58011b675662a40e58e1cdc768119a5f03968140058c"
+        },
+        "ao": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forrest_ground_01/forrest_ground_01_ao_1k.jpg",
+          "provider_md5": "e4bf07c1a9b664468b3ec419179ac8a8",
+          "bytes": 660492,
+          "sha256": "sha256:a3632232fa080e28239d456526a3f0c83e0a404515581339b9d6633324dca6a4"
+        }
+      },
+      "authors": [
+        "Rob Tuytel"
+      ],
+      "dimensions_mm": [
+        2000,
+        2000
+      ]
+    }
+  ]
+}

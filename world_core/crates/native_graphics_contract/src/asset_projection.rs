@@ -83,19 +83,12 @@ pub fn project_render_asset(
         .materials
         .iter()
         .map(|material| {
-            let texture_ids = [
-                material.base_color_texture_id.as_deref(),
-                material.metallic_roughness_texture_id.as_deref(),
-                material.normal_texture_id.as_deref(),
-                material.occlusion_texture_id.as_deref(),
-                material.emissive_texture_id.as_deref(),
-            ]
-            .into_iter()
-            .flatten()
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
+            // `texture_ids` is the ALBEDO slot (the adapter samples it as base
+            // colour and refuses more than one); every other map has its own
+            // named slot below. This used to list every referenced texture,
+            // which the adapter rejected for any imported material carrying
+            // more than a base-colour map (found by CALIBRATION-1).
+            let texture_ids = material.base_color_texture_id.iter().cloned().collect();
             MaterialIntent {
                 material_id: material.material_id.clone(),
                 base_color_rgba: material.base_color_rgba,
@@ -253,8 +246,21 @@ pub fn validate_graphics_asset_projection(
         }
     }
     for material in &projection.materials {
-        for texture_id in &material.texture_ids {
-            if !texture_ids.contains(texture_id.as_str()) {
+        if material.texture_ids.len() > 1 {
+            return Err(GraphicsContractError::provenance(format!(
+                "material {} has {} albedo textures; the native path samples one",
+                material.material_id,
+                material.texture_ids.len()
+            )));
+        }
+        let slots = [
+            material.normal_texture_id.as_deref(),
+            material.roughness_texture_id.as_deref(),
+            material.occlusion_texture_id.as_deref(),
+            material.emissive_texture_id.as_deref(),
+        ];
+        for texture_id in material.texture_ids.iter().map(String::as_str).chain(slots.into_iter().flatten()) {
+            if !texture_ids.contains(texture_id) {
                 return Err(GraphicsContractError::provenance(format!(
                     "material {} references unknown texture {}",
                     material.material_id, texture_id

@@ -9,7 +9,7 @@
 
 use wge_native_graphics_contract::{
     BloomPolicy, DitherPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, SamplerPolicy,
-    ShadowFitPolicy, ShadowPolicy, SkyModel, SkyPolicy, AtmospherePolicy, TerrainSurfacePolicy, VignettePolicy, canonical_json, seal_scene_packet, validate_render_policy,
+    ShadowFitPolicy, ShadowPolicy, SkyModel, SkyPolicy, AtmospherePolicy, DebugPolicy, TerrainSurfacePolicy, VignettePolicy, canonical_json, seal_scene_packet, validate_render_policy,
     validate_scene_packet, GraphicsContractError, GraphicsScenePacketBody, POLICY_SCALE,
     SCENE_PACKET_SCHEMA,
 };
@@ -507,6 +507,7 @@ fn a_full_policy_survives_serde_round_trip_and_revalidates() {
             density_at_ground_bp: 50,
             sun_scatter_gain_bp: 300,
         }),
+        debug: Some(DebugPolicy { albedo_override_bp: 5000 }),
     });
     b.schema_version = SCENE_PACKET_SCHEMA.into();
     validate_render_policy(b.render_policy.as_ref().unwrap()).expect("full policy validates");

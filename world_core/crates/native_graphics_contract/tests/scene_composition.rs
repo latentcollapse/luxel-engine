@@ -240,3 +240,27 @@ fn bound_scene_rejects_world_or_source_identity_drift() {
         "fedcbafedcbafedcbafedcbafedcbafedcbafedcbafedcbafedcbafedcbafedcba".into();
     assert!(compose_bound_scene(body(), &scene(), &[wrong_asset]).is_err());
 }
+
+/// CALIBRATION-1 rig seam: no rig is the camera-only composition exactly; a
+/// rig changes ONLY lights, environment, render policy and the packet id, and
+/// every enumerated rig yields a distinct packet (so the supervisor's exact
+/// recomposition check distinguishes them).
+#[test]
+fn calibration_rig_seam_changes_only_lighting_and_is_enumerated() {
+    use wge_native_graphics_contract::{CalibrationRig, compose_bound_scene_with_camera, compose_bound_scene_with_view};
+    let plain = compose_bound_scene_with_camera(&mut body(), &scene(), &[asset()], None).unwrap();
+    let no_rig = compose_bound_scene_with_view(&mut body(), &scene(), &[asset()], None, None).unwrap();
+    assert_eq!(plain, no_rig, "rig None must be byte-identical to the camera-only seam");
+
+    let mut digests = std::collections::BTreeSet::new();
+    for rig in CalibrationRig::ALL {
+        let lit = compose_bound_scene_with_view(&mut body(), &scene(), &[asset()], None, Some(rig)).unwrap();
+        let mut expected = plain.body.clone();
+        expected.packet_id = format!("{}-rig-{}", plain.body.packet_id, rig.name());
+        rig.apply(&mut expected);
+        assert_eq!(lit.body, expected, "{rig:?} must change only lights, environment, policy and id");
+        assert_eq!(CalibrationRig::parse(rig.name()), Some(rig));
+        assert!(digests.insert(lit.packet_sha256.clone()), "{rig:?} is not distinct");
+    }
+    assert_eq!(CalibrationRig::parse("noon"), None, "rigs are enumerated, not free parameters");
+}

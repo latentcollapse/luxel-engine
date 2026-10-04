@@ -748,10 +748,211 @@ fn run() -> Result<(), String> {
             }
             Ok(())
         }
+        Some("render-calibration") => run_render_calibration(arguments.collect()),
         _ => {
-            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-world-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-quality-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       wge-native-graphics-contract render-campaign2-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]\n       wge-native-graphics-contract benchmark-dense-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES] DENSE_BACKGROUND_INSTANCES".into())
+            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-world-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-quality-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       wge-native-graphics-contract render-campaign2-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]\n       wge-native-graphics-contract benchmark-dense-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES] DENSE_BACKGROUND_INSTANCES\n       wge-native-graphics-contract render-calibration LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER CALIBRATION_GLB OUTPUT_DIR [--rigs all|sun,overcast,grazing,sun-albedo-grey] [--views all|row|close|grazing|VIEW,...]".into())
         }
     }
+}
+
+/// CALIBRATION-1 (WGE_CONVERGE1_CONTRACTS.md §3): render the material
+/// calibration scene through the authorized bound-scene route, for each
+/// requested enumerated rig and derived view.
+fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
+    use wge_asset_contract::{PreparationStatus, RenderPreparationStatus, condition_render_asset, prepare_asset};
+    use wge_native_graphics_contract::calibration::{
+        GREY_CARD_TARGET_SRGB8, grey_card_local_center, project_local_point, render_request, runtime_request,
+    };
+    use wge_native_graphics_contract::{
+        BoundSceneRenderAuthorization, CalibrationPlacement, CalibrationRig, CalibrationView,
+        compose_bound_scene_with_view, project_render_asset, validate_graphics_asset_projection,
+    };
+
+    const USAGE: &str = "render-calibration LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER CALIBRATION_GLB OUTPUT_DIR [--rigs ...] [--views ...]";
+    let mut positional = Vec::new();
+    let mut rig_filter = "all".to_owned();
+    let mut view_filter = "row,close-calibration".to_owned();
+    let mut rest = arguments.into_iter();
+    while let Some(argument) = rest.next() {
+        match argument.as_str() {
+            "--rigs" => rig_filter = rest.next().ok_or_else(|| format!("--rigs needs a value; {USAGE}"))?,
+            "--views" => view_filter = rest.next().ok_or_else(|| format!("--views needs a value; {USAGE}"))?,
+            _ => positional.push(argument),
+        }
+    }
+    let [layout, julia, terrain_lab, graphics_project, worker, glb_path, output_dir]: [String; 7] =
+        positional.try_into().map_err(|_| USAGE.to_owned())?;
+    let layout = canonical_path(PathBuf::from(layout), "layout")?;
+    let julia = PathBuf::from(julia);
+    let terrain_lab = canonical_path(PathBuf::from(terrain_lab), "terrain lab")?;
+    let graphics_project = canonical_path(PathBuf::from(graphics_project), "graphics project")?;
+    let worker = canonical_path(PathBuf::from(worker), "graphics worker")?;
+    let output_dir = PathBuf::from(output_dir);
+
+    let rigs: Vec<CalibrationRig> = if rig_filter == "all" {
+        CalibrationRig::ALL.to_vec()
+    } else {
+        rig_filter
+            .split(',')
+            .map(|name| CalibrationRig::parse(name.trim()).ok_or_else(|| format!("unknown calibration rig `{name}`")))
+            .collect::<Result<_, _>>()?
+    };
+    let all_views = CalibrationView::all();
+    let views: Vec<CalibrationView> = if view_filter == "all" {
+        all_views
+    } else {
+        let tokens: Vec<&str> = view_filter.split(',').map(str::trim).collect();
+        let selected: Vec<CalibrationView> = all_views
+            .into_iter()
+            .filter(|view| {
+                let name = view.name();
+                tokens.iter().any(|token| {
+                    *token == name || name.split('-').next() == Some(*token) && !token.contains('-')
+                })
+            })
+            .collect();
+        if selected.is_empty() {
+            return Err(format!("--views `{view_filter}` selects no calibration view"));
+        }
+        selected
+    };
+
+    let glb = fs::read(&glb_path).map_err(|error| format!("cannot read {glb_path}: {error}"))?;
+    let render_receipt = condition_render_asset(&glb, &render_request()).map_err(|error| error.to_string())?;
+    if render_receipt.status != RenderPreparationStatus::Ready || !render_receipt.findings.is_empty() {
+        return Err(format!("calibration GLB failed render conditioning: {:?}", render_receipt.findings));
+    }
+    let package = render_receipt.package.as_ref().expect("a ready receipt has a package");
+    let runtime_receipt = prepare_asset(&glb, &runtime_request(&glb, package).map_err(|e| e.to_string())?)
+        .map_err(|error| error.to_string())?;
+    if runtime_receipt.status != PreparationStatus::Ready || !runtime_receipt.findings.is_empty() {
+        return Err(format!("calibration GLB failed prepare: {:?}", runtime_receipt.findings));
+    }
+    let projection = project_render_asset(package).map_err(|error| error.to_string())?;
+    validate_graphics_asset_projection(&projection).map_err(|error| error.to_string())?;
+
+    let world = build_from_layout_path(&layout, &julia, &terrain_lab).map_err(|error| error.to_string())?;
+    let reference = lower_reference_world(&world.world).map_err(|error| error.to_string())?;
+    let base = lower_objective_close_packet(&reference).map_err(|error| error.to_string())?;
+    let placement = CalibrationPlacement::for_world(&world.world).map_err(|error| error.to_string())?;
+    let scene = wge_native_graphics_contract::calibration::calibration_scene(
+        &world.world,
+        &runtime_receipt,
+        package,
+        placement,
+    )
+    .map_err(|error| error.to_string())?;
+    let card_local = grey_card_local_center(package).map_err(|error| error.to_string())?;
+
+    let mut supervisor = GraphicsWorkerSupervisor::start(&julia, &graphics_project, &worker)
+        .map_err(|error| error.to_string())?;
+    supervisor.capabilities().map_err(|error| error.to_string())?;
+    fs::create_dir_all(&output_dir)
+        .map_err(|error| format!("cannot create {}: {error}", output_dir.display()))?;
+    write_json_artifact(&output_dir.join("scene_artifact.json"), &scene)?;
+
+    let mut renders = Vec::new();
+    let mut gate_failures = Vec::new();
+    for rig in &rigs {
+        for view in &views {
+            let started = Instant::now();
+            let camera = view.camera(package, placement).map_err(|error| error.to_string())?;
+            let mut body = base.body.clone();
+            let packet = compose_bound_scene_with_view(
+                &mut body,
+                &scene,
+                std::slice::from_ref(&projection),
+                Some(&camera),
+                Some(*rig),
+            )
+            .map_err(|error| format!("{} {} composition failed: {error}", rig.name(), view.name()))?;
+            let promoted = supervisor
+                .render_bound_scene_and_promote(
+                    &packet,
+                    &world.world,
+                    BoundSceneRenderAuthorization {
+                        base_packet: &base,
+                        scene: &scene,
+                        asset_receipts: std::slice::from_ref(&runtime_receipt),
+                        render_packages: std::slice::from_ref(package),
+                        assets: std::slice::from_ref(&projection),
+                        camera: Some(&camera),
+                        rig: Some(*rig),
+                    },
+                )
+                .map_err(|error| format!("{} {} render failed: {error}", rig.name(), view.name()))?;
+            let certification = deterministic_certification_frame_receipt(&packet, &promoted.receipt, &promoted.capture_bytes)
+                .map_err(|error| error.to_string())?;
+            let dir = output_dir.join(rig.name()).join(view.name());
+            fs::create_dir_all(&dir).map_err(|error| format!("cannot create {}: {error}", dir.display()))?;
+            let (width, height) = (promoted.frame.width_px, promoted.frame.height_px);
+            let ppm = rgba8_to_ppm(&promoted.capture_bytes, width, height)?;
+            fs::write(dir.join("native_capture.ppm"), &ppm).map_err(|error| error.to_string())?;
+            fs::write(dir.join("native_capture.rgba"), &promoted.capture_bytes).map_err(|error| error.to_string())?;
+            write_json_artifact(&dir.join("graphics_frame_receipt.json"), &certification)?;
+            write_json_artifact(&dir.join("graphics_renderer_attestation.json"), &promoted.renderer_attestation)?;
+            // The 18% card, 5x5 px mean of sRGB, in the two views composed to
+            // frame it. Other views may have the distant card inside the
+            // frustum but small or occluded, which is not a measurement.
+            let frames_card = matches!(view, CalibrationView::Row) || *view == CalibrationView::Close("calibration".into());
+            let grey_card = frames_card.then(|| project_local_point(&camera, placement, card_local)).flatten().map(|(px, py)| {
+                let mut sum = 0.0f64;
+                let mut count = 0.0f64;
+                for y in py.saturating_sub(2)..=(py + 2).min(height - 1) {
+                    for x in px.saturating_sub(2)..=(px + 2).min(width - 1) {
+                        let i = ((y * width + x) * 4) as usize;
+                        sum += promoted.capture_bytes[i..i + 3].iter().map(|v| f64::from(*v)).sum::<f64>() / 3.0;
+                        count += 1.0;
+                    }
+                }
+                let mean = sum / count;
+                serde_json::json!({
+                    "pixel": [px, py],
+                    "srgb8_mean": mean,
+                    "target_srgb8": GREY_CARD_TARGET_SRGB8,
+                    "relative_error": (mean - f64::from(GREY_CARD_TARGET_SRGB8)) / f64::from(GREY_CARD_TARGET_SRGB8),
+                })
+            });
+            let entry = serde_json::json!({
+                "rig": rig.name(),
+                "view": view.name(),
+                "packet_sha256": packet.packet_sha256,
+                "packet_bytes": serde_json::to_vec(&packet).map(|bytes| bytes.len()).unwrap_or(0),
+                "capture_sha256": sha256_prefixed(&promoted.capture_bytes),
+                "frame_receipt_sha256": certification.receipt_sha256,
+                "grey_card": grey_card,
+                "wall_time_ms": started.elapsed().as_millis() as u64,
+            });
+            eprintln!("calibration {} {} {}", rig.name(), view.name(), entry["capture_sha256"]);
+            // Contract §3 gate: the 18% card within ±5% of middle grey under
+            // the rigs whose exposure is calibrated on it (sun, overcast).
+            if matches!(rig, CalibrationRig::Sun | CalibrationRig::Overcast)
+                && let Some(error) = entry["grey_card"]["relative_error"].as_f64()
+                && error.abs() > 0.05
+            {
+                gate_failures.push(format!("{}: grey card {:+.1}% from target", view.name(), error * 100.0));
+            }
+            renders.push(entry);
+        }
+    }
+    let summary = serde_json::json!({
+        "schema_version": "wge.native-graphics-calibration/v1",
+        "contract": "WGE_CONVERGE1_CONTRACTS.md §3 CALIBRATION-1",
+        "world_artifact_id": world.world.artifact_id,
+        "glb_sha256": sha256_prefixed(&glb),
+        "runtime_receipt_sha256": runtime_receipt.receipt_sha256,
+        "render_receipt_sha256": render_receipt.receipt_sha256,
+        "scene_artifact_sha256": scene.artifact_sha256,
+        "placement_anchor_xyz_m": placement.anchor_xyz_m,
+        "renders": renders,
+        "gate_failures": gate_failures,
+    });
+    write_json_artifact(&output_dir.join("calibration_summary.json"), &summary)?;
+    println!("{}", serde_json::to_string_pretty(&summary).map_err(|error| error.to_string())?);
+    if !gate_failures.is_empty() {
+        return Err(format!("calibration grey-card gate failed: {gate_failures:?}"));
+    }
+    Ok(())
 }
 
 fn write_json_artifact<T: Serialize>(path: &PathBuf, value: &T) -> Result<(), String> {

@@ -79,7 +79,10 @@ fn package() -> RenderAssetPackage {
 }
 
 fn sealed_package() -> RenderAssetPackage {
-    let mut package = package();
+    seal(package())
+}
+
+fn seal(mut package: RenderAssetPackage) -> RenderAssetPackage {
     let mut value = serde_json::to_value(&package).expect("package serializes");
     value
         .as_object_mut()
@@ -160,4 +163,47 @@ fn projection_preserves_multilevel_payload_and_digest() {
     };
     levels[1].width_px = 2;
     assert!(validate_graphics_asset_projection(&tampered).is_err());
+}
+
+fn data_texture(texture_id: &str, index: usize, color_space: RenderTextureColorSpace) -> RenderTexture {
+    let mut texture = package().textures.remove(0);
+    texture.texture_id = texture_id.into();
+    texture.source_texture_index = index;
+    texture.source_image_index = index;
+    texture.color_space = color_space;
+    texture
+}
+
+/// CALIBRATION-1 regression: a material with every PBR map used to project
+/// ALL of them into `texture_ids`, which the adapter samples as the single
+/// albedo slot and refuses ("native path supports one albedo texture per
+/// material"). Only base colour belongs there; the rest have named slots.
+#[test]
+fn full_pbr_material_projects_one_albedo_and_named_slots() {
+    let mut full = package();
+    full.materials[0].metallic_roughness_texture_id = Some("orm".into());
+    full.materials[0].normal_texture_id = Some("normal".into());
+    full.materials[0].occlusion_texture_id = Some("ao".into());
+    full.materials[0].emissive_texture_id = Some("glow".into());
+    full.textures.extend([
+        data_texture("orm", 1, RenderTextureColorSpace::Linear),
+        data_texture("normal", 2, RenderTextureColorSpace::NormalMap),
+        data_texture("ao", 3, RenderTextureColorSpace::Linear),
+        data_texture("glow", 4, RenderTextureColorSpace::Srgb),
+    ]);
+    let projection = project_render_asset(&seal(full)).expect("full PBR material projects");
+    let material = &projection.materials[0];
+    assert_eq!(material.texture_ids, vec!["albedo"], "texture_ids is the albedo slot only");
+    assert_eq!(material.roughness_texture_id.as_deref(), Some("orm"));
+    assert_eq!(material.normal_texture_id.as_deref(), Some("normal"));
+    assert_eq!(material.occlusion_texture_id.as_deref(), Some("ao"));
+    assert_eq!(material.emissive_texture_id.as_deref(), Some("glow"));
+    validate_graphics_asset_projection(&projection).expect("projection revalidates");
+
+    let mut dangling = projection.clone();
+    dangling.materials[0].normal_texture_id = Some("missing".into());
+    assert!(validate_graphics_asset_projection(&dangling).is_err(), "named slots must resolve");
+    let mut doubled = projection;
+    doubled.materials[0].texture_ids.push("orm".into());
+    assert!(validate_graphics_asset_projection(&doubled).is_err(), "one albedo texture per material");
 }

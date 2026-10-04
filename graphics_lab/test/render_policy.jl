@@ -801,3 +801,20 @@ end
     behind = LavaAdapter._inscattered_light(ray, N1_SUN, Vec4f(5.0f0, 4.1f0, 3.1f0, 0.0f0), N1_TOP, N1_HORIZON, sky, 0.03f0)
     @test all(isapprox.(fogged[1:3], behind[1:3]; rtol=1e-3))
 end
+
+@testset "CALIBRATION-1 debug albedo override" begin
+    parsed = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("debug" => Dict("albedo_override_bp" => 5000))))
+    @test parsed.debug.albedo_override_bp == 5000
+    @test WGEGraphics.RenderPolicy().debug === nothing
+    @test WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => N1_SKY))).debug === nothing
+    refuses(overrides) = @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(N1_POLICY_JSON(overrides))
+    refuses(Dict("debug" => Dict("albedo_override_bp" => 10001)))
+    refuses(Dict("debug" => Dict("albedo_override_bp" => -1)))
+    refuses(Dict("debug" => Dict("albedo_override_bp" => 5000, "normals" => true)))
+    # Absent: zeros, and the override is the identity (packets keep their bytes).
+    @test LavaAdapter._debug_parameters(WGEGraphics.RenderPolicy()) == N1_ZERO
+    color = Vec4f(0.3f0, 0.6f0, 0.1f0, 0.8f0)
+    @test LavaAdapter._albedo_override(color, N1_ZERO) === color
+    forced = LavaAdapter._albedo_override(color, LavaAdapter._debug_parameters(parsed))
+    @test forced == Vec4f(0.5f0, 0.5f0, 0.5f0, 0.8f0)  # alpha is kept
+end

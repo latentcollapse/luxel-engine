@@ -498,6 +498,13 @@ function _sky_parameters(
     return Vec4f(turbidity, zenith_luminance / _perez(turbidity, 1.0f0, theta_s, cos(theta_s)), 0.0f0, 0.0f0)
 end
 
+"""Lower `render_policy.debug` into `(enabled, linear albedo, 0, 0)`; absent is zeros."""
+function _debug_parameters(policy::WGEGraphics.RenderPolicy)::Vec4f
+    debug = policy.debug
+    debug === nothing && return Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
+    return Vec4f(1.0f0, Float32(debug.albedo_override_bp) / POLICY_SCALE_F32, 0.0f0, 0.0f0)
+end
+
 """Lower `render_policy.atmosphere` into `(enabled, k [1/m], σ₀ [1/m], sun gain)`.
 Absent is all zeros, which the shaders read as the historical linear fog."""
 function _atmosphere_parameters(policy::WGEGraphics.RenderPolicy)::Vec4f
@@ -777,6 +784,13 @@ function _apply_aerial_perspective(
     )
 end
 
+"""Diagnostic albedo override (render_policy.debug): `debug = (enabled, albedo)`.
+Disabled returns `color` unchanged, so packets without the axis keep their bytes."""
+@inline function _albedo_override(color::Vec4f, debug::Vec4f)::Vec4f
+    debug[1] > 0.5f0 || return color
+    return Vec4f(debug[2], debug[2], debug[2], color[4])
+end
+
 function _reflect_vector(incident::Vec4f, normal::Vec4f)::Vec4f
     scale = 2.0f0 * _dot_vector(incident, normal)
     return Vec4f(
@@ -1016,7 +1030,10 @@ function _textured_color(
         base_color[1] * (1.0f0 - weight + weight * sampled[1]),
         base_color[2] * (1.0f0 - weight + weight * sampled[2]),
         base_color[3] * (1.0f0 - weight + weight * sampled[3]),
-        base_color[4] * (1.0f0 - weight + weight * sampled[4]),
+        # Alpha is coverage. Filtering an opaque texture at an extreme grazing
+        # angle returned 1.0000001 (CALIBRATION-1 grazing view), which the
+        # capture check rightly refuses; clamped, every alpha <= 1 is unchanged.
+        clamp(base_color[4] * (1.0f0 - weight + weight * sampled[4]), 0.0f0, 1.0f0),
     )
 end
 
@@ -1253,6 +1270,7 @@ and the layered terrain pipelines so their geometry cannot drift apart."""
     uv_repeat::Float32,
     sky_parameters::Vec4f,
     atmosphere_parameters::Vec4f,
+    debug_parameters::Vec4f,
 )
     vertex_id = Lava.vertex_index() - Int32(1)
     cells_per_axis = resolution - Int32(1)
@@ -1327,6 +1345,7 @@ and the layered terrain pipelines so their geometry cannot drift apart."""
     Lava.gfx_output(17, shadow)
     Lava.gfx_output(18, sky_parameters)
     Lava.gfx_output(19, atmosphere_parameters)
+    Lava.gfx_output(20, debug_parameters)
     return nothing
 end
 
@@ -1371,8 +1390,9 @@ function _terrain_vertex(
     uv_repeat::Float32,
     sky_parameters::Vec4f,
     atmosphere_parameters::Vec4f,
+    debug_parameters::Vec4f,
 )
-    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters)
+    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters, debug_parameters)
     return nothing
 end
 
@@ -1420,6 +1440,7 @@ function _terrain_layered_vertex(
     uv_repeat::Float32,
     sky_parameters::Vec4f,
     atmosphere_parameters::Vec4f,
+    debug_parameters::Vec4f,
     layer0_a::Vec4f,
     layer0_b::Vec4f,
     layer1_a::Vec4f,
@@ -1428,14 +1449,14 @@ function _terrain_layered_vertex(
     layer2_b::Vec4f,
     macro_parameters::Vec4f,
 )
-    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters)
-    Lava.gfx_output(20, layer0_a)
-    Lava.gfx_output(21, layer0_b)
-    Lava.gfx_output(22, layer1_a)
-    Lava.gfx_output(23, layer1_b)
-    Lava.gfx_output(24, layer2_a)
-    Lava.gfx_output(25, layer2_b)
-    Lava.gfx_output(26, macro_parameters)
+    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters, debug_parameters)
+    Lava.gfx_output(21, layer0_a)
+    Lava.gfx_output(22, layer0_b)
+    Lava.gfx_output(23, layer1_a)
+    Lava.gfx_output(24, layer1_b)
+    Lava.gfx_output(25, layer2_a)
+    Lava.gfx_output(26, layer2_b)
+    Lava.gfx_output(27, macro_parameters)
     return nothing
 end
 
@@ -1476,6 +1497,7 @@ function _mesh_vertex(
     shadow::Vec4f,
     sky_parameters::Vec4f,
     atmosphere_parameters::Vec4f,
+    debug_parameters::Vec4f,
 )
     vertex_id = Lava.vertex_index()
     instance_id = Lava.instance_index()
@@ -1551,6 +1573,7 @@ function _mesh_vertex(
     Lava.gfx_output(17, shadow)
     Lava.gfx_output(18, sky_parameters)
     Lava.gfx_output(19, atmosphere_parameters)
+    Lava.gfx_output(20, debug_parameters)
     return nothing
 end
 
@@ -2170,6 +2193,7 @@ function _terrain_fragment()
     shadow = Lava.gfx_input(Vec4f, 17)
     sky_parameters = Lava.gfx_input(Vec4f, 18)
     atmosphere_parameters = Lava.gfx_input(Vec4f, 19)
+    debug_parameters = Lava.gfx_input(Vec4f, 20)
     light_intensity = lighting_parameters[1]
     fog_density = lighting_parameters[2]
     exposure = lighting_parameters[3]
@@ -2192,7 +2216,7 @@ function _terrain_fragment()
     occlusion_sample = _sample_texture(UInt32(3), uv)[1]
     emissive_sample = _sample_texture(UInt32(4), uv)
     lit_color = _material_response(
-        _textured_color(base_color, uv, texture_enabled),
+        _albedo_override(_textured_color(base_color, uv, texture_enabled), debug_parameters),
         _perturbed_normal(normal, tangent, uv, material[3]),
         light_direction,
         light_color,
@@ -2318,13 +2342,14 @@ function _terrain_layered_fragment()
     shadow = Lava.gfx_input(Vec4f, 17)
     sky_parameters = Lava.gfx_input(Vec4f, 18)
     atmosphere_parameters = Lava.gfx_input(Vec4f, 19)
-    layer0_a = Lava.gfx_input(Vec4f, 20)
-    layer0_b = Lava.gfx_input(Vec4f, 21)
-    layer1_a = Lava.gfx_input(Vec4f, 22)
-    layer1_b = Lava.gfx_input(Vec4f, 23)
-    layer2_a = Lava.gfx_input(Vec4f, 24)
-    layer2_b = Lava.gfx_input(Vec4f, 25)
-    macro_parameters = Lava.gfx_input(Vec4f, 26)
+    debug_parameters = Lava.gfx_input(Vec4f, 20)
+    layer0_a = Lava.gfx_input(Vec4f, 21)
+    layer0_b = Lava.gfx_input(Vec4f, 22)
+    layer1_a = Lava.gfx_input(Vec4f, 23)
+    layer1_b = Lava.gfx_input(Vec4f, 24)
+    layer2_a = Lava.gfx_input(Vec4f, 25)
+    layer2_b = Lava.gfx_input(Vec4f, 26)
+    macro_parameters = Lava.gfx_input(Vec4f, 27)
     u = world_position[1]
     v = -world_position[3]
     slope = 1.0f0 - clamp(_normalize_vector(normal)[2], 0.0f0, 1.0f0)
@@ -2376,7 +2401,10 @@ function _terrain_layered_fragment()
     roughness_sample = _mix(_mix(rough0, rough1, weight1), rough2, weight2)
     occlusion_sample = _mix(_mix(occlusion0, occlusion1, weight1), occlusion2, weight2)
     macro_scale = 1.0f0 + macro_parameters[2] * (macro_value * 2.0f0 - 1.0f0)
-    surface_color = Vec4f(albedo[1] * macro_scale, albedo[2] * macro_scale, albedo[3] * macro_scale, 1.0f0)
+    surface_color = _albedo_override(
+        Vec4f(albedo[1] * macro_scale, albedo[2] * macro_scale, albedo[3] * macro_scale, 1.0f0),
+        debug_parameters,
+    )
     view_direction = Vec4f(
         camera_position[1] - world_position[1],
         camera_position[2] - world_position[2],
@@ -2689,7 +2717,10 @@ function _rgba8(
         index -> begin
             channel = Float32(value[index])
             isfinite(channel) && 0.0f0 <= channel <= 1.0f0 ||
-                throw(AdapterError("invalid_capture", "RGBA channel is outside [0, 1]"))
+                throw(AdapterError(
+                    "invalid_capture",
+                    "RGBA channel is outside [0, 1]: pixel ($x, $y) channel $index = $channel",
+                ))
             encoded = index == 4 ? channel : _linear_to_srgb(channel)
             if index != 4 && dither_amplitude_lsb > 0.0f0
                 # amplitude is in LSB; one LSB in encoded [0,1] space is 1/255.
@@ -3515,8 +3546,17 @@ function _basis_vectors(
     return forward, right, up
 end
 
+"""Up hint for a directional light's shadow basis.
+
++Y unless the light is near +-Z or within ~8 deg of vertical. The vertical test
+was missing (only z was checked), so a sun straight overhead was collinear
+with its +Y hint and failed basis construction (found by CALIBRATION-1's
+overcast rig). The 0.99 threshold leaves every existing light (steepest
+|y| = 0.952) on its old basis, byte-identical.
+"""
 function _shadow_up_hint(direction::Vec4f)::Vec4f
-    return abs(direction[3]) < 0.9f0 ?
+    vertical = abs(_normalize_vector(direction)[2])
+    return abs(direction[3]) < 0.9f0 && vertical < 0.99f0 ?
         Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0) :
         Vec4f(1.0f0, 0.0f0, 0.0f0, 0.0f0)
 end
@@ -4891,6 +4931,7 @@ function _record_scene_passes!(
     shadow_uniform = _shadow_uniform(packet.render_policy)
     sky_parameters = _sky_parameters(packet.render_policy, lighting, packet.environment)
     atmosphere_parameters = _atmosphere_parameters(packet.render_policy)
+    debug_parameters = _debug_parameters(packet.render_policy)
     texture_resources = _material_texture_resources!(
         state,
         packet,
@@ -4982,6 +5023,7 @@ function _record_scene_passes!(
             Float32(packet.render_policy.terrain_surface.uv_repeat_scale_milli) / 1000.0f0,
             sky_parameters,
             atmosphere_parameters,
+            debug_parameters,
     )
     if packet.terrain.layers === nothing
         draw!(
@@ -5070,6 +5112,7 @@ function _record_scene_passes!(
                     shadow_uniform,
                     sky_parameters,
                     atmosphere_parameters,
+                    debug_parameters,
                 ),
                 instances=batch.instance_count,
                 descriptor_set_layout=batch_texture_resources.bindings.layout,

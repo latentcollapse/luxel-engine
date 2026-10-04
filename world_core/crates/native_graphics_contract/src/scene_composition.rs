@@ -8,6 +8,7 @@ use wge_project_ledger::{
     project_scene_for_graphics, validate_scene_artifact,
 };
 
+use crate::calibration::CalibrationRig;
 use crate::{
     GraphicsAssetProjection, GraphicsContractError, GraphicsScenePacket, GraphicsScenePacketBody,
     InstanceImportance, InstancePacket, Transform3d, seal_scene_packet,
@@ -36,6 +37,21 @@ pub fn compose_bound_scene_with_camera(
     scene: &SceneArtifact,
     assets: &[GraphicsAssetProjection],
     camera: Option<&crate::GraphicsCamera>,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    compose_bound_scene_with_view(body, scene, assets, camera, None)
+}
+
+/// `compose_bound_scene_with_camera` plus an enumerated calibration light rig
+/// (CALIBRATION-1). The rig replaces the base projection's lights, environment
+/// and render policy with its constants; it is a name, not free parameters, so
+/// the supervisor re-applies it and requires an exact match exactly as it does
+/// for the camera. `None` is the camera-only composition, byte-identical.
+pub fn compose_bound_scene_with_view(
+    body: &mut GraphicsScenePacketBody,
+    scene: &SceneArtifact,
+    assets: &[GraphicsAssetProjection],
+    camera: Option<&crate::GraphicsCamera>,
+    rig: Option<CalibrationRig>,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
     let mut body = body.clone();
     validate_scene_artifact(scene).map_err(|error| {
@@ -146,6 +162,10 @@ pub fn compose_bound_scene_with_camera(
         body.capture.camera_id = camera.camera_id.clone();
         body.capture.width_px = camera.width_px;
         body.capture.height_px = camera.height_px;
+    }
+    if let Some(rig) = rig {
+        body.packet_id = format!("{}-rig-{}", body.packet_id, rig.name());
+        rig.apply(&mut body);
     }
     seal_scene_packet(body)
 }

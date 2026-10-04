@@ -316,6 +316,11 @@ struct AtmospherePolicy
     sun_scatter_gain_bp::Int32
 end
 
+# Diagnostic albedo override (CALIBRATION-1). Absence renders authored albedo.
+struct DebugPolicy
+    albedo_override_bp::Int32
+end
+
 struct RenderPolicy
     grade::GradePolicy
     bloom::BloomPolicy
@@ -328,6 +333,7 @@ struct RenderPolicy
     shadow_fit::Union{Nothing,ShadowFitPolicy}
     sky::Union{Nothing,SkyPolicy}
     atmosphere::Union{Nothing,AtmospherePolicy}
+    debug::Union{Nothing,DebugPolicy}
 end
 
 RenderPolicy() = RenderPolicy(
@@ -342,9 +348,11 @@ RenderPolicy() = RenderPolicy(
     nothing,
     nothing,
     nothing,
+    nothing,
 )
 
-# The ten-axis form predates N-1: no atmosphere means linear fog.
+# The ten-axis form predates N-1: no atmosphere means linear fog, no debug
+# override means authored albedo.
 RenderPolicy(
     grade::GradePolicy,
     bloom::BloomPolicy,
@@ -357,7 +365,7 @@ RenderPolicy(
     shadow_fit::Union{Nothing,ShadowFitPolicy},
     sky::Union{Nothing,SkyPolicy},
 ) = RenderPolicy(
-    grade, bloom, vignette, dither, terrain_surface, sampler, shadow, mesh_surface, shadow_fit, sky, nothing,
+    grade, bloom, vignette, dither, terrain_surface, sampler, shadow, mesh_surface, shadow_fit, sky, nothing, nothing,
 )
 
 # The seven-axis form predates CONVERGE-0; the three newer axes default to
@@ -382,6 +390,7 @@ RenderPolicy(
     nothing,
     nothing,
     nothing,
+    nothing,
 )
 
 const RENDER_POLICY_KEYS = (
@@ -396,6 +405,7 @@ const RENDER_POLICY_KEYS = (
     "shadow_fit",
     "sky",
     "atmosphere",
+    "debug",
 )
 
 abstract type OverlayPacket end
@@ -765,6 +775,13 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     else
         nothing
     end
+    debug = if haskey(value, "debug")
+        d = _object(value["debug"], "render_policy.debug")
+        _exact_keys(d, ("albedo_override_bp",), "render_policy.debug")
+        DebugPolicy(_bounded_bp(d["albedo_override_bp"], "debug.albedo_override_bp", 0, 10_000))
+    else
+        nothing
+    end
     atmosphere !== nothing && sky === nothing && throw(ProtocolError(
         "malformed_packet",
         "render_policy.atmosphere requires the view-direction sky (render_policy.sky)",
@@ -781,6 +798,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
         shadow_fit,
         sky,
         atmosphere,
+        debug,
     )
 end
 

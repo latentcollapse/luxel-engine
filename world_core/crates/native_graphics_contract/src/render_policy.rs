@@ -377,6 +377,19 @@ pub struct AtmospherePolicy {
     pub sun_scatter_gain_bp: i32,
 }
 
+/// Diagnostic overrides for calibration views (CALIBRATION-1).
+///
+/// PRESENT forces the albedo of every lit surface (terrain, layers and meshes)
+/// to `albedo_override_bp / 10000` in linear light, so material identity can be
+/// judged from roughness, normals, AO and metalness with colour removed.
+/// Emission is untouched. ABSENT renders authored albedo, byte-identical.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DebugPolicy {
+    /// Forced linear albedo, basis points. Range [0, 10000].
+    pub albedo_override_bp: i32,
+}
+
 /// The complete typed policy set. Every field is `Option`, so an absent field
 /// means "declared default" and the packet stays minimal — but the DEFAULTS are
 /// here, not in the renderer, so they are auditable and testable.
@@ -405,6 +418,8 @@ pub struct RenderPolicy {
     pub sky: Option<SkyPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub atmosphere: Option<AtmospherePolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug: Option<DebugPolicy>,
 }
 
 impl RenderPolicy {
@@ -424,16 +439,17 @@ impl RenderPolicy {
             shadow_fit: self.shadow_fit,
             sky: self.sky,
             atmosphere: self.atmosphere,
+            debug: self.debug,
         }
     }
 }
 
 /// A `RenderPolicy` with every field resolved. This is what the adapter binds.
 ///
-/// `shadow_fit`, `sky` and `atmosphere` stay optional after resolution: their
-/// absence selects a different code path (the historical whole-world fit,
-/// screen-space sky, linear fog), not a default parameter value, so there is
-/// no honest default to resolve to.
+/// `shadow_fit`, `sky`, `atmosphere` and `debug` stay optional after
+/// resolution: their absence selects a different code path (the historical
+/// whole-world fit, screen-space sky, linear fog, authored albedo), not a
+/// default parameter value, so there is no honest default to resolve to.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ResolvedRenderPolicy {
     pub grade: GradePolicy,
@@ -447,6 +463,7 @@ pub struct ResolvedRenderPolicy {
     pub shadow_fit: Option<ShadowFitPolicy>,
     pub sky: Option<SkyPolicy>,
     pub atmosphere: Option<AtmospherePolicy>,
+    pub debug: Option<DebugPolicy>,
 }
 
 impl Default for ResolvedRenderPolicy {
@@ -562,6 +579,9 @@ pub fn validate_render_policy(policy: &RenderPolicy) -> Result<(), GraphicsContr
         if let Some(SkyModel::Analytic { turbidity_milli }) = sky.model {
             bounded_i32(turbidity_milli, 2000, 10000, "sky.model.turbidity_milli")?;
         }
+    }
+    if let Some(debug) = &policy.debug {
+        bounded_i32(debug.albedo_override_bp, 0, POLICY_SCALE as i32, "debug.albedo_override_bp")?;
     }
     if let Some(atmosphere) = &policy.atmosphere {
         bounded_i32(

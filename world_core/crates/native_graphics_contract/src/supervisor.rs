@@ -18,7 +18,7 @@ use crate::{
     GraphicsAssetProjection, GraphicsCamera, GraphicsContractError, GraphicsFrameMeasurements,
     GraphicsFrameReceipt, GraphicsFrameReceiptBody, GraphicsReady, GraphicsRendererAttestation,
     GraphicsRendererAttestationBody, GraphicsScenePacket, GraphicsTelemetry, LAVA_BACKEND_ID,
-    LAVA_REVISION, MAX_DENSE_BENCHMARK_INSTANCES, canonical_json, compose_bound_scene_with_camera,
+    LAVA_REVISION, MAX_DENSE_BENCHMARK_INSTANCES, canonical_json, compose_bound_scene_with_view, CalibrationRig,
     lower_campaign2_packet, lower_campaign2_packet_with, lower_dense_benchmark_packet,
     ParityContent, ParityPolicyCandidate, TerrainLayerSet, lower_objective_close_packet,
     lower_reference_world, lower_showcase_packet, lower_world_showcase_packet,
@@ -132,6 +132,10 @@ pub struct BoundSceneRenderAuthorization<'a> {
     /// Optional derived inspection view. It is re-applied during independent
     /// Rust recomposition and therefore cannot be changed after promotion.
     pub camera: Option<&'a GraphicsCamera>,
+    /// Optional enumerated calibration light rig (CALIBRATION-1), re-applied
+    /// the same way: a packet whose lights, environment or policy differ from
+    /// the named rig's constants does not match the recomposition.
+    pub rig: Option<CalibrationRig>,
 }
 
 pub struct GraphicsWorkerSupervisor {
@@ -356,11 +360,12 @@ impl GraphicsWorkerSupervisor {
             ))
         })?;
         let mut base_body = authorization.base_packet.body.clone();
-        let recomposed = compose_bound_scene_with_camera(
+        let recomposed = compose_bound_scene_with_view(
             &mut base_body,
             authorization.scene,
             authorization.assets,
             authorization.camera,
+            authorization.rig,
         )
         .map_err(GraphicsWorkerError::contract)?;
         if &recomposed != packet {

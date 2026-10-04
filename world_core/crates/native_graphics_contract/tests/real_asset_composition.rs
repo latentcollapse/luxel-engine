@@ -511,6 +511,7 @@ fn supplied_real_asset_renders_in_lava_and_replays_after_worker_restart() {
                 render_packages: std::slice::from_ref(render_package),
                 assets: std::slice::from_ref(&projection),
                 camera: None,
+                rig: None,
             },
         )
         .expect("Rust promotes the real asset context frame");
@@ -531,6 +532,7 @@ fn supplied_real_asset_renders_in_lava_and_replays_after_worker_restart() {
                 render_packages: std::slice::from_ref(render_package),
                 assets: std::slice::from_ref(&projection),
                 camera: Some(&close_camera),
+                rig: None,
             },
         )
         .expect("Rust promotes the real asset close frame");
@@ -560,6 +562,7 @@ fn supplied_real_asset_renders_in_lava_and_replays_after_worker_restart() {
                 render_packages: std::slice::from_ref(render_package),
                 assets: std::slice::from_ref(&projection),
                 camera: None,
+                rig: None,
             },
         )
         .expect("restarted worker reproduces the context warm-up");
@@ -574,6 +577,7 @@ fn supplied_real_asset_renders_in_lava_and_replays_after_worker_restart() {
                 render_packages: std::slice::from_ref(render_package),
                 assets: std::slice::from_ref(&projection),
                 camera: Some(&close_camera),
+                rig: None,
             },
         )
         .expect("restarted worker promotes the same real asset close frame");
