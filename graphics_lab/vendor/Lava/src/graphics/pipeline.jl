@@ -6,6 +6,11 @@
 
 # The graphics pipeline cache is a `VkContext` field; a reset makes a new one.
 
+"""Patch 0002: whether the device was created with `alphaToOne` (set at device
+creation). Alpha-to-coverage pipelines enable it when it is there."""
+const ALPHA_TO_ONE_SUPPORTED = Ref(false)
+alpha_to_one_supported() = ALPHA_TO_ONE_SUPPORTED[]
+
 """
     create_graphics_pipeline(vertex_spirv, fragment_spirv;
         blend=Opaque(), cull=CullBack(), topology=TriangleList(), depth=DepthLess(),
@@ -32,7 +37,9 @@ function create_graphics_pipeline(vertex_spirv::Vector{UInt8},
                                     tess_ctrl_spirv::Union{Nothing, Vector{UInt8}}=nothing,
                                     tess_eval_spirv::Union{Nothing, Vector{UInt8}}=nothing,
                                     tess_config::Union{Nothing, TessConfig}=nothing,
-                                    descriptor_set_layout::Union{Nothing, Vulkan.DescriptorSetLayout}=nothing)
+                                    descriptor_set_layout::Union{Nothing, Vulkan.DescriptorSetLayout}=nothing,
+                                    samples::Integer=1,
+                                    alpha_to_coverage::Bool=false)
     dev = ctx.device
 
     # Create shader modules
@@ -97,9 +104,11 @@ function create_graphics_pipeline(vertex_spirv::Vector{UInt8},
         cull_mode=cull_mode,
     )
 
-    # Multisampling: no MSAA
+    # Multisampling (patch 0002): the target's sample count, and optionally
+    # alpha-to-coverage. Defaults are upstream's (1 sample, no coverage).
     multisample = Vulkan.PipelineMultisampleStateCreateInfo(
-        Vulkan.SAMPLE_COUNT_1_BIT, false, 1.0f0, false, false)
+        sample_count_flag(samples), false, 1.0f0, alpha_to_coverage,
+        alpha_to_coverage && ALPHA_TO_ONE_SUPPORTED[])
 
     # Depth/stencil.
     #
@@ -320,7 +329,9 @@ function vk_draw!(bq::BatchQueue,
                    clear_color::Union{Nothing, NTuple{4, Float32}}=nothing,
                    indices_buffer::Union{Nothing, Vulkan.Buffer}=nothing,
                    index_count::Integer=0,
-                   descriptor_set::Union{Nothing, Vulkan.DescriptorSet}=nothing)
+                   descriptor_set::Union{Nothing, Vulkan.DescriptorSet}=nothing,
+                   resolve_view::Union{Nothing, Vulkan.ImageView}=nothing,
+                   resolve_image::Union{Nothing, Vulkan.Image}=nothing)
     # Route through record_dispatch! so the prior-dispatch → draw barrier,
     # dispatch_count bookkeeping, CB-split logic, and dispatch-log accounting
     # all come from the single shared helper.  The do-block handles the
@@ -392,6 +403,18 @@ function vk_draw!(bq::BatchQueue,
                 dst_stage_mask=Vulkan.PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
         end
 
+        # Patch 0002: the resolve target is written whole by every pass's
+        # resolve, so its old contents never matter.
+        if resolve_image !== nothing
+            transition_image!(cmd, resolve_image,
+                Vulkan.IMAGE_LAYOUT_UNDEFINED,
+                Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                Vulkan.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                Vulkan.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                Vulkan.ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                Vulkan.ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
+        end
+
         # Color attachment for dynamic rendering
         clear_val = if clear_color !== nothing
             Vulkan.ClearValue(Vulkan.ClearColorValue(clear_color))
@@ -401,15 +424,28 @@ function vk_draw!(bq::BatchQueue,
 
         load_op = clear_color !== nothing ? Vulkan.ATTACHMENT_LOAD_OP_CLEAR : Vulkan.ATTACHMENT_LOAD_OP_LOAD
 
-        color_attachment = Vulkan.RenderingAttachmentInfo(
-            Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            Vulkan.IMAGE_LAYOUT_UNDEFINED,  # resolve image layout (unused)
-            load_op,
-            Vulkan.ATTACHMENT_STORE_OP_STORE,
-            clear_val;
-            image_view=color_view,
-            resolve_mode=Vulkan.RESOLVE_MODE_NONE,
-        )
+        color_attachment = if resolve_view === nothing
+            Vulkan.RenderingAttachmentInfo(
+                Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                Vulkan.IMAGE_LAYOUT_UNDEFINED,  # resolve image layout (unused)
+                load_op,
+                Vulkan.ATTACHMENT_STORE_OP_STORE,
+                clear_val;
+                image_view=color_view,
+                resolve_mode=Vulkan.RESOLVE_MODE_NONE,
+            )
+        else
+            Vulkan.RenderingAttachmentInfo(
+                Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                load_op,
+                Vulkan.ATTACHMENT_STORE_OP_STORE,
+                clear_val;
+                image_view=color_view,
+                resolve_mode=Vulkan.RESOLVE_MODE_AVERAGE_BIT,
+                resolve_image_view=resolve_view,
+            )
+        end
 
         # Depth attachment (optional)
         depth_attachment = C_NULL

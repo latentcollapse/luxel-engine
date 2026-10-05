@@ -1,0 +1,313 @@
+diff --color -ruN a/src/graphics/api.jl b/src/graphics/api.jl
+--- a/src/graphics/api.jl	2026-10-05 03:59:05.813582958 -0400
++++ b/src/graphics/api.jl	2026-10-05 03:59:05.836204168 -0400
+@@ -27,6 +27,8 @@
+     topology::T
+     depth::D
+     varyings::VY      # Nothing or NamedTuple of types, e.g. (normal=Vec3f, uv=Vec2f)
++    # Patch 0002: on a multisampled target, fragment alpha writes coverage.
++    alpha_to_coverage::Bool
+ end
+ 
+ const Rasterizer = GraphicsPipeline
+@@ -36,11 +38,11 @@
+         geometry=nothing, tess_control=nothing, tess_eval=nothing,
+         blend::BlendMode=Opaque(), cull::CullFace=CullBack(),
+         topology::Topology=TriangleList(), depth::DepthMode=DepthLess(),
+-        varyings=nothing)
++        varyings=nothing, alpha_to_coverage::Bool=false)
+     GraphicsPipeline(
+         vertex, fragment, geometry, tess_control, tess_eval,
+         blend, cull, topology, depth,
+-        varyings,
++        varyings, alpha_to_coverage,
+     )
+ end
+ 
+@@ -61,17 +63,18 @@
+ only in, say, blend mode or depth mode share one compiled pipeline — whichever was
+ compiled first won, and the second draw silently rendered with the wrong state.
+ """
+-pipeline_state_key(p::GraphicsPipeline) = (typeof(p), p.varyings, p.geometry, p.tess_control)
++pipeline_state_key(p::GraphicsPipeline) = (typeof(p), p.varyings, p.geometry, p.tess_control, p.alpha_to_coverage)
+ 
+ """Return (vert_shader::LavaGfxShader, compiled::CompiledGraphicsPipeline)."""
+ function ensure_compiled_with_shader!(pipeline::GraphicsPipeline,
+                               vert_fn, frag_fn, tt_vertex, tt_fragment;
+                               color_format=Vulkan.FORMAT_B8G8R8A8_SRGB,
+                               depth_format=Vulkan.FORMAT_UNDEFINED,
+-                              descriptor_set_layout=nothing)
++                              descriptor_set_layout=nothing,
++                              samples::Integer=1)
+     vert = get_or_compile_gfx(vert_fn, tt_vertex, :vertex)
+     compiled = ensure_compiled!(pipeline, vert_fn, frag_fn, tt_vertex, tt_fragment;
+-        color_format, depth_format, descriptor_set_layout)
++        color_format, depth_format, descriptor_set_layout, samples)
+     return vert, compiled
+ end
+ 
+@@ -79,11 +82,15 @@
+                               color_format=Vulkan.FORMAT_B8G8R8A8_SRGB,
+                               depth_format=Vulkan.FORMAT_UNDEFINED,
+                               descriptor_set_layout=nothing,
++                              samples::Integer=1,
+                               ctx::VkContext = vk_context())
+     # Cache key includes type tuples — different arg types get different compiled
+     # pipelines — and the pipeline state, which is the rest of what is baked in.
++    # (The sample count is hashed only when > 1, so single-sample keys are the
++    # ones upstream computes.)
+     cache_key = hash((vert_fn, frag_fn, tt_vertex, tt_fragment, color_format, depth_format,
+                        pipeline_state_key(pipeline), descriptor_set_layout !== nothing))
++    samples > 1 && (cache_key = hash(samples, cache_key))
+     cached = get(ctx.caches.gfx_pipelines, cache_key, nothing)
+     cached !== nothing && return cached::CompiledGraphicsPipeline
+ 
+@@ -123,6 +130,7 @@
+         topology=pipeline.topology, depth=pipeline.depth,
+         color_format=color_format, depth_format=depth_format,
+         push_constant_size=max(vert.push_info.push_size, frag.push_info.push_size),
++        samples=samples, alpha_to_coverage=pipeline.alpha_to_coverage,
+         geometry_spirv=geom_spirv,
+         tess_ctrl_spirv=tc_spirv, tess_eval_spirv=te_spirv,
+         tess_config=tess_cfg,
+@@ -228,18 +236,25 @@
+         vert_fn, frag_fn, vert_tt, frag_tt;
+         color_format=fb.color_format,
+         depth_format=fb.depth_view === nothing ? Vulkan.FORMAT_UNDEFINED : fb.depth_format,
+-        descriptor_set_layout)
++        descriptor_set_layout,
++        samples=fb.samples)
+ 
+     push_data = isempty(args) ? UInt8[] : pack_gfx_args(bq, args, vert_shader.push_info)
+ 
+-    vk_draw!(bq, compiled, fb.color_view, fb.color_image,
++    # Multisampled: draw into the MSAA image, resolve into the readable one.
++    multisampled = fb.samples > 1
++    vk_draw!(bq, compiled,
++        multisampled ? fb.msaa_color_view : fb.color_view,
++        multisampled ? fb.msaa_color_image : fb.color_image,
+         Vulkan.Extent2D(UInt32(fb.width), UInt32(fb.height)),
+         vertex_count;
+         push_data, instances,
+         depth_view=fb.depth_view,
+         depth_image=fb.depth_image,
+         depth_clear,
+-        clear_color, descriptor_set)
++        clear_color, descriptor_set,
++        resolve_view=multisampled ? fb.color_view : nothing,
++        resolve_image=multisampled ? fb.color_image : nothing)
+ end
+ 
+ """
+diff --color -ruN a/src/graphics/framebuffer.jl b/src/graphics/framebuffer.jl
+--- a/src/graphics/framebuffer.jl	2026-10-05 03:59:05.813582958 -0400
++++ b/src/graphics/framebuffer.jl	2026-10-05 03:59:05.836683890 -0400
+@@ -24,6 +24,15 @@
+     depth_format::Vulkan.Format
+     # Owning context — used for readback / ownership decisions.
+     ctx::VkContext
++    # Multisampling (patch 0002). With `samples > 1` draws render into the
++    # multisampled colour image and resolve (average) into `color_image`, which
++    # stays the single-sample image every reader samples, copies and reads
++    # back; the depth image is multisampled too. With `samples == 1` the
++    # `msaa_*` fields are `nothing` and nothing changes.
++    samples::Int
++    msaa_color_image::Union{Nothing, Vulkan.Image}
++    msaa_color_memory::Union{Nothing, Vulkan.DeviceMemory}
++    msaa_color_view::Union{Nothing, Vulkan.ImageView}
+ end
+ 
+ """Default usage of a framebuffer's color attachment."""
+@@ -38,18 +47,24 @@
+ own, or with `bind_image!` to place it in a shared allocation.
+ """
+ image_2d(ctx::VkContext, width::Integer, height::Integer,
+-         format::Vulkan.Format, usage::Vulkan.ImageUsageFlag) =
++         format::Vulkan.Format, usage::Vulkan.ImageUsageFlag; samples::Integer=1) =
+     Vulkan.Image(ctx.device,
+         Vulkan.IMAGE_TYPE_2D, format,
+         Vulkan.Extent3D(UInt32(width), UInt32(height), UInt32(1)),
+         UInt32(1), UInt32(1),
+-        Vulkan.SAMPLE_COUNT_1_BIT,
++        sample_count_flag(samples),
+         Vulkan.IMAGE_TILING_OPTIMAL,
+         usage,
+         Vulkan.SHARING_MODE_EXCLUSIVE, UInt32[],
+         Vulkan.IMAGE_LAYOUT_UNDEFINED,
+     )
+ 
++"""The `SampleCountFlag` for 1, 2, 4 or 8 samples (patch 0002)."""
++function sample_count_flag(samples::Integer)
++    samples in (1, 2, 4, 8) || error("unsupported sample count $samples (1, 2, 4 or 8)")
++    return Vulkan.SampleCountFlag(UInt32(samples))
++end
++
+ """A full-subresource 2D view. Must be created after the image has memory bound."""
+ image_view(ctx::VkContext, image::Vulkan.Image, format::Vulkan.Format,
+            aspect::Vulkan.ImageAspectFlag = Vulkan.IMAGE_ASPECT_COLOR_BIT) =
+@@ -69,7 +84,8 @@
+ function LavaFramebuffer(width::Integer, height::Integer;
+                           ctx::VkContext=vk_context(),
+                           depth::Bool=true,
+-                          color_format::Vulkan.Format=Vulkan.FORMAT_B8G8R8A8_SRGB)
++                          color_format::Vulkan.Format=Vulkan.FORMAT_B8G8R8A8_SRGB,
++                          samples::Integer=1)
+     dev = ctx.device
+ 
+     color_image = image_2d(ctx, width, height, color_format, COLOR_USAGE)
+@@ -83,15 +99,23 @@
+     depth_vw = nothing
+     if depth
+         depth_img = image_2d(ctx, width, height, depth_format,
+-                             Vulkan.IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
++                             Vulkan.IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; samples)
+         depth_mem = alloc_image_memory(ctx, depth_img)
+         depth_vw = image_view(ctx, depth_img, depth_format, Vulkan.IMAGE_ASPECT_DEPTH_BIT)
+     end
+ 
++    msaa_img, msaa_mem, msaa_vw = nothing, nothing, nothing
++    if samples > 1
++        msaa_img = image_2d(ctx, width, height, color_format,
++                            Vulkan.IMAGE_USAGE_COLOR_ATTACHMENT_BIT; samples)
++        msaa_mem = alloc_image_memory(ctx, msaa_img)
++        msaa_vw = image_view(ctx, msaa_img, color_format)
++    end
++
+     LavaFramebuffer(Int(width), Int(height),
+         color_image, color_memory, color_view, color_format,
+         depth_img, depth_mem, depth_vw, depth_format,
+-        ctx)
++        ctx, Int(samples), msaa_img, msaa_mem, msaa_vw)
+ end
+ 
+ """
+diff --color -ruN a/src/graphics/pipeline.jl b/src/graphics/pipeline.jl
+--- a/src/graphics/pipeline.jl	2026-10-05 03:59:05.813582958 -0400
++++ b/src/graphics/pipeline.jl	2026-10-05 03:59:05.837128956 -0400
+@@ -6,6 +6,11 @@
+ 
+ # The graphics pipeline cache is a `VkContext` field; a reset makes a new one.
+ 
++"""Patch 0002: whether the device was created with `alphaToOne` (set at device
++creation). Alpha-to-coverage pipelines enable it when it is there."""
++const ALPHA_TO_ONE_SUPPORTED = Ref(false)
++alpha_to_one_supported() = ALPHA_TO_ONE_SUPPORTED[]
++
+ """
+     create_graphics_pipeline(vertex_spirv, fragment_spirv;
+         blend=Opaque(), cull=CullBack(), topology=TriangleList(), depth=DepthLess(),
+@@ -32,7 +37,9 @@
+                                     tess_ctrl_spirv::Union{Nothing, Vector{UInt8}}=nothing,
+                                     tess_eval_spirv::Union{Nothing, Vector{UInt8}}=nothing,
+                                     tess_config::Union{Nothing, TessConfig}=nothing,
+-                                    descriptor_set_layout::Union{Nothing, Vulkan.DescriptorSetLayout}=nothing)
++                                    descriptor_set_layout::Union{Nothing, Vulkan.DescriptorSetLayout}=nothing,
++                                    samples::Integer=1,
++                                    alpha_to_coverage::Bool=false)
+     dev = ctx.device
+ 
+     # Create shader modules
+@@ -97,9 +104,11 @@
+         cull_mode=cull_mode,
+     )
+ 
+-    # Multisampling: no MSAA
++    # Multisampling (patch 0002): the target's sample count, and optionally
++    # alpha-to-coverage. Defaults are upstream's (1 sample, no coverage).
+     multisample = Vulkan.PipelineMultisampleStateCreateInfo(
+-        Vulkan.SAMPLE_COUNT_1_BIT, false, 1.0f0, false, false)
++        sample_count_flag(samples), false, 1.0f0, alpha_to_coverage,
++        alpha_to_coverage && ALPHA_TO_ONE_SUPPORTED[])
+ 
+     # Depth/stencil.
+     #
+@@ -320,7 +329,9 @@
+                    clear_color::Union{Nothing, NTuple{4, Float32}}=nothing,
+                    indices_buffer::Union{Nothing, Vulkan.Buffer}=nothing,
+                    index_count::Integer=0,
+-                   descriptor_set::Union{Nothing, Vulkan.DescriptorSet}=nothing)
++                   descriptor_set::Union{Nothing, Vulkan.DescriptorSet}=nothing,
++                   resolve_view::Union{Nothing, Vulkan.ImageView}=nothing,
++                   resolve_image::Union{Nothing, Vulkan.Image}=nothing)
+     # Route through record_dispatch! so the prior-dispatch → draw barrier,
+     # dispatch_count bookkeeping, CB-split logic, and dispatch-log accounting
+     # all come from the single shared helper.  The do-block handles the
+@@ -392,6 +403,18 @@
+                 dst_stage_mask=Vulkan.PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+         end
+ 
++        # Patch 0002: the resolve target is written whole by every pass's
++        # resolve, so its old contents never matter.
++        if resolve_image !== nothing
++            transition_image!(cmd, resolve_image,
++                Vulkan.IMAGE_LAYOUT_UNDEFINED,
++                Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++                Vulkan.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
++                Vulkan.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
++                Vulkan.ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
++                Vulkan.ACCESS_COLOR_ATTACHMENT_WRITE_BIT)
++        end
++
+         # Color attachment for dynamic rendering
+         clear_val = if clear_color !== nothing
+             Vulkan.ClearValue(Vulkan.ClearColorValue(clear_color))
+@@ -401,15 +424,28 @@
+ 
+         load_op = clear_color !== nothing ? Vulkan.ATTACHMENT_LOAD_OP_CLEAR : Vulkan.ATTACHMENT_LOAD_OP_LOAD
+ 
+-        color_attachment = Vulkan.RenderingAttachmentInfo(
+-            Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+-            Vulkan.IMAGE_LAYOUT_UNDEFINED,  # resolve image layout (unused)
+-            load_op,
+-            Vulkan.ATTACHMENT_STORE_OP_STORE,
+-            clear_val;
+-            image_view=color_view,
+-            resolve_mode=Vulkan.RESOLVE_MODE_NONE,
+-        )
++        color_attachment = if resolve_view === nothing
++            Vulkan.RenderingAttachmentInfo(
++                Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++                Vulkan.IMAGE_LAYOUT_UNDEFINED,  # resolve image layout (unused)
++                load_op,
++                Vulkan.ATTACHMENT_STORE_OP_STORE,
++                clear_val;
++                image_view=color_view,
++                resolve_mode=Vulkan.RESOLVE_MODE_NONE,
++            )
++        else
++            Vulkan.RenderingAttachmentInfo(
++                Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++                Vulkan.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
++                load_op,
++                Vulkan.ATTACHMENT_STORE_OP_STORE,
++                clear_val;
++                image_view=color_view,
++                resolve_mode=Vulkan.RESOLVE_MODE_AVERAGE_BIT,
++                resolve_image_view=resolve_view,
++            )
++        end
+ 
+         # Depth attachment (optional)
+         depth_attachment = C_NULL
+diff --color -ruN a/src/runtime/device.jl b/src/runtime/device.jl
+--- a/src/runtime/device.jl	2026-10-05 03:59:05.814814423 -0400
++++ b/src/runtime/device.jl	2026-10-05 03:59:05.845936590 -0400
+@@ -1458,12 +1458,18 @@
+                 next=feature_chain))
+     end
+ 
++    # Patch 0002: alpha-to-one, when the device has it, so alpha-to-coverage
++    # pipelines can write opaque samples (coverage carries the edge).
++    supports_alpha_to_one = Vulkan.get_physical_device_features(phys_dev).alpha_to_one
++    ALPHA_TO_ONE_SUPPORTED[] = supports_alpha_to_one
++
+     # Enable shader int64, float64, geometry/tessellation shaders, wide lines
+     core_features = Vulkan.PhysicalDeviceFeatures(
+         :shader_int_64, :shader_float_64,
+         :shader_int_16,
+         :geometry_shader, :tessellation_shader,
+         :fill_mode_non_solid, :wide_lines, :large_points,
++        (supports_alpha_to_one ? (:alpha_to_one,) : ())...,
+     )
+ 
+     device = Vulkan.Device(

@@ -24,6 +24,15 @@ mutable struct LavaFramebuffer
     depth_format::Vulkan.Format
     # Owning context — used for readback / ownership decisions.
     ctx::VkContext
+    # Multisampling (patch 0002). With `samples > 1` draws render into the
+    # multisampled colour image and resolve (average) into `color_image`, which
+    # stays the single-sample image every reader samples, copies and reads
+    # back; the depth image is multisampled too. With `samples == 1` the
+    # `msaa_*` fields are `nothing` and nothing changes.
+    samples::Int
+    msaa_color_image::Union{Nothing, Vulkan.Image}
+    msaa_color_memory::Union{Nothing, Vulkan.DeviceMemory}
+    msaa_color_view::Union{Nothing, Vulkan.ImageView}
 end
 
 """Default usage of a framebuffer's color attachment."""
@@ -38,17 +47,23 @@ A 2D image with no memory bound. Bind it with `alloc_image_memory` for one of it
 own, or with `bind_image!` to place it in a shared allocation.
 """
 image_2d(ctx::VkContext, width::Integer, height::Integer,
-         format::Vulkan.Format, usage::Vulkan.ImageUsageFlag) =
+         format::Vulkan.Format, usage::Vulkan.ImageUsageFlag; samples::Integer=1) =
     Vulkan.Image(ctx.device,
         Vulkan.IMAGE_TYPE_2D, format,
         Vulkan.Extent3D(UInt32(width), UInt32(height), UInt32(1)),
         UInt32(1), UInt32(1),
-        Vulkan.SAMPLE_COUNT_1_BIT,
+        sample_count_flag(samples),
         Vulkan.IMAGE_TILING_OPTIMAL,
         usage,
         Vulkan.SHARING_MODE_EXCLUSIVE, UInt32[],
         Vulkan.IMAGE_LAYOUT_UNDEFINED,
     )
+
+"""The `SampleCountFlag` for 1, 2, 4 or 8 samples (patch 0002)."""
+function sample_count_flag(samples::Integer)
+    samples in (1, 2, 4, 8) || error("unsupported sample count $samples (1, 2, 4 or 8)")
+    return Vulkan.SampleCountFlag(UInt32(samples))
+end
 
 """A full-subresource 2D view. Must be created after the image has memory bound."""
 image_view(ctx::VkContext, image::Vulkan.Image, format::Vulkan.Format,
@@ -69,7 +84,8 @@ Create an offscreen framebuffer with color and optional depth attachments.
 function LavaFramebuffer(width::Integer, height::Integer;
                           ctx::VkContext=vk_context(),
                           depth::Bool=true,
-                          color_format::Vulkan.Format=Vulkan.FORMAT_B8G8R8A8_SRGB)
+                          color_format::Vulkan.Format=Vulkan.FORMAT_B8G8R8A8_SRGB,
+                          samples::Integer=1)
     dev = ctx.device
 
     color_image = image_2d(ctx, width, height, color_format, COLOR_USAGE)
@@ -83,15 +99,23 @@ function LavaFramebuffer(width::Integer, height::Integer;
     depth_vw = nothing
     if depth
         depth_img = image_2d(ctx, width, height, depth_format,
-                             Vulkan.IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+                             Vulkan.IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT; samples)
         depth_mem = alloc_image_memory(ctx, depth_img)
         depth_vw = image_view(ctx, depth_img, depth_format, Vulkan.IMAGE_ASPECT_DEPTH_BIT)
+    end
+
+    msaa_img, msaa_mem, msaa_vw = nothing, nothing, nothing
+    if samples > 1
+        msaa_img = image_2d(ctx, width, height, color_format,
+                            Vulkan.IMAGE_USAGE_COLOR_ATTACHMENT_BIT; samples)
+        msaa_mem = alloc_image_memory(ctx, msaa_img)
+        msaa_vw = image_view(ctx, msaa_img, color_format)
     end
 
     LavaFramebuffer(Int(width), Int(height),
         color_image, color_memory, color_view, color_format,
         depth_img, depth_mem, depth_vw, depth_format,
-        ctx)
+        ctx, Int(samples), msaa_img, msaa_mem, msaa_vw)
 end
 
 """

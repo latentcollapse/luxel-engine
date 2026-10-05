@@ -27,6 +27,8 @@ struct GraphicsPipeline{V, F, G, TC, TE, B<:BlendMode, C<:CullFace, T<:Topology,
     topology::T
     depth::D
     varyings::VY      # Nothing or NamedTuple of types, e.g. (normal=Vec3f, uv=Vec2f)
+    # Patch 0002: on a multisampled target, fragment alpha writes coverage.
+    alpha_to_coverage::Bool
 end
 
 const Rasterizer = GraphicsPipeline
@@ -36,11 +38,11 @@ function GraphicsPipeline(;
         geometry=nothing, tess_control=nothing, tess_eval=nothing,
         blend::BlendMode=Opaque(), cull::CullFace=CullBack(),
         topology::Topology=TriangleList(), depth::DepthMode=DepthLess(),
-        varyings=nothing)
+        varyings=nothing, alpha_to_coverage::Bool=false)
     GraphicsPipeline(
         vertex, fragment, geometry, tess_control, tess_eval,
         blend, cull, topology, depth,
-        varyings,
+        varyings, alpha_to_coverage,
     )
 end
 
@@ -61,17 +63,18 @@ are hashed as values. Leaving state out of the key made two pipelines that diffe
 only in, say, blend mode or depth mode share one compiled pipeline — whichever was
 compiled first won, and the second draw silently rendered with the wrong state.
 """
-pipeline_state_key(p::GraphicsPipeline) = (typeof(p), p.varyings, p.geometry, p.tess_control)
+pipeline_state_key(p::GraphicsPipeline) = (typeof(p), p.varyings, p.geometry, p.tess_control, p.alpha_to_coverage)
 
 """Return (vert_shader::LavaGfxShader, compiled::CompiledGraphicsPipeline)."""
 function ensure_compiled_with_shader!(pipeline::GraphicsPipeline,
                               vert_fn, frag_fn, tt_vertex, tt_fragment;
                               color_format=Vulkan.FORMAT_B8G8R8A8_SRGB,
                               depth_format=Vulkan.FORMAT_UNDEFINED,
-                              descriptor_set_layout=nothing)
+                              descriptor_set_layout=nothing,
+                              samples::Integer=1)
     vert = get_or_compile_gfx(vert_fn, tt_vertex, :vertex)
     compiled = ensure_compiled!(pipeline, vert_fn, frag_fn, tt_vertex, tt_fragment;
-        color_format, depth_format, descriptor_set_layout)
+        color_format, depth_format, descriptor_set_layout, samples)
     return vert, compiled
 end
 
@@ -79,11 +82,15 @@ function ensure_compiled!(pipeline::GraphicsPipeline, vert_fn, frag_fn, tt_verte
                               color_format=Vulkan.FORMAT_B8G8R8A8_SRGB,
                               depth_format=Vulkan.FORMAT_UNDEFINED,
                               descriptor_set_layout=nothing,
+                              samples::Integer=1,
                               ctx::VkContext = vk_context())
     # Cache key includes type tuples — different arg types get different compiled
     # pipelines — and the pipeline state, which is the rest of what is baked in.
+    # (The sample count is hashed only when > 1, so single-sample keys are the
+    # ones upstream computes.)
     cache_key = hash((vert_fn, frag_fn, tt_vertex, tt_fragment, color_format, depth_format,
                        pipeline_state_key(pipeline), descriptor_set_layout !== nothing))
+    samples > 1 && (cache_key = hash(samples, cache_key))
     cached = get(ctx.caches.gfx_pipelines, cache_key, nothing)
     cached !== nothing && return cached::CompiledGraphicsPipeline
 
@@ -123,6 +130,7 @@ function ensure_compiled!(pipeline::GraphicsPipeline, vert_fn, frag_fn, tt_verte
         topology=pipeline.topology, depth=pipeline.depth,
         color_format=color_format, depth_format=depth_format,
         push_constant_size=max(vert.push_info.push_size, frag.push_info.push_size),
+        samples=samples, alpha_to_coverage=pipeline.alpha_to_coverage,
         geometry_spirv=geom_spirv,
         tess_ctrl_spirv=tc_spirv, tess_eval_spirv=te_spirv,
         tess_config=tess_cfg,
@@ -228,18 +236,25 @@ function draw!(bq::BatchQueue, pipeline::GraphicsPipeline, target::OffscreenTarg
         vert_fn, frag_fn, vert_tt, frag_tt;
         color_format=fb.color_format,
         depth_format=fb.depth_view === nothing ? Vulkan.FORMAT_UNDEFINED : fb.depth_format,
-        descriptor_set_layout)
+        descriptor_set_layout,
+        samples=fb.samples)
 
     push_data = isempty(args) ? UInt8[] : pack_gfx_args(bq, args, vert_shader.push_info)
 
-    vk_draw!(bq, compiled, fb.color_view, fb.color_image,
+    # Multisampled: draw into the MSAA image, resolve into the readable one.
+    multisampled = fb.samples > 1
+    vk_draw!(bq, compiled,
+        multisampled ? fb.msaa_color_view : fb.color_view,
+        multisampled ? fb.msaa_color_image : fb.color_image,
         Vulkan.Extent2D(UInt32(fb.width), UInt32(fb.height)),
         vertex_count;
         push_data, instances,
         depth_view=fb.depth_view,
         depth_image=fb.depth_image,
         depth_clear,
-        clear_color, descriptor_set)
+        clear_color, descriptor_set,
+        resolve_view=multisampled ? fb.color_view : nothing,
+        resolve_image=multisampled ? fb.color_image : nothing)
 end
 
 """

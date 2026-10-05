@@ -1458,12 +1458,18 @@ function VkContext(; select = pick_physical_device, debug::DebugConfig = DebugCo
                 next=feature_chain))
     end
 
+    # Patch 0002: alpha-to-one, when the device has it, so alpha-to-coverage
+    # pipelines can write opaque samples (coverage carries the edge).
+    supports_alpha_to_one = Vulkan.get_physical_device_features(phys_dev).alpha_to_one
+    ALPHA_TO_ONE_SUPPORTED[] = supports_alpha_to_one
+
     # Enable shader int64, float64, geometry/tessellation shaders, wide lines
     core_features = Vulkan.PhysicalDeviceFeatures(
         :shader_int_64, :shader_float_64,
         :shader_int_16,
         :geometry_shader, :tessellation_shader,
         :fill_mode_non_solid, :wide_lines, :large_points,
+        (supports_alpha_to_one ? (:alpha_to_one,) : ())...,
     )
 
     device = Vulkan.Device(
