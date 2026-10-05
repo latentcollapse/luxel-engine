@@ -1,6 +1,6 @@
 # WGE CONVERGE-2 Contracts
 
-Status: **APPROVED, 2026-10-04.** Order N-6 → N-5 approved; landmark: ruin from
+Status: **CONVERGE-2 CLOSED, 2026-10-04.** N-6 and N-5 implemented and accepted; closeout at the end. Order N-6 → N-5 approved; landmark: ruin from
 `modular_fort_01` (option 1).
 Source: `WGE_GRAPHICS_CONVERGENCE_AUDIT.md` §8 (N-5, N-6) and the "Carried into
 CONVERGE-2" list in `WGE_CONVERGE1_CONTRACTS.md`.
@@ -208,6 +208,21 @@ ones.
 
 ## 2. N-5 — Hero asset kit, imported
 
+> **Status: IMPLEMENTED (2026-10-04), human acceptance met.** Arm `converge2`
+> (`WGE_PARITY_RENDER_POLICY=converge2`, `WGE_KIT_SET=tools/kit/kit1.lock.json`):
+> converge1's policy unchanged, the procedural shrine and tree balls replaced
+> by the kit. Packet 52.6 MB (converge1 37.6 MB). Identity: 122/122 frames byte-identical (calibration1 `run3` 88 + `run3-grazing` 16;
+> parity `ab-{null,full,converge0,converge1}-tfix` 12; foliage `n6-foliage` 6), with
+> the channel-semantics shader and the 128 MiB frame bound. Rust 399 passed / 0 failed;
+> Julia protocol, render-policy and adapter suites all pass.
+> Sheets: `artifacts/parity/review-converge2/{close,medium,wide}-sheet.png`.
+>
+> **Human acceptance (2026-10-04, close / wide sheets): met.** "That is night
+> and day ... It genuinely reminds me almost of something I'd see in RIFT ...
+> It's giving Freemarch. Which is miles better than the fire hydrant shrine
+> thing." The eye no longer goes to the shrine or the tree balls. The pool
+> effect was checked and does not clip. The brickwork read as "early Ottoman".
+
 ### Contract
 
 - **Build tool** (`tools/build_kit.py`, driving `blender -b --python`):
@@ -260,6 +275,81 @@ ones.
 - **Non-goals:** scatter and forest density (N-7), per-instance variety
   (below), LODs, wind, interiors.
 
+### Implementation (N-5)
+
+- **Sources** (`tools/models/kit1.json`, pinned by `tools/fetch_models.py`):
+  `modular_fort_01`, `rock_moss_set_01`, `rock_moss_set_02`, `tree_small_02`
+  (+ `leaves_alpha`), `fern_02` (+ `Alpha`).
+- **Build** (`tools/build_kit.py`, 46 s, deterministic: a rebuild matches the
+  committed `tools/kit/kit1.lock.json` byte for byte; Blender 5.2.2 LTS):
+
+  | Asset | Content | Triangles | GLB |
+  |---|---|---|---|
+  | ruin | fort gate + broken wall end 2 m clear, 7° off true | 1,368 + 442 (authored) | 1.11 MB |
+  | rock_a / rock_b | one rock from each mossy set, Blender collapse | 10,996 → 2,500 / 8,000 → 2,499 | 0.27 / 0.30 MB |
+  | tree | `tree_small_02`: trunk 28,293 → 3,000, branches 94,814 → 6,000, 1.94 M leaf triangles → 370 cluster cards (185 clusters, 24 px tiles, one 512² atlas) | ~9.7 k | 1.11 MB |
+  | fern | `fern_02_b` as authored | 2,384 | 0.20 MB |
+
+  Branch UVs come from `TEXCOORD_1` with a `KHR_texture_transform`; WGE
+  carries one UV set, so `tools/gltf_model.py` bakes the transform into UV0.
+  Collapse left 36 zero normals on degenerate branch triangles; the builder
+  drops zero-area triangles and gives any other zero normal its face normal.
+- **Leaf cards** (`tools/leaf_cards.py`): leaves grouped by a uniform grid
+  (cell grows until <= 220 clusters), two crossed cards per cluster through its
+  area-weighted centre, each a tile rasterised in numpy from the real leaves
+  (UV-mapped albedo and alpha, front-most fragment, 2x2 supersampled coverage),
+  darkened toward the crown centre (AO floor 0.65), normals leaning outward
+  from the crown so the canopy shades as a volume.
+- **Seam** (`kit.rs`): `load_kit_set` checks every GLB's size and digest
+  against the lock, conditions it with the calibration render request (any
+  finding refused) and projects it. `apply_kit` drops the `campaign2-hero-*`,
+  `-trunk-`, `-crown-`, `-lobe-` instances, prunes the meshes, materials and
+  textures only they used, and places the kit relative to the shrine anchor:
+  ruin (scale 0.8, yaw 126°, arch toward all three cameras), trees at the
+  seven authored tree spots and scales, five rocks (sunk 18 cm x scale), twelve
+  ferns. Placement constants live in `kit.rs`; a packet is a pure function of
+  (world, view, arm, terrain layers, kit).
+- **Carried item 5 closed for this route:** `Campaign2Inputs` (arm, content,
+  terrain layers, kit) is passed explicitly to lowering and to
+  `GraphicsWorkerSupervisor::render_and_promote_campaign2`, which re-derives
+  the authorized packet from exactly those inputs. `render-campaign2-layout`
+  reads the environment once and never inside authorization. (The older
+  `render_and_promote_with_terrain_layers` remains as an env-reading wrapper.)
+- **Channel semantics (carried item 4):** `RenderMaterial` carries glTF
+  `normalTexture.scale` and `occlusionTexture.strength` when set (findings
+  outside [0, 2] / [0, 1]); they reach the existing packet fields. A material
+  with a glTF metallicRoughness texture gets `metallic_from_texture`, and the
+  shader multiplies metallic by that texture's BLUE channel (flag passed as
+  emissive w = 2). Absent, the select returns the factor exactly: every
+  existing frame is byte-identical, calibration included.
+- **Frame bound** raised from 64 MiB to 128 MiB on both ends
+  (`supervisor.rs`, `wge_graphics_worker.jl`); converge2 measures 52.6 MB.
+- **Tests:** `tests/kit.rs` (lock completeness; converge2 needs a kit and no
+  other arm accepts one; with the built kit: primitives gone, pool kept, kit
+  instances present, policy and camera equal to converge1; kit adds <= 24 MB
+  (11.7 MB on the synthetic layer set); a one-bit-tampered GLB is refused),
+  channel-semantics tests in `alpha_mask.rs` and `asset_contract`.
+
+### Corrections to this contract (N-5)
+
+- **Budget:** "converge2 frame <= 48 MB" was a guess. Measured, the converge
+  packets already carry 31.5 MB of terrain-layer textures and meshes cost
+  ~96 bytes per vertex as JSON. Restated: the kit adds <= 24 MB, the frame
+  bound is 128 MiB; measured 52.6 MB.
+- **Tree silhouette:** ">= 85% of the source's silhouette from 3 views"
+  measured pixel-exact leaf placement, which no card representation can
+  match off-axis (a card flattens leaves up to +/-0.25 m off its plane;
+  coverage stayed 0.81-0.88 from 254 to 878 cards). Restated at canopy scale
+  (10 cm cells): outline IoU >= 0.85 and leaf mass within +/-20%. Measured
+  front / side / diagonal: IoU 0.91 / 0.90 / 0.86, mass 1.12 / 1.18 / 1.12
+  (pixel-exact 0.88 / 0.84 / 0.81, reported).
+- **"Real metal on the landmark":** the chosen landmark is stone and plaster;
+  it has no metal. The metal channel is verified by tests and by calibration
+  (metal_plate's B = 255 gives the factor exactly).
+- **`prepare` with zero findings:** the kit is checked by render conditioning
+  (zero findings required at load), not by `prepare_asset`, which needs a
+  per-asset runtime request (collision, LODs) the kit does not author yet.
+
 ### Landmark: decided 2026-10-04 — option 1, ruin from `modular_fort_01`
 
 Poly Haven has no shrine. Options considered, roughly by effort:
@@ -284,3 +374,55 @@ Poly Haven has no shrine. Options considered, roughly by effort:
 | 1. Material varieties (several scans per family, per-instance tint / scale / rotation / wear / wetness) | Variety pays off when there are many instances; N-5 places a handful | N-7 scatter + forest |
 | 3. Bark depth (parallax / displacement) | Recheck after the imported tree's bark is on screen; may be unnecessary at kit distances | Review after N-5 |
 | 6. Km-scale backdrop; restate N-2's wet/dry target | Independent of the kit; its own contract | N-3 backdrop |
+
+---
+
+## CONVERGE-2 closeout (2026-10-04)
+
+Commits: `7164966` N-6 · N-5 (next commit).
+
+| Contract | Human acceptance | Measured acceptance |
+|---|---|---|
+| N-6 alpha-mask foliage | Met: "clearly a jungle fern ... some kinda underwater plant ... a simple river reed" | Identity 116/116 met; mip coverage ±2% (unit) met; silhouette vs opaque-card geometry 0.96 at 10 m met, 0.77 at 40 m NOT met (deferred to L-2); shadows visual, met |
+| N-5 hero kit | Met: "night and day ... It's giving Freemarch"; the eye no longer hits the shrine or tree balls | Primitives absent met; kit <= 24 MB met (adds 15 MB; frame 52.6 MB); kit build deterministic (lock) met; canopy outline IoU >= 0.85 met (0.86-0.91), mass ±20% met (+12-18%); identity 122/122 met |
+
+Identity discipline held: every new axis is absent by default and
+byte-identical when absent (alpha cutoff, double-sided, metallic-from-texture,
+kit, foliage views). New references: `artifacts/parity/ab-converge2-n5`
+(= `ab-converge2`), foliage `artifacts/calibration/n6-foliage` (= `n5-foliage`).
+
+**Infrastructure landed beyond the contracts:** Lava vendored with a fragment
+`discard` (OpKill) patch; pinned model fetcher, glTF node importer (TRS and
+texture-transform baking), headless Blender decimation, numpy leaf-card baker;
+`Campaign2Inputs` explicit-input authorization (carried item 5, for
+`render-campaign2-layout`); glTF channel semantics (carried item 4); worker
+frame bound 128 MiB.
+
+**Defects found and fixed on the way:** glTF base colours that are JPEG lose
+their alpha (merged from the separate alpha map); Blender collapse emits zero
+normals on degenerate triangles (dropped / face-normal fallback); the first
+ruin layout read as an intact fort block (broken apart); the silhouette
+measure itself counted partial edge pixels whole and was corrected before any
+conclusion was drawn from it.
+
+**Carried into CONVERGE-3** (from reviews and findings):
+
+1. **Distance foliage (L-2):** alpha-tested leaves stipple at 40 m (0.77 of
+   geometry); needs alpha-to-coverage + MSAA or TAA, or distance LOD cards.
+   `tools/foliage_measure.py` is the measurement to move.
+2. **Wet pool:** the procedural glowing ripple rings are the last campaign2
+   primitive in the frame and now read as artificial next to scanned assets.
+3. **Material varieties** (CONVERGE-1 item 1): several scans per family plus
+   per-instance tint / scale / rotation / wear / wetness. Pays off with N-7
+   scatter and forest.
+4. **Scatter + forest (N-7):** seven trees and twelve ferns are hand-placed
+   constants; density needs the placement grammar.
+5. **Ruin wall end** reads as a solid block more than a broken wall; a ruin
+   needs damage geometry (broken tops, fallen blocks), not only gaps.
+6. **Bark depth** (CONVERGE-1 item 3) and **km-scale backdrop + wet/dry
+   target restatement** (CONVERGE-1 item 6, N-3), still open.
+7. **Kit `prepare` receipts:** kit assets are checked by render conditioning;
+   runtime receipts (collision, LODs) are not authored yet.
+8. **Carried item 5 elsewhere:** `render_and_promote` and
+   `render_and_promote_with_terrain_layers` still read the arm from the
+   environment for their other callers.

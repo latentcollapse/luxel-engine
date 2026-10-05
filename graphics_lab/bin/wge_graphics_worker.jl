@@ -9,7 +9,7 @@ using .LavaAdapter
 
 const WORKER_SCHEMA = "wge.graphics-worker/v1"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
-const MAX_WORKER_FRAME_BYTES = 64 * 1024 * 1024
+const MAX_WORKER_FRAME_BYTES = 128 * 1024 * 1024  # must match supervisor.rs (CONVERGE-2 N-5)
 
 function read_frame(io::IO)::Union{Nothing, String}
     header = read(io, 4)

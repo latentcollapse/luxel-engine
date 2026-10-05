@@ -79,3 +79,72 @@ def node_triangles(document, buffers, node_name):
     normals = (normals / scale) @ rotation.T
     normals /= np.linalg.norm(normals, axis=1, keepdims=True)
     return positions, normals, uvs, indices, primitive["material"]
+
+
+def node_transform(node):
+    rotation = rotation_matrix(node.get("rotation", [0, 0, 0, 1]))
+    scale = np.asarray(node.get("scale", [1, 1, 1]), np.float64)
+    translation = np.asarray(node.get("translation", [0, 0, 0]), np.float64)
+    return rotation, scale, translation
+
+
+def material_uv_set(material):
+    """(texCoord index, KHR_texture_transform) of a material's base colour.
+
+    WGE carries one UV set with one transform per primitive, so every texture
+    of the material must agree; a material that mixes sets or transforms is
+    refused rather than silently mis-mapped."""
+    infos = [material.get("pbrMetallicRoughness", {}).get(key) for key in ("baseColorTexture", "metallicRoughnessTexture")]
+    infos += [material.get(key) for key in ("normalTexture", "occlusionTexture", "emissiveTexture")]
+    seen = {(info.get("texCoord", 0), json.dumps(info.get("extensions", {}).get("KHR_texture_transform"), sort_keys=True))
+            for info in infos if info is not None}
+    if len(seen) > 1:
+        raise SystemExit(f"material {material.get('name')!r} mixes UV sets or transforms: {seen}")
+    if not seen:
+        return 0, None
+    texcoord, transform = seen.pop()
+    return texcoord, json.loads(transform)
+
+
+def bake_texture_transform(uvs, transform):
+    """Apply KHR_texture_transform (offset, rotation, scale) to UVs."""
+    if not transform:
+        return uvs
+    offset = np.asarray(transform.get("offset", [0, 0]), np.float64)
+    scale = np.asarray(transform.get("scale", [1, 1]), np.float64)
+    angle = transform.get("rotation", 0.0)
+    c, s = np.cos(angle), np.sin(angle)
+    scaled = uvs * scale
+    rotated = np.stack([c * scaled[:, 0] + s * scaled[:, 1], -s * scaled[:, 0] + c * scaled[:, 1]], axis=1)
+    return rotated + offset
+
+
+def node_primitives(document, buffers, node_name):
+    """Every primitive of one root node, baked: a list of dicts with
+    positions, normals, uvs (the material's UV set with its transform baked),
+    indices and material index."""
+    nodes = [node for node in document["nodes"] if node.get("name") == node_name]
+    if len(nodes) != 1:
+        raise SystemExit(f"node {node_name!r} matches {len(nodes)} nodes")
+    node = nodes[0]
+    roots = {index for scene in document.get("scenes", []) for index in scene["nodes"]}
+    if document["nodes"].index(node) not in roots or "matrix" in node:
+        raise SystemExit(f"node {node_name!r} is not a flat TRS root node")
+    rotation, scale, translation = node_transform(node)
+    result = []
+    for primitive in document["meshes"][node["mesh"]]["primitives"]:
+        if primitive.get("mode", 4) != 4:
+            raise SystemExit(f"node {node_name!r} has a non-triangle primitive")
+        attributes = primitive["attributes"]
+        material = document["materials"][primitive["material"]]
+        texcoord, transform = material_uv_set(material)
+        positions = accessor(document, buffers, attributes["POSITION"]).astype(np.float64)
+        normals = accessor(document, buffers, attributes["NORMAL"]).astype(np.float64)
+        uvs = bake_texture_transform(accessor(document, buffers, attributes[f"TEXCOORD_{texcoord}"]).astype(np.float64), transform)
+        indices = accessor(document, buffers, primitive["indices"]).reshape(-1).astype(np.int64)
+        positions = (positions * scale) @ rotation.T + translation
+        normals = (normals / scale) @ rotation.T
+        normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+        result.append({"positions": positions, "normals": normals, "uvs": uvs, "indices": indices,
+                       "material": primitive["material"]})
+    return result

@@ -2430,9 +2430,13 @@ end
     # PBR asset the wrong roughness. Every procedural roughness map and the
     # 1x1 fallback are scalar (R == G == B, verified for all campaign2 maps),
     # so this is byte-identical for existing content. The metallic channel (B)
-    # is still not read: metallic is factor-only until the contract carries
-    # channel semantics (CONVERGE-0 ledger, turn 11).
-    roughness_sample = _sample_texture(UInt32(2), uv)[2]
+    # is read only for materials that declare glTF packing
+    # (`metallic_from_texture`, flagged as emissive w = 2): metallic becomes
+    # factor x BLUE. Everything else keeps factor-only metallic; the select
+    # returns the factor exactly, so existing frames keep their bytes.
+    roughness_texel = _sample_texture(UInt32(2), uv)
+    roughness_sample = roughness_texel[2]
+    metallic = material_emissive[4] > 1.5f0 ? material[1] * roughness_texel[3] : material[1]
     occlusion_sample = _sample_texture(UInt32(3), uv)[1]
     emissive_sample = _sample_texture(UInt32(4), uv)
     lit_color = _material_response(
@@ -2444,7 +2448,7 @@ end
         environment_top,
         environment_horizon,
         environment_ground,
-        material[1],
+        metallic,
         material[2],
         surface_parameters[1],
         surface_parameters[2],
@@ -4815,7 +4819,9 @@ function _mesh_resources!(
             ) for _ in batch_instances
         ]
         emissive_parameters = Vec4f[
-            Vec4f(material.emissive_factor_rgb..., 1.0f0) for _ in batch_instances
+            # w is a flag the shader reads: 2 = metallic from the roughness
+            # texture's BLUE channel (glTF packing), 1 = factor only.
+            Vec4f(material.emissive_factor_rgb..., material.metallic_from_texture ? 2.0f0 : 1.0f0) for _ in batch_instances
         ]
         gpu_positions = Lava.LavaArray{Vec4f,1}(positions; bq=state.queue)
         gpu_normals = Lava.LavaArray{Vec4f,1}(normals; bq=state.queue)

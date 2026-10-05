@@ -145,6 +145,12 @@ pub struct RenderMaterial {
     /// of opaque assets keep their digests.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alpha_cutoff: Option<f32>,
+    /// glTF `normalTexture.scale` and `occlusionTexture.strength`, present
+    /// only when the source sets them (CONVERGE-2 N-5 channel semantics).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normal_scale: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occlusion_strength: Option<f32>,
     pub double_sided: bool,
     pub base_color_texture_id: Option<String>,
     pub metallic_roughness_texture_id: Option<String>,
@@ -1028,6 +1034,21 @@ fn parse_material(
             cutoff
         }
     });
+    let texture_scalar = |key: &str, field: &str, range: std::ops::RangeInclusive<f32>, findings: &mut Vec<RenderFinding>| {
+        let value = material.get(key)?.get(field)?;
+        let scalar = value.as_f64().map(|value| value as f32).filter(|value| value.is_finite() && range.contains(value));
+        if scalar.is_none() {
+            finding(
+                findings,
+                RenderFindingCode::InvalidMaterial,
+                &material_id,
+                format!("{key}.{field} must be finite and within {range:?}"),
+            );
+        }
+        scalar
+    };
+    let normal_scale = texture_scalar("normalTexture", "scale", 0.0..=2.0, findings);
+    let occlusion_strength = texture_scalar("occlusionTexture", "strength", 0.0..=1.0, findings);
     let base_color_texture_id =
         material_texture_id(document, pbr, "baseColorTexture", &material_id, findings);
     let metallic_roughness_texture_id = material_texture_id(
@@ -1060,6 +1081,8 @@ fn parse_material(
         roughness,
         alpha_mode,
         alpha_cutoff,
+        normal_scale,
+        occlusion_strength,
         double_sided: material
             .get("doubleSided")
             .and_then(Value::as_bool)
@@ -1744,6 +1767,8 @@ fn default_material() -> RenderMaterial {
         roughness: 1.0,
         alpha_mode: RenderAlphaMode::Opaque,
         alpha_cutoff: None,
+        normal_scale: None,
+        occlusion_strength: None,
         double_sided: false,
         base_color_texture_id: None,
         metallic_roughness_texture_id: None,
@@ -2178,5 +2203,33 @@ mod alpha_coverage_tests {
         .unwrap();
         mask_coverage_cutoffs(&conflicting, &mut findings);
         assert_eq!(findings.len(), 1);
+    }
+
+    #[test]
+    fn normal_scale_and_occlusion_strength_are_carried_and_bounded() {
+        let request = RenderConditioningRequest {
+            schema_version: "wge.render-asset-request/v1".into(),
+            meters_per_unit: 1.0,
+            vertical_axis: Axis::Y,
+            require_uv0: true,
+            generate_normals: true,
+            generate_tangents: true,
+            mip_policy: RenderMipPolicy::GenerateCpuChain,
+            max_texture_dimension: 1024,
+        };
+        let document: Value = serde_json::from_str(r#"{"textures": [{"source": 0}], "images": [{"uri": "x.png"}]}"#).unwrap();
+        let parse = |material: &str| {
+            let mut findings = Vec::new();
+            let material: Value = serde_json::from_str(material).unwrap();
+            (parse_material(&document, 0, &material, &request, &mut findings), findings)
+        };
+        let (plain, findings) = parse(r#"{"normalTexture": {"index": 0}, "occlusionTexture": {"index": 0}}"#);
+        assert!(findings.is_empty(), "{findings:?}");
+        assert_eq!((plain.normal_scale, plain.occlusion_strength), (None, None), "absent stays absent");
+        let (set, findings) = parse(r#"{"normalTexture": {"index": 0, "scale": 0.4}, "occlusionTexture": {"index": 0, "strength": 0.7}}"#);
+        assert!(findings.is_empty(), "{findings:?}");
+        assert_eq!((set.normal_scale, set.occlusion_strength), (Some(0.4), Some(0.7)));
+        let (_, findings) = parse(r#"{"normalTexture": {"index": 0, "scale": 3.0}}"#);
+        assert_eq!(findings.len(), 1, "out-of-range scale is a finding");
     }
 }

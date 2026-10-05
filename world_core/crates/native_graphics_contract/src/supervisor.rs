@@ -19,7 +19,7 @@ use crate::{
     GraphicsFrameReceipt, GraphicsFrameReceiptBody, GraphicsReady, GraphicsRendererAttestation,
     GraphicsRendererAttestationBody, GraphicsScenePacket, GraphicsTelemetry, LAVA_BACKEND_ID,
     LAVA_REVISION, MAX_DENSE_BENCHMARK_INSTANCES, canonical_json, compose_bound_scene_with_view, CalibrationRig,
-    lower_campaign2_packet, lower_campaign2_packet_with, lower_dense_benchmark_packet,
+    lower_campaign2_packet, lower_campaign2_packet_inputs, lower_dense_benchmark_packet, Campaign2Inputs,
     ParityContent, ParityPolicyCandidate, TerrainLayerSet, lower_objective_close_packet,
     lower_reference_world, lower_showcase_packet, lower_world_showcase_packet,
     measure_frame_capture, seal_frame_receipt_with_capture, seal_renderer_attestation,
@@ -29,7 +29,11 @@ use crate::{
 use wge_reference_runtime::{WorldArtifact, validate_world_artifact};
 
 pub const WORKER_SCHEMA: &str = "wge.graphics-worker/v1";
-const MAX_WORKER_FRAME_BYTES: usize = 64 * 1024 * 1024;
+/// Request/response frame bound. Raised from 64 MiB for CONVERGE-2 N-5: the
+/// converge packets carry ~31 MB of terrain-layer textures before any imported
+/// kit, and meshes travel as JSON floats (~96 bytes per vertex). Must match
+/// `MAX_WORKER_FRAME_BYTES` in `graphics_lab/bin/wge_graphics_worker.jl`.
+const MAX_WORKER_FRAME_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_WORKER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
 /// The ready handshake covers Julia package loading, which on a cold or
 /// invalidated depot includes precompiling Lava and its GPU stack (measured:
@@ -320,16 +324,36 @@ impl GraphicsWorkerSupervisor {
     /// The set is an explicit input, like a bound scene's packages: the
     /// supervisor re-derives the authorized projection WITH the same set and
     /// requires an exact match, so layer content cannot be smuggled into a
-    /// packet the world does not authorize.
+    /// packet the world does not authorize. The parity arm is still read from
+    /// the environment here; `render_and_promote_campaign2` takes it explicitly.
     pub fn render_and_promote_with_terrain_layers(
         &mut self,
         packet: &GraphicsScenePacket,
         world: &WorldArtifact,
         terrain_layers: &TerrainLayerSet,
     ) -> Result<PromotedFrame, GraphicsWorkerError> {
+        let candidate = ParityPolicyCandidate::from_env();
+        let content = ParityContent::from_env(candidate).map_err(GraphicsWorkerError::contract)?;
+        self.render_and_promote_campaign2(
+            packet,
+            world,
+            &Campaign2Inputs { candidate, content, terrain_layers: Some(terrain_layers), kit: None },
+        )
+    }
+
+    /// Render a Campaign 2 packet whose every lowering input is explicit
+    /// (arm, content, terrain layers, kit). The supervisor re-derives the
+    /// authorized projection from exactly these inputs; nothing is read from
+    /// the process environment (CONVERGE-1 carried item 5).
+    pub fn render_and_promote_campaign2(
+        &mut self,
+        packet: &GraphicsScenePacket,
+        world: &WorldArtifact,
+        inputs: &Campaign2Inputs<'_>,
+    ) -> Result<PromotedFrame, GraphicsWorkerError> {
         validate_scene_packet(packet).map_err(GraphicsWorkerError::contract)?;
         validate_world_artifact_binding(packet, world)?;
-        validate_authorized_world_projection(packet, world, Some(terrain_layers))?;
+        validate_authorized_world_projection(packet, world, Some(inputs))?;
         self.render_validated_and_promote(packet)
     }
 
@@ -763,16 +787,12 @@ impl GraphicsWorkerSupervisor {
 fn validate_authorized_world_projection(
     packet: &GraphicsScenePacket,
     world: &WorldArtifact,
-    terrain_layers: Option<&TerrainLayerSet>,
+    campaign2_inputs: Option<&Campaign2Inputs<'_>>,
 ) -> Result<(), GraphicsWorkerError> {
     let reference = lower_reference_world(world).map_err(GraphicsWorkerError::contract)?;
-    let campaign2 = |view| match terrain_layers {
+    let campaign2 = |view| match campaign2_inputs {
         None => lower_campaign2_packet(&reference, view),
-        Some(set) => {
-            let candidate = ParityPolicyCandidate::from_env();
-            let content = ParityContent::from_env(candidate)?;
-            lower_campaign2_packet_with(&reference, view, candidate, content, Some(set))
-        }
+        Some(inputs) => lower_campaign2_packet_inputs(&reference, view, inputs),
     };
     let mut authorized = vec![
         reference.clone(),

@@ -111,6 +111,7 @@ fn packet(overlays: bool) -> GraphicsScenePacket {
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: Vec::new(),
             normal_texture_id: None,
             roughness_texture_id: None,

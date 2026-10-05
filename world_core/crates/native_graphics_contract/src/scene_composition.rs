@@ -170,14 +170,14 @@ pub fn compose_bound_scene_with_view(
     seal_scene_packet(body)
 }
 
-struct AssetNamespace {
+pub(crate) struct AssetNamespace {
     mesh_ids: BTreeMap<String, String>,
     material_ids: BTreeMap<String, String>,
     texture_ids: BTreeMap<String, String>,
 }
 
 impl AssetNamespace {
-    fn new(asset: &GraphicsAssetProjection) -> Self {
+    pub(crate) fn new(asset: &GraphicsAssetProjection) -> Self {
         let prefix = format!("{}::", asset.render_package_id);
         Self {
             mesh_ids: asset
@@ -213,13 +213,13 @@ impl AssetNamespace {
         }
     }
 
-    fn mesh(&self, local: &str) -> Result<&String, GraphicsContractError> {
+    pub(crate) fn mesh(&self, local: &str) -> Result<&String, GraphicsContractError> {
         self.mesh_ids.get(local).ok_or_else(|| {
             GraphicsContractError::provenance(format!("unknown conditioned mesh {local}"))
         })
     }
 
-    fn material(&self, local: &str) -> Result<&String, GraphicsContractError> {
+    pub(crate) fn material(&self, local: &str) -> Result<&String, GraphicsContractError> {
         self.material_ids.get(local).ok_or_else(|| {
             GraphicsContractError::provenance(format!("unknown conditioned material {local}"))
         })
@@ -232,7 +232,7 @@ impl AssetNamespace {
     }
 }
 
-fn append_asset_resources(
+pub(crate) fn append_asset_resources(
     body: &mut GraphicsScenePacketBody,
     namespace: &AssetNamespace,
     asset: &GraphicsAssetProjection,

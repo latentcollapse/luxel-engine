@@ -112,6 +112,8 @@ struct MaterialPacket
     alpha_cutoff::Union{Nothing,Float32}
     # Absent on the wire means single-sided; the wire never carries `false`.
     double_sided::Bool
+    # CONVERGE-2 N-5: metallic = factor x roughness texture BLUE (glTF packing).
+    metallic_from_texture::Bool
 end
 
 # Packets written before N-6 carry neither field.
@@ -122,7 +124,7 @@ MaterialPacket(
 ) = MaterialPacket(
     material_id, base_color_rgba, metallic, roughness, clearcoat, clearcoat_roughness,
     alpha_mode, texture_ids, normal_texture_id, roughness_texture_id, occlusion_texture_id,
-    emissive_texture_id, normal_scale, occlusion_strength, emissive_factor_rgb, nothing, false,
+    emissive_texture_id, normal_scale, occlusion_strength, emissive_factor_rgb, nothing, false, false,
 )
 
 struct TextureMipPacket
@@ -1081,6 +1083,7 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
             "emissive_texture_id",
             "alpha_cutoff",
             "double_sided",
+            "metallic_from_texture",
         )
         _exact_keys(object, required_keys, optional_keys, "material")
         id = _string(object["material_id"], "material.material_id")
@@ -1139,6 +1142,14 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
                 throw(ProtocolError("malformed_packet", "single-sided materials omit double_sided"))
             double_sided = true
         end
+        metallic_from_texture = false
+        if haskey(object, "metallic_from_texture")
+            object["metallic_from_texture"] === true ||
+                throw(ProtocolError("malformed_packet", "factor-only metallic omits metallic_from_texture"))
+            roughness_texture_id === nothing &&
+                throw(ProtocolError("malformed_packet", "metallic_from_texture needs a roughness texture"))
+            metallic_from_texture = true
+        end
         push!(
             materials,
             MaterialPacket(
@@ -1159,6 +1170,7 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
                 emissive_factor_rgb,
                 alpha_cutoff,
                 double_sided,
+                metallic_from_texture,
             ),
         )
     end

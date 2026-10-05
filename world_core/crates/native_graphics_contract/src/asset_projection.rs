@@ -99,13 +99,14 @@ pub fn project_render_asset(
                 alpha_mode: project_alpha_mode(material.alpha_mode),
                 alpha_cutoff: material.alpha_cutoff,
                 double_sided: material.double_sided.then_some(true),
+                metallic_from_texture: material.metallic_roughness_texture_id.is_some().then_some(true),
                 texture_ids,
                 normal_texture_id: material.normal_texture_id.clone(),
                 roughness_texture_id: material.metallic_roughness_texture_id.clone(),
                 occlusion_texture_id: material.occlusion_texture_id.clone(),
                 emissive_texture_id: material.emissive_texture_id.clone(),
-                normal_scale: 1.0,
-                occlusion_strength: 1.0,
+                normal_scale: material.normal_scale.unwrap_or(1.0),
+                occlusion_strength: material.occlusion_strength.unwrap_or(1.0),
                 emissive_factor_rgb: material.emissive_factor_rgb,
             }
         })

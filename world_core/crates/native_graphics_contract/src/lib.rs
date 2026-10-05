@@ -46,6 +46,7 @@ pub mod asset_projection;
 pub mod calibration;
 pub mod deformation;
 pub mod ibl;
+pub mod kit;
 pub mod input_session;
 pub mod live;
 pub mod material_maps;
@@ -79,6 +80,7 @@ pub use asset_projection::{
 };
 pub use scene_composition::{compose_bound_scene, compose_bound_scene_with_camera, compose_bound_scene_with_view};
 pub use calibration::{CalibrationPlacement, CalibrationRig, CalibrationView};
+pub use kit::{KitSet, load_kit_set};
 pub use terrain_layers::{
     LayerCoverage, LayerSource, LayerTextureSizes, MacroRamp, SquareRgba8, TerrainLayer,
     TerrainLayerSet, TerrainLayers, apply_terrain_layers, build_terrain_layer_set,
@@ -363,6 +365,12 @@ pub struct MaterialIntent {
     /// their bytes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub double_sided: Option<bool>,
+    /// `Some(true)`: the roughness texture is a glTF metallicRoughness texture
+    /// and metallic is the factor times its BLUE channel (roughness is GREEN).
+    /// Absent: metallic is the factor alone (procedural scalar maps carry
+    /// roughness in every channel). Requires `roughness_texture_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metallic_from_texture: Option<bool>,
     pub texture_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normal_texture_id: Option<String>,
@@ -3138,6 +3146,7 @@ pub fn lower_reference_world(
         alpha_mode: AlphaMode::Opaque,
         alpha_cutoff: None,
         double_sided: None,
+        metallic_from_texture: None,
         texture_ids: vec![terrain_albedo_texture.texture_id.clone()],
         normal_texture_id: normal_texture_id.clone(),
         roughness_texture_id: roughness_texture_id.clone(),
@@ -3160,6 +3169,7 @@ pub fn lower_reference_world(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![stone_albedo_texture.texture_id.clone()],
             normal_texture_id: normal_texture_id.clone(),
             roughness_texture_id: roughness_texture_id.clone(),
@@ -3206,6 +3216,7 @@ pub fn lower_reference_world(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![foliage_albedo_texture.texture_id.clone()],
             normal_texture_id: normal_texture_id.clone(),
             roughness_texture_id: roughness_texture_id.clone(),
@@ -3228,6 +3239,7 @@ pub fn lower_reference_world(
         alpha_mode: AlphaMode::Opaque,
         alpha_cutoff: None,
         double_sided: None,
+        metallic_from_texture: None,
         texture_ids: vec![beacon_albedo_texture.texture_id.clone()],
         normal_texture_id: normal_texture_id.clone(),
         roughness_texture_id: roughness_texture_id.clone(),
@@ -3562,6 +3574,7 @@ pub fn lower_showcase_packet(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![showcase_stone_texture.texture_id.clone()],
             normal_texture_id: common_normal.clone(),
             roughness_texture_id: common_roughness.clone(),
@@ -3581,6 +3594,7 @@ pub fn lower_showcase_packet(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![showcase_metal_texture.texture_id.clone()],
             normal_texture_id: common_normal.clone(),
             roughness_texture_id: common_roughness.clone(),
@@ -3600,6 +3614,7 @@ pub fn lower_showcase_packet(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![showcase_glow_texture.texture_id.clone()],
             normal_texture_id: common_normal,
             roughness_texture_id: common_roughness,
@@ -3952,6 +3967,11 @@ pub enum ParityPolicyCandidate {
     /// exponential height-dependent atmosphere, on the same converge0 content,
     /// so the only difference from `Converge0` is sky and aerial perspective.
     Converge1,
+    /// CONVERGE-2 N-5: `Converge1`'s policy unchanged, with the hero kit
+    /// (`kit::apply_kit`) replacing the procedural shrine and tree balls. The
+    /// kit is an explicit input like the terrain layers; only content differs
+    /// from `Converge1`.
+    Converge2,
 }
 
 /// Content flags for the parity experiments, orthogonal to the render policy.
@@ -4074,7 +4094,7 @@ impl ParityPolicyCandidate {
     /// Arms that render the converge0 world (extended terrain, metric UVs,
     /// layered scanned ground). Their content and policy are only valid together.
     pub fn uses_converge0_content(self) -> bool {
-        matches!(self, Self::Converge0 | Self::Converge1)
+        matches!(self, Self::Converge0 | Self::Converge1 | Self::Converge2)
     }
 
     pub fn from_env() -> Self {
@@ -4088,6 +4108,7 @@ impl ParityPolicyCandidate {
             Ok("hero-materials") => Self::HeroMaterials,
             Ok("converge0") => Self::Converge0,
             Ok("converge1") => Self::Converge1,
+            Ok("converge2") => Self::Converge2,
             _ => Self::Null,
         }
     }
@@ -4178,6 +4199,7 @@ impl ParityPolicyCandidate {
                     ..converge0
                 })
             }
+            Self::Converge2 => Self::Converge1.policy(),
             Self::HeroMaterials => Some(RenderPolicy::default()),
             Self::Terrain => Some(RenderPolicy {
                 terrain_surface: Some(TERRAIN_TILING_CANDIDATE),
@@ -4396,6 +4418,27 @@ pub fn lower_campaign2_packet(
     lower_campaign2_packet_with(packet, view, candidate, content, None)
 }
 
+/// Every input of a Campaign 2 lowering besides the world and the view, passed
+/// explicitly. The supervisor re-derives the authorized packet from the same
+/// value, so authorization never consults the process environment (CONVERGE-1
+/// carried item 5).
+#[derive(Clone, Copy, Debug)]
+pub struct Campaign2Inputs<'a> {
+    pub candidate: ParityPolicyCandidate,
+    pub content: ParityContent,
+    pub terrain_layers: Option<&'a TerrainLayerSet>,
+    pub kit: Option<&'a KitSet>,
+}
+
+/// `lower_campaign2_packet` with every input explicit (see `Campaign2Inputs`).
+pub fn lower_campaign2_packet_inputs(
+    packet: &GraphicsScenePacket,
+    view: Campaign2View,
+    inputs: &Campaign2Inputs<'_>,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    lower_campaign2_packet_impl(packet, view, inputs.candidate, inputs.content, inputs.terrain_layers, inputs.kit)
+}
+
 /// `lower_campaign2_packet` with the parity arm passed explicitly instead of
 /// read from the environment, so tests can lower several arms in one process
 /// without racing on process-global environment variables.
@@ -4406,7 +4449,26 @@ pub fn lower_campaign2_packet_with(
     parity_content: ParityContent,
     terrain_layers: Option<&TerrainLayerSet>,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
+    lower_campaign2_packet_impl(packet, view, parity_candidate, parity_content, terrain_layers, None)
+}
+
+fn lower_campaign2_packet_impl(
+    packet: &GraphicsScenePacket,
+    view: Campaign2View,
+    parity_candidate: ParityPolicyCandidate,
+    parity_content: ParityContent,
+    terrain_layers: Option<&TerrainLayerSet>,
+    kit: Option<&KitSet>,
+) -> Result<GraphicsScenePacket, GraphicsContractError> {
     validate_scene_packet(packet)?;
+    // N-5: the kit is converge2's content and only converge2's.
+    if kit.is_some() != (parity_candidate == ParityPolicyCandidate::Converge2) {
+        return Err(GraphicsContractError::provenance(if kit.is_some() {
+            "a kit is only valid with the converge2 arm"
+        } else {
+            "converge2 requires a kit (tools/kit/kit1.lock.json)"
+        }));
+    }
     if parity_content.converge0 != parity_candidate.uses_converge0_content() {
         return Err(GraphicsContractError::malformed(
             "converge0 content and the converge0/converge1 render policies are only valid together",
@@ -4590,6 +4652,7 @@ pub fn lower_campaign2_packet_with(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![wet_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4609,6 +4672,7 @@ pub fn lower_campaign2_packet_with(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![foliage_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4628,6 +4692,7 @@ pub fn lower_campaign2_packet_with(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![bark_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4647,6 +4712,7 @@ pub fn lower_campaign2_packet_with(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![hero_stone_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4666,6 +4732,7 @@ pub fn lower_campaign2_packet_with(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![hero_metal_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4685,6 +4752,7 @@ pub fn lower_campaign2_packet_with(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![hero_glow_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4704,6 +4772,7 @@ pub fn lower_campaign2_packet_with(
             alpha_mode: AlphaMode::Opaque,
             alpha_cutoff: None,
             double_sided: None,
+            metallic_from_texture: None,
             texture_ids: vec![hero_stone_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture,
@@ -5078,7 +5147,7 @@ pub fn lower_campaign2_packet_with(
         (-15.0, 11.5, 1.48),
         (13.0, 8.0, 1.04),
     ];
-    for (index, (offset_x, offset_z, scale)) in foliage_layout.into_iter().enumerate() {
+    for (index, (offset_x, offset_z, scale)) in foliage_layout.iter().copied().enumerate() {
         let x = f64::from(hero_x) + offset_x;
         let z = f64::from(hero_z) + offset_z;
         let y = campaign2_terrain_height(packet, x, z) + 0.02;
@@ -5237,6 +5306,15 @@ pub fn lower_campaign2_packet_with(
         if let Some(set) = terrain_layers {
             apply_terrain_layers(&mut body, set)?;
         }
+    }
+    if let Some(kit) = kit {
+        let trees: Vec<(f32, f32, f32)> = foliage_layout
+            .iter()
+            .map(|(dx, dz, scale)| ((f64::from(hero_x) + dx) as f32, (f64::from(hero_z) + dz) as f32, *scale))
+            .collect();
+        kit::apply_kit(&mut body, kit, [hero_x, hero_y, hero_z], &trees, |x, z| {
+            campaign2_terrain_height(packet, f64::from(x), f64::from(z)) + 0.02
+        })?;
     }
     if parity_content.hero_materials {
         let remapped = material_maps::apply_hero_material_set(&mut body);
@@ -5554,6 +5632,19 @@ fn validate_material(material: &MaterialIntent) -> Result<(), GraphicsContractEr
         return Err(GraphicsContractError::malformed(
             "single-sided materials omit double_sided",
         ));
+    }
+    match (material.metallic_from_texture, &material.roughness_texture_id) {
+        (None, _) | (Some(true), Some(_)) => {}
+        (Some(false), _) => {
+            return Err(GraphicsContractError::malformed(
+                "factor-only metallic omits metallic_from_texture",
+            ));
+        }
+        (Some(true), None) => {
+            return Err(GraphicsContractError::malformed(
+                "metallic_from_texture needs a roughness (metallicRoughness) texture",
+            ));
+        }
     }
     finite_values(&material.emissive_factor_rgb, "material emissive factor")?;
     if material
@@ -6501,6 +6592,7 @@ mod tests {
                 alpha_mode: AlphaMode::Opaque,
                 alpha_cutoff: None,
                 double_sided: None,
+                metallic_from_texture: None,
                 texture_ids: Vec::new(),
                 normal_texture_id: None,
                 roughness_texture_id: None,

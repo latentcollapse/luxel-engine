@@ -74,3 +74,16 @@ fn single_sided_has_one_encoding() {
     body.materials[0].double_sided = Some(false);
     assert!(validates(body).is_err());
 }
+
+// CONVERGE-2 N-5 channel semantics: metallic from the metallicRoughness BLUE channel.
+
+#[test]
+fn metallic_from_texture_needs_a_roughness_texture_and_has_one_encoding() {
+    let mut explicit_false = body();
+    explicit_false.materials[0].metallic_from_texture = Some(false);
+    assert!(validates(explicit_false).is_err(), "Some(false) accepted");
+    let mut untextured = body();
+    untextured.materials[0].roughness_texture_id = None;
+    untextured.materials[0].metallic_from_texture = Some(true);
+    assert!(validates(untextured).is_err(), "flag without a roughness texture accepted");
+}

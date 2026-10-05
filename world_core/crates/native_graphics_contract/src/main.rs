@@ -9,7 +9,7 @@ use wge_native_graphics_contract::{
     Campaign2View, GraphicsWorkerSupervisor, QualityOutcome, VisualQualityProfile,
     assess_campaign2_visual_evidence, assess_visual_quality,
     deterministic_certification_frame_receipt, load_terrain_layer_set,
-    lower_campaign2_packet_with, ParityContent, ParityPolicyCandidate,
+    lower_campaign2_packet_inputs, load_kit_set, Campaign2Inputs, ParityContent, ParityPolicyCandidate,
     lower_dense_benchmark_packet, lower_objective_close_packet, lower_reference_world,
     lower_showcase_packet, lower_world_showcase_packet, sha256_prefixed,
     validate_campaign2_visual_evidence,
@@ -479,6 +479,28 @@ fn run() -> Result<(), String> {
             } else {
                 None
             };
+            // N-5: converge2's kit, the same explicit-input seam. The lock path
+            // comes from the environment; its GLBs are digest-verified on load.
+            let kit = if parity_candidate == ParityPolicyCandidate::Converge2 {
+                let lock = env::var("WGE_KIT_SET").map_err(|_| {
+                    "converge2 needs WGE_KIT_SET=<lock>, e.g. tools/kit/kit1.lock.json \
+                     (build the kit first with tools/build_kit.py)"
+                        .to_owned()
+                })?;
+                let root = env::current_dir().map_err(|error| error.to_string())?;
+                Some(
+                    load_kit_set(&PathBuf::from(lock), &root)
+                        .map_err(|error| format!("kit failed to load: {error}"))?,
+                )
+            } else {
+                None
+            };
+            let inputs = Campaign2Inputs {
+                candidate: parity_candidate,
+                content: parity_content,
+                terrain_layers: terrain_layers.as_ref(),
+                kit: kit.as_ref(),
+            };
             let view_specs = [
                 ("close", Campaign2View::Close),
                 ("medium", Campaign2View::Medium),
@@ -487,19 +509,13 @@ fn run() -> Result<(), String> {
             let mut view_summaries = Vec::with_capacity(view_specs.len());
             let mut failed_views = Vec::new();
             for (view_name, view) in view_specs {
-                let packet = lower_campaign2_packet_with(
-                    &reference_packet,
-                    view,
-                    parity_candidate,
-                    parity_content,
-                    terrain_layers.as_ref(),
-                )
-                .map_err(|error| format!("Campaign 2 {view_name} lowering failed: {error}"))?;
-                let promoted = match &terrain_layers {
-                    Some(set) => supervisor.render_and_promote_with_terrain_layers(&packet, &world.world, set),
-                    None => supervisor.render_and_promote(&packet, &world.world),
-                }
-                .map_err(|error| format!("Campaign 2 {view_name} render failed: {error}"))?;
+                let packet = lower_campaign2_packet_inputs(&reference_packet, view, &inputs)
+                    .map_err(|error| format!("Campaign 2 {view_name} lowering failed: {error}"))?;
+                // Authorization re-derives from the same explicit inputs; the
+                // environment is read once, above, and never by the supervisor.
+                let promoted = supervisor
+                    .render_and_promote_campaign2(&packet, &world.world, &inputs)
+                    .map_err(|error| format!("Campaign 2 {view_name} render failed: {error}"))?;
                 let certification_receipt = deterministic_certification_frame_receipt(
                     &packet,
                     &promoted.receipt,

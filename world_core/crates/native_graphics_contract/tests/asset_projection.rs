@@ -44,6 +44,8 @@ fn package() -> RenderAssetPackage {
             roughness: 0.65,
             alpha_mode: RenderAlphaMode::Opaque,
             alpha_cutoff: None,
+            normal_scale: None,
+            occlusion_strength: None,
             double_sided: false,
             base_color_texture_id: Some("albedo".into()),
             metallic_roughness_texture_id: None,

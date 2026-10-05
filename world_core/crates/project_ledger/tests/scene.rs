@@ -188,6 +188,8 @@ fn ready_render_package(source_identity: &AssetIdentity) -> RenderAssetPackage {
             roughness: 0.8,
             alpha_mode: RenderAlphaMode::Opaque,
             alpha_cutoff: None,
+            normal_scale: None,
+            occlusion_strength: None,
             double_sided: false,
             base_color_texture_id: None,
             metallic_roughness_texture_id: None,
