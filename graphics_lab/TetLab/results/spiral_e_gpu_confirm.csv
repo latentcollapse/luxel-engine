@@ -1,0 +1,21 @@
+# Spiral E GPU confirmation (runtime arithmetic, RTX 5060 sm_120)
+# device: NVIDIA GeForce RTX 5060 cap 12.0.0
+# cuda runtime: 13.4.0
+# blob h=0.28 self-check max=0.00e+00 (≤1e-9·scale) — λ machinery matches TetDeform
+# conifer h=0.60 self-check max=0.00e+00 (≤1e-9·scale) — λ machinery matches TetDeform
+# plate h=0.30 self-check max=0.00e+00 (≤1e-9·scale) — λ machinery matches TetDeform
+# case rows: kind,name,h,family,px95_f64cage,px95_cpuf32,px95_gpu,dev_cpugpu_px,dev_gpu_f64,gate
+case,blob,0.28,wind,0.2184,0.2184,0.2184,0.0000,0.0000,ok
+case,blob,0.28,fold4,0.2536,0.2536,0.2536,0.0000,0.0000,ok
+case,conifer,0.6,wind,0.5410,0.5410,0.5410,0.0000,0.0000,ok
+case,conifer,0.6,fold4,2.0636,2.0635,2.0635,0.0000,0.0001,ok
+case,plate,0.3,wind,1.6722,1.6722,1.6722,0.0000,0.0000,ok
+case,plate,0.3,fold4,0.3647,0.3647,0.3647,0.0000,0.0000,ok
+# te rows: kind,name,family,groups,pairs,bit_ident_frac,max_dev_obj,max_dev_px5,edge_min,ntilt_deg,gate
+te,blob,wind,389,27255,1.0000,0.000e+00,0.000e+00,0.2800,0.000e+00,ok
+te,blob,fold4,389,27255,1.0000,0.000e+00,0.000e+00,0.2800,0.000e+00,ok
+te,conifer,wind,96,5348,1.0000,0.000e+00,0.000e+00,0.6000,0.000e+00,ok
+te,conifer,fold4,96,5348,1.0000,0.000e+00,0.000e+00,0.6000,0.000e+00,ok
+te,plate,wind,50,1632,1.0000,0.000e+00,0.000e+00,0.3000,0.000e+00,ok
+te,plate,fold4,50,1632,1.0000,0.000e+00,0.000e+00,0.3000,0.000e+00,ok
+# gates: E-G2 <=0.02px & D-band; E-G3 <=0.01px; E-G4 <=1e-5*scale & <=0.01deg; E-G5 = byte-identical CSV x2

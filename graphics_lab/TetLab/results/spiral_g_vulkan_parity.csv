@@ -1,0 +1,30 @@
+# Spiral G — Vulkan render-pass readback parity (RTX 5060, repo-pinned Vulkan.jl)
+# physical device: NVIDIA GeForce RTX 5060 api=1.4.351 (DISCRETE)
+# glslc SPIR-V: vert=fa3f5cf204aed569 frag=b25db51ec6d930b5
+# method: chunked point-splat value parity — flat f32 payload written by
+# the rasterized fragment (full render chain incl. fixed-function
+# w-divide + viewport) vs f64 analytic framebuffer coords per vertex.
+# orientation: y-up transported without flip (presentation convention,
+# outside the parity model). G-G4: sha16 over the byte-exact per-vertex
+# error vector (device-derived) — must match across processes.
+# parity rows: kind,name,h,tets,family,n_chunks,n_solo,mean_px,p95_px,max_px,gate(<=0.5px)
+parity,blob,0.28,1100,wind,8,225,0.000018,0.000034,0.000049,ok
+parity,blob,0.28,1100,fold4,7,292,0.000018,0.000034,0.000052,ok
+parity,teapot,0.3,500,wind,4,61,0.000017,0.000032,0.000042,ok
+parity,teapot,0.3,500,fold4,4,80,0.000017,0.000031,0.000049,ok
+parity,icosphere2,0.3,906,wind,2,24,0.000018,0.000032,0.000041,ok
+parity,icosphere2,0.3,906,fold4,2,31,0.000017,0.000032,0.000041,ok
+parity,robot,0.13,435,wind,2,0,0.000019,0.000033,0.000036,ok
+parity,robot,0.13,435,fold4,2,2,0.000021,0.000031,0.000036,ok
+parity,conifer,0.6,226,wind,4,17,0.000026,0.000050,0.000083,fb-clip(821)
+parity,conifer,0.6,226,fold4,2,5,0.000024,0.000047,0.000084,fb-clip(2107)
+parity,plate,0.3,96,wind,1,19,0.000023,0.000037,0.000045,ok
+parity,plate,0.3,96,fold4,1,34,0.000023,0.000038,0.000045,ok
+parity,grass,0.16,93,wind,4,24,0.000020,0.000032,0.000040,ok
+parity,grass,0.16,93,fold4,4,24,0.000019,0.000034,0.000043,ok
+parity,cube,0.3,300,wind,2,8,0.000006,0.000016,0.000016,ok
+parity,cube,0.3,300,fold4,2,6,0.000009,0.000023,0.000023,ok
+parity,skeleton,0.3,218,wind,2,38,0.000020,0.000035,0.000046,ok
+parity,skeleton,0.3,218,fold4,2,36,0.000019,0.000034,0.000042,ok
+# error-vector sha16 (G-G4): 7c7102c2615a6ddb
+# gate: G-G2 max <= 0.5 px on every class x family

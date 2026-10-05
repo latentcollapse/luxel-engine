@@ -1,0 +1,37 @@
+# Spiral H2 — CUDA wind N-ladder (RTX 5060)
+# device: NVIDIA GeForce RTX 5060 cap 12.0.0
+# job: close the P0 comparator gap — the CUDA wind family measured across the same N-ladder {1,8,32,128} the Vulkan port runs, so P0-G4 can assert a same-(class,N) 2x claim for wind instead of the weaker same-cell substitute
+# kernel: H's fused_deform_reconstruct! wind branch, batched per Spiral I's A_param contract (shared resident cage + weights, one dispatch over ntot=N*nV, 0 B/frame)
+# timing: Spiral I protocol (capture->instantiate->launch, wall_us median of 25 after 5 warmups, thr=256) — deliberately NOT H's timing, so both pin families share one measurement protocol
+# params: A=0.2 phi=0.7 (H's wind constants, identical to the P0 driver's)
+# gates: HF2-G0 provenance + harness self-check; HF2-G1 identity vs host f32 wind path at every (class,N), bound 4*eps(f32)*maxcoord; HF2-G2 stable columns byte-identical x2
+# ladder rows: kind,family,name,h,tets,verts,N,ntot,reps,wall_us,dev_us,ident_max
+# pin protocol: stable columns = kind..reps + ident_max (us_* are machine-state)
+ladder,wind,blob,0.28,1100,10242,1,10242,25,11.18,5.22,1.192e-07
+ladder,wind,blob,0.28,1100,10242,8,81936,25,14.31,9.09,1.192e-07
+ladder,wind,blob,0.28,1100,10242,32,327744,25,31.13,25.57,1.192e-07
+ladder,wind,blob,0.28,1100,10242,128,1310976,25,135.79,120.29,1.192e-07
+ladder,wind,teapot,0.3,500,392,1,392,25,8.45,5.31,1.192e-07
+ladder,wind,teapot,0.3,500,392,8,3136,25,8.34,4.10,1.192e-07
+ladder,wind,teapot,0.3,500,392,32,12544,25,8.95,4.13,1.192e-07
+ladder,wind,teapot,0.3,500,392,128,50176,25,11.14,7.17,1.192e-07
+ladder,wind,icosphere2,0.3,906,162,1,162,25,8.17,4.19,5.960e-08
+ladder,wind,icosphere2,0.3,906,162,8,1296,25,8.56,4.16,5.960e-08
+ladder,wind,icosphere2,0.3,906,162,32,5184,25,8.21,3.87,5.960e-08
+ladder,wind,icosphere2,0.3,906,162,128,20736,25,8.76,5.34,5.960e-08
+ladder,wind,robot,0.13,435,48,1,48,25,7.90,3.94,1.192e-07
+ladder,wind,robot,0.13,435,48,8,384,25,8.34,4.19,1.192e-07
+ladder,wind,robot,0.13,435,48,32,1536,25,8.12,4.38,1.192e-07
+ladder,wind,robot,0.13,435,48,128,6144,25,8.13,3.97,1.192e-07
+ladder,wind,conifer,0.6,226,3508,1,3508,25,8.23,4.00,9.537e-07
+ladder,wind,conifer,0.6,226,3508,8,28064,25,9.32,5.92,9.537e-07
+ladder,wind,conifer,0.6,226,3508,32,112256,25,15.62,11.36,9.537e-07
+ladder,wind,conifer,0.6,226,3508,128,449024,25,38.20,33.34,9.537e-07
+ladder,wind,plate,0.3,96,289,1,289,25,8.38,4.10,1.192e-07
+ladder,wind,plate,0.3,96,289,8,2312,25,8.53,4.42,1.192e-07
+ladder,wind,plate,0.3,96,289,32,9248,25,9.13,5.54,1.192e-07
+ladder,wind,plate,0.3,96,289,128,36992,25,11.14,7.94,1.192e-07
+ladder,wind,grass,0.16,93,120,1,120,25,8.92,4.38,1.192e-07
+ladder,wind,grass,0.16,93,120,8,960,25,9.12,4.35,1.192e-07
+ladder,wind,grass,0.16,93,120,32,3840,25,8.36,4.32,1.192e-07
+ladder,wind,grass,0.16,93,120,128,15360,25,8.62,3.87,1.192e-07

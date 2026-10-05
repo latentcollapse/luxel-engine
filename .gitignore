@@ -40,3 +40,7 @@ kvfold/
 # Generated repository graph; source and reports remain in the tree.
 graphify-out/
 graphics_lab/TetLab.zip
+
+# TetCage primary source: 15 MB, fetched from the URL pinned (with SHA-256)
+# in graphics_lab/TetLab/references/TETCAGE_PAPER_PIN.md.
+graphics_lab/TetLab/references/*.pdf
