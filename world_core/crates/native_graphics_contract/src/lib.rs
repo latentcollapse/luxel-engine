@@ -52,7 +52,9 @@ pub mod live;
 pub mod material_maps;
 pub mod render_policy;
 pub mod scene_composition;
+pub mod scatter;
 pub mod session;
+pub mod still_water;
 pub mod terrain_layers;
 pub mod supervisor;
 pub mod visual_quality;
@@ -67,7 +69,7 @@ pub use deformation::{
 
 pub use render_policy::{
     validate_packet_render_policy, validate_render_policy, AtmospherePolicy, BloomPolicy,
-    DebugPolicy, DitherPolicy, IblPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, ResolvedRenderPolicy,
+    DebugPolicy, DitherPolicy, FoliageCoveragePolicy, IblPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, ResolvedRenderPolicy,
     SamplerPolicy, ShadowFitPolicy, ShadowPolicy, SkyModel, SkyPolicy, TerrainSurfacePolicy,
     VignettePolicy,
     POLICY_SCALE,
@@ -81,6 +83,7 @@ pub use asset_projection::{
 pub use scene_composition::{compose_bound_scene, compose_bound_scene_with_camera, compose_bound_scene_with_view};
 pub use calibration::{CalibrationPlacement, CalibrationRig, CalibrationView};
 pub use kit::{KitSet, load_kit_set};
+pub use still_water::TerrainSurface;
 pub use terrain_layers::{
     LayerCoverage, LayerSource, LayerTextureSizes, MacroRamp, SquareRgba8, TerrainLayer,
     TerrainLayerSet, TerrainLayers, apply_terrain_layers, build_terrain_layer_set,
@@ -264,6 +267,50 @@ pub struct TerrainPacket {
     /// canonical bytes of every existing packet are unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layers: Option<TerrainLayers>,
+    /// W-1 wet ground around still water. Absent = no wetness term, and the
+    /// canonical bytes of every existing packet are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wet_zone: Option<TerrainWetZone>,
+}
+
+/// Ground made wet by standing water (CONVERGE-3 W-1), applied on top of the
+/// terrain's own surface with the CALIBRATION-1 wet recipe: albedo darkened in
+/// linear light, normals flattened, roughness lowered. Full strength inside
+/// the ellipse, fading to dry over `falloff_m` outside it.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct TerrainWetZone {
+    pub center_xz_m: [f32; 2],
+    pub radii_xz_m: [f32; 2],
+    pub falloff_m: f32,
+    /// Linear-light albedo multiplier at full wetness, (0, 1].
+    pub albedo_scale: f32,
+    /// Roughness multiplier at full wetness, (0, 1].
+    pub roughness_scale: f32,
+    /// Tangent-space normal slope multiplier at full wetness, [0, 1].
+    pub normal_scale: f32,
+    /// Standing water filling the ellipse. Absent = wet ground only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub standing_water: Option<StandingWater>,
+}
+
+/// Still water painted by the terrain shader inside a wet zone's ellipse:
+/// the surface turns flat (world up), dark and smooth, so it reflects the sky.
+/// The outline is the ellipse displaced by the terrain's macro noise, so it is
+/// smooth per pixel and grounded by construction, at any terrain resolution.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct StandingWater {
+    /// Linear-light albedo of the water body, each in [0, 1].
+    pub albedo_rgb: [f32; 3],
+    pub roughness: f32,
+    /// Outline displacement, in ellipse units, [0, 0.5].
+    pub edge_wobble: f32,
+    /// Frequency of the outline displacement, cycles per metre, > 0.
+    pub wobble_cycles_per_m: f32,
+    /// Height of the water surface: the plane the renderer mirrors the scene
+    /// about for the water's reflection (the mean ground height under it).
+    pub surface_y_m: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -456,6 +503,19 @@ pub struct InstancePacket {
     pub material_id: String,
     pub importance: InstanceImportance,
     pub transform: Transform3d,
+    /// N-7 per-instance variety. Absent = the material as authored, and the
+    /// canonical bytes of every existing packet are unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variation: Option<InstanceVariation>,
+}
+
+/// Per-instance variety on top of an instance's material (CONVERGE-3 N-7),
+/// so many copies of one asset do not read as copies.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct InstanceVariation {
+    /// Linear-light multiplier on the material's base colour, each in [0.5, 1.5].
+    pub tint_rgb: [f32; 3],
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -996,6 +1056,14 @@ pub fn validate_scene_packet(packet: &GraphicsScenePacket) -> Result<(), Graphic
             )));
         }
         validate_transform(&instance.transform)?;
+        if let Some(variation) = &instance.variation
+            && !variation.tint_rgb.iter().all(|t| t.is_finite() && (0.5..=1.5).contains(t))
+        {
+            return Err(GraphicsContractError::malformed(format!(
+                "instance {} variation tint must be finite and in [0.5, 1.5]",
+                instance.instance_id
+            )));
+        }
         if !instance_ids.insert(instance.instance_id.as_str()) {
             return Err(GraphicsContractError::malformed(format!(
                 "duplicate instance {}",
@@ -2378,6 +2446,7 @@ fn deterministic_foliage_instances(
                         0.8 + height_scale * 0.15,
                     ],
                 },
+                variation: None,
             });
         }
     }
@@ -3201,6 +3270,7 @@ pub fn lower_reference_world(
                         finite_f32(obstacle.radius_m, "obstacle radius")?,
                     ],
                 },
+                variation: None,
             });
         }
     }
@@ -3267,6 +3337,7 @@ pub fn lower_reference_world(
             rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
             scale_xyz: [1.0, 1.0, 1.0],
         },
+        variation: None,
     });
     let route_points = world
         .body
@@ -3377,6 +3448,7 @@ pub fn lower_reference_world(
                 world.body.fields.region_codes.clone(),
             ),
             layers: None,
+            wet_zone: None,
         },
         materials,
         textures: vec![
@@ -3692,6 +3764,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "showcase-column-left".into(),
@@ -3703,6 +3776,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "showcase-column-right".into(),
@@ -3714,6 +3788,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "showcase-lintel".into(),
@@ -3725,6 +3800,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: identity,
                 scale_xyz: [3.3, 0.34, 0.55],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "showcase-halo".into(),
@@ -3736,6 +3812,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "showcase-rune-ring".into(),
@@ -3747,6 +3824,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "showcase-collar".into(),
@@ -3758,6 +3836,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "showcase-beacon-inlay".into(),
@@ -3769,6 +3848,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: identity,
                 scale_xyz: [0.12, 1.25, 0.035],
             },
+            variation: None,
         },
         // A few explicitly named dressing stones give the inspection profile
         // real foreground/midground structure without changing gameplay
@@ -3783,6 +3863,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: [0.0, 0.18, 0.0, 0.984],
                 scale_xyz: [1.35, 0.92, 1.10],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "showcase-rock-right".into(),
@@ -3794,6 +3875,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: [0.0, -0.22, 0.0, 0.976],
                 scale_xyz: [0.84, 0.68, 0.92],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "showcase-rock-back".into(),
@@ -3805,6 +3887,7 @@ pub fn lower_showcase_packet(
                 rotation_xyzw: [0.0, 0.36, 0.0, 0.933],
                 scale_xyz: [1.55, 1.05, 1.25],
             },
+            variation: None,
         },
     ]);
     if let Some(beacon_material) = body
@@ -3972,6 +4055,9 @@ pub enum ParityPolicyCandidate {
     /// kit is an explicit input like the terrain layers; only content differs
     /// from `Converge1`.
     Converge2,
+    /// CONVERGE-3: `Converge2` plus the CONVERGE-3 contracts as they land
+    /// (W-1 still water first). Same kit seam; every earlier arm unchanged.
+    Converge3,
 }
 
 /// Content flags for the parity experiments, orthogonal to the render policy.
@@ -4094,7 +4180,12 @@ impl ParityPolicyCandidate {
     /// Arms that render the converge0 world (extended terrain, metric UVs,
     /// layered scanned ground). Their content and policy are only valid together.
     pub fn uses_converge0_content(self) -> bool {
-        matches!(self, Self::Converge0 | Self::Converge1 | Self::Converge2)
+        matches!(self, Self::Converge0 | Self::Converge1 | Self::Converge2 | Self::Converge3)
+    }
+
+    /// Arms whose content includes the imported hero kit (N-5).
+    pub fn uses_kit(self) -> bool {
+        matches!(self, Self::Converge2 | Self::Converge3)
     }
 
     pub fn from_env() -> Self {
@@ -4109,6 +4200,7 @@ impl ParityPolicyCandidate {
             Ok("converge0") => Self::Converge0,
             Ok("converge1") => Self::Converge1,
             Ok("converge2") => Self::Converge2,
+            Ok("converge3") => Self::Converge3,
             _ => Self::Null,
         }
     }
@@ -4200,6 +4292,14 @@ impl ParityPolicyCandidate {
                 })
             }
             Self::Converge2 => Self::Converge1.policy(),
+            // L-2a: converge1's policy plus 4x MSAA with alpha-to-coverage.
+            Self::Converge3 => {
+                let converge1 = Self::Converge1.policy().expect("Converge1 always carries a policy");
+                Some(RenderPolicy {
+                    foliage_coverage: Some(FoliageCoveragePolicy { samples: 4 }),
+                    ..converge1
+                })
+            }
             Self::HeroMaterials => Some(RenderPolicy::default()),
             Self::Terrain => Some(RenderPolicy {
                 terrain_surface: Some(TERRAIN_TILING_CANDIDATE),
@@ -4405,6 +4505,10 @@ fn extend_terrain_with_backdrop(terrain: &mut TerrainPacket) -> Result<(), Graph
     Ok(())
 }
 
+/// Campaign 2 camera positions relative to the hero anchor: close, medium,
+/// wide. Shared by the view table and N-7's sightline corridors.
+const CAMPAIGN2_CAMERA_OFFSETS: [[f32; 3]; 3] = [[8.0, 5.2, 11.0], [14.0, 8.0, 18.0], [19.0, 11.0, 24.0]];
+
 /// Instance scale of both hero fins. Named because the converge0 metric fin
 /// mesh folds this scale into its UVs; the two must never drift apart.
 const CAMPAIGN2_FIN_SCALE: [f32; 3] = [0.30, 1.75, 0.62];
@@ -4461,13 +4565,24 @@ fn lower_campaign2_packet_impl(
     kit: Option<&KitSet>,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
     validate_scene_packet(packet)?;
-    // N-5: the kit is converge2's content and only converge2's.
-    if kit.is_some() != (parity_candidate == ParityPolicyCandidate::Converge2) {
+    // N-5: the kit is content of the kit arms (converge2, converge3) only.
+    if kit.is_some() != parity_candidate.uses_kit() {
         return Err(GraphicsContractError::provenance(if kit.is_some() {
-            "a kit is only valid with the converge2 arm"
+            "a kit is only valid with the converge2 or converge3 arm"
         } else {
-            "converge2 requires a kit (tools/kit/kit1.lock.json)"
+            "this arm requires a kit (converge2: tools/kit/kit1.lock.json, converge3: tools/kit/kit2.lock.json)"
         }));
+    }
+    // Each kit arm renders exactly one kit set, so a run cannot be mislabelled:
+    // converge2 is N-5's kit1, converge3 is R-1's damaged kit2.
+    if let Some(kit) = kit {
+        let expected = if parity_candidate == ParityPolicyCandidate::Converge3 { "kit2" } else { "kit1" };
+        if kit.set_id != expected {
+            return Err(GraphicsContractError::provenance(format!(
+                "the {parity_candidate:?} arm renders kit set `{expected}`, not `{}`",
+                kit.set_id
+            )));
+        }
     }
     if parity_content.converge0 != parity_candidate.uses_converge0_content() {
         return Err(GraphicsContractError::malformed(
@@ -5003,6 +5118,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-hero-pedestal".into(),
@@ -5014,6 +5130,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-hero-spire".into(),
@@ -5025,6 +5142,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-hero-halo".into(),
@@ -5036,6 +5154,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-hero-rune-ring".into(),
@@ -5047,6 +5166,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-hero-fin-left".into(),
@@ -5058,6 +5178,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: [0.0, 0.20, 0.0, 0.98],
                 scale_xyz: CAMPAIGN2_FIN_SCALE,
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-hero-fin-right".into(),
@@ -5069,6 +5190,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: [0.0, -0.20, 0.0, 0.98],
                 scale_xyz: CAMPAIGN2_FIN_SCALE,
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-hero-inlay-left".into(),
@@ -5080,6 +5202,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [0.10, 0.92, 0.035],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-hero-inlay-right".into(),
@@ -5091,6 +5214,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [0.10, 0.92, 0.035],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-hero-inlay-center".into(),
@@ -5102,6 +5226,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [0.68, 0.055, 0.035],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-wet-pool".into(),
@@ -5113,6 +5238,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [3.8, 1.0, 2.7],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-wet-ripple-outer".into(),
@@ -5124,6 +5250,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [3.8, 1.0, 2.7],
             },
+            variation: None,
         },
         InstancePacket {
             instance_id: "campaign2-wet-ripple-inner".into(),
@@ -5135,6 +5262,7 @@ fn lower_campaign2_packet_impl(
                 rotation_xyzw: identity,
                 scale_xyz: [2.2, 1.0, 1.55],
             },
+            variation: None,
         },
     ]);
 
@@ -5173,6 +5301,7 @@ fn lower_campaign2_packet_impl(
                     ],
                     scale_xyz: [scale * 0.72, scale, scale * 0.72],
                 },
+                variation: None,
             },
             InstancePacket {
                 instance_id: format!("campaign2-crown-{index:02}"),
@@ -5193,6 +5322,7 @@ fn lower_campaign2_packet_impl(
                     ],
                     scale_xyz: [scale, scale, scale],
                 },
+                variation: None,
             },
             InstancePacket {
                 instance_id: format!("campaign2-lobe-{index:02}"),
@@ -5220,6 +5350,7 @@ fn lower_campaign2_packet_impl(
                     ],
                     scale_xyz: [scale, scale, scale],
                 },
+                variation: None,
             },
         ]);
     }
@@ -5227,21 +5358,21 @@ fn lower_campaign2_packet_impl(
     let (target, position, fov_y_degrees, width_px, height_px) = match view {
         Campaign2View::Close => (
             [hero_x, hero_y + 2.45, hero_z],
-            [hero_x + 8.0, hero_y + 5.2, hero_z + 11.0],
+            [hero_x + CAMPAIGN2_CAMERA_OFFSETS[0][0], hero_y + CAMPAIGN2_CAMERA_OFFSETS[0][1], hero_z + CAMPAIGN2_CAMERA_OFFSETS[0][2]],
             46.0,
             768,
             512,
         ),
         Campaign2View::Medium => (
             [hero_x - 1.5, hero_y + 2.2, hero_z + 1.0],
-            [hero_x + 14.0, hero_y + 8.0, hero_z + 18.0],
+            [hero_x + CAMPAIGN2_CAMERA_OFFSETS[1][0], hero_y + CAMPAIGN2_CAMERA_OFFSETS[1][1], hero_z + CAMPAIGN2_CAMERA_OFFSETS[1][2]],
             50.0,
             960,
             640,
         ),
         Campaign2View::Wide => (
             [hero_x - 8.0, hero_y + 1.5, hero_z - 10.0],
-            [hero_x + 19.0, hero_y + 11.0, hero_z + 24.0],
+            [hero_x + CAMPAIGN2_CAMERA_OFFSETS[2][0], hero_y + CAMPAIGN2_CAMERA_OFFSETS[2][1], hero_z + CAMPAIGN2_CAMERA_OFFSETS[2][2]],
             50.0,
             960,
             640,
@@ -5307,14 +5438,50 @@ fn lower_campaign2_packet_impl(
             apply_terrain_layers(&mut body, set)?;
         }
     }
+    // CONVERGE-3 W-1: still water painted by the terrain replaces the disc and
+    // its rings. Before the kit, so the kit's prune drops the glow material the
+    // rings were the last users of.
+    let converge3 = parity_candidate == ParityPolicyCandidate::Converge3;
+    if converge3 {
+        still_water::apply_still_water(&mut body, [pool_x, pool_z])?;
+    }
     if let Some(kit) = kit {
         let trees: Vec<(f32, f32, f32)> = foliage_layout
             .iter()
             .map(|(dx, dz, scale)| ((f64::from(hero_x) + dx) as f32, (f64::from(hero_z) + dz) as f32, *scale))
             .collect();
-        kit::apply_kit(&mut body, kit, [hero_x, hero_y, hero_z], &trees, |x, z| {
-            campaign2_terrain_height(packet, f64::from(x), f64::from(z)) + 0.02
-        })?;
+        if converge3 {
+            // Grounded on the lowered terrain exactly as it is rasterised; the
+            // source-packet lookup below clamps outside the 96 x 72 m source
+            // and is nearest-cell inside it (CONVERGE-3 §0).
+            let surface = still_water::TerrainSurface::of(&body.terrain)?;
+            let anchor = [hero_x, surface.height(hero_x, hero_z), hero_z];
+            // N-7: scattered forest, ground cover and rocks. The layout is the
+            // same in every view (one world); every view's camera keeps its
+            // sightline to the ruin.
+            let cameras: Vec<[f32; 3]> = CAMPAIGN2_CAMERA_OFFSETS
+                .iter()
+                .map(|[dx, dy, dz]| [hero_x + dx, hero_y + dy, hero_z + dz])
+                .collect();
+            let pool = body
+                .terrain
+                .wet_zone
+                .map(|zone| (zone.center_xz_m, zone.radii_xz_m))
+                .ok_or_else(|| GraphicsContractError::provenance("converge3 scatter needs the still-water zone"))?;
+            let layout = scatter::campaign2_layout(
+                &surface,
+                [body.terrain.width_m * 0.5, body.terrain.length_m * 0.5],
+                anchor,
+                &cameras,
+                pool,
+                &kit::ruin_footprints(anchor),
+            );
+            kit::apply_kit(&mut body, kit, anchor, kit::KitLayout::Scattered(&layout), |x, z| surface.height(x, z))?;
+        } else {
+            kit::apply_kit(&mut body, kit, [hero_x, hero_y, hero_z], kit::KitLayout::Authored { trees: &trees }, |x, z| {
+                campaign2_terrain_height(packet, f64::from(x), f64::from(z)) + 0.02
+            })?;
+        }
     }
     if parity_content.hero_materials {
         let remapped = material_maps::apply_hero_material_set(&mut body);
@@ -5412,6 +5579,7 @@ pub fn lower_dense_benchmark_packet(
                     0.8 + height_scale * 0.15,
                 ],
             },
+            variation: None,
         });
     }
     seal_scene_packet(body)
@@ -5484,6 +5652,34 @@ fn validate_camera(camera: &GraphicsCamera) -> Result<(), GraphicsContractError>
     Ok(())
 }
 
+/// W-1 wet zone: a finite ellipse with positive radii and falloff, and wet
+/// multipliers that only darken, smooth and flatten (never brighten).
+fn validate_wet_zone(zone: &TerrainWetZone) -> Result<(), GraphicsContractError> {
+    let finite = zone.center_xz_m.iter().chain(&zone.radii_xz_m).all(|v| v.is_finite());
+    let positive = zone.radii_xz_m.iter().all(|r| *r > 0.0) && zone.falloff_m > 0.0 && zone.falloff_m.is_finite();
+    let unit = |v: f32, allow_zero: bool| v.is_finite() && v <= 1.0 && if allow_zero { v >= 0.0 } else { v > 0.0 };
+    if !(finite && positive && unit(zone.albedo_scale, false) && unit(zone.roughness_scale, false) && unit(zone.normal_scale, true)) {
+        return Err(GraphicsContractError::malformed(
+            "terrain wet_zone needs a finite ellipse, positive radii and falloff, albedo/roughness scales in (0, 1] and normal scale in [0, 1]",
+        ));
+    }
+    if let Some(water) = &zone.standing_water {
+        let sane = water.albedo_rgb.iter().all(|v| unit(*v, true))
+            && unit(water.roughness, true)
+            && water.edge_wobble.is_finite()
+            && (0.0..=0.5).contains(&water.edge_wobble)
+            && water.wobble_cycles_per_m.is_finite()
+            && water.wobble_cycles_per_m > 0.0
+            && water.surface_y_m.is_finite();
+        if !sane {
+            return Err(GraphicsContractError::malformed(
+                "terrain wet_zone standing_water needs albedo and roughness in [0, 1], edge wobble in [0, 0.5], a positive wobble frequency and a finite surface height",
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_terrain(
     terrain: &TerrainPacket,
     materials: &[MaterialIntent],
@@ -5491,6 +5687,12 @@ fn validate_terrain(
 ) -> Result<(), GraphicsContractError> {
     if let Some(layers) = &terrain.layers {
         validate_terrain_layers(layers, materials, textures)?;
+    }
+    if let Some(zone) = &terrain.wet_zone {
+        if terrain.layers.is_none() {
+            return Err(GraphicsContractError::unsupported("terrain wet_zone is shaded by the layered terrain only"));
+        }
+        validate_wet_zone(zone)?;
     }
     valid_id(&terrain.terrain_id, "terrain_id")?;
     if !terrain.width_m.is_finite()
@@ -6581,6 +6783,7 @@ mod tests {
                 slope_grade: BufferReference::inline_f32("slope", vec![0.0; 9]),
                 region_codes: BufferReference::inline_u8("regions", vec![1; 9]),
                 layers: None,
+                wet_zone: None,
             },
             materials: vec![MaterialIntent {
                 material_id: "terrain".into(),
@@ -6909,6 +7112,7 @@ mod tests {
                 rotation_xyzw: [0.0, 0.0, 0.0, 2.0],
                 scale_xyz: [1.0, 1.0, 1.0],
             },
+            variation: None,
         }];
         assert!(seal_scene_packet(body).is_err());
 

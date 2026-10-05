@@ -100,6 +100,7 @@ fn packet(overlays: bool) -> GraphicsScenePacket {
             slope_grade: BufferReference::inline_f32("slope", vec![0.0; 9]),
             region_codes: BufferReference::inline_u8("regions", vec![1; 9]),
             layers: None,
+            wet_zone: None,
         },
         materials: vec![MaterialIntent {
             material_id: "quality-ground".into(),
@@ -284,6 +285,7 @@ fn terrain_quality_excludes_projected_authored_geometry() {
             rotation_xyzw: [0.0, 0.0, 0.0, 1.0],
             scale_xyz: [1.0, 1.0, 1.0],
         },
+        variation: None,
     });
     let geometry_packet = seal_scene_packet(body).expect("geometry fixture reseals");
     let geometry_receipt = receipt(&geometry_packet, &pixels);

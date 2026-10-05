@@ -391,6 +391,20 @@ pub struct IblPolicy {
     pub enabled: bool,
 }
 
+/// Anti-aliased coverage for alpha-tested foliage (CONVERGE-3 L-2a).
+///
+/// PRESENT renders the scene at `samples`x MSAA (on top of the 2x supersample)
+/// and lets alpha-mask materials write coverage from their alpha
+/// (alpha-to-coverage) instead of discarding, so thin leaves at distance keep
+/// their area instead of stippling. Shadows keep the alpha test. ABSENT is the
+/// single-sample path, byte-identical.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct FoliageCoveragePolicy {
+    /// MSAA samples per pixel: 2, 4 or 8.
+    pub samples: u8,
+}
+
 /// Diagnostic overrides for calibration views (CALIBRATION-1).
 ///
 /// PRESENT forces the albedo of every lit surface (terrain, layers and meshes)
@@ -436,6 +450,8 @@ pub struct RenderPolicy {
     pub debug: Option<DebugPolicy>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ibl: Option<IblPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foliage_coverage: Option<FoliageCoveragePolicy>,
 }
 
 impl RenderPolicy {
@@ -457,6 +473,7 @@ impl RenderPolicy {
             atmosphere: self.atmosphere,
             debug: self.debug,
             ibl: self.ibl,
+            foliage_coverage: self.foliage_coverage,
         }
     }
 }
@@ -482,6 +499,7 @@ pub struct ResolvedRenderPolicy {
     pub atmosphere: Option<AtmospherePolicy>,
     pub debug: Option<DebugPolicy>,
     pub ibl: Option<IblPolicy>,
+    pub foliage_coverage: Option<FoliageCoveragePolicy>,
 }
 
 impl Default for ResolvedRenderPolicy {
@@ -507,6 +525,14 @@ fn bounded_i32(
 /// Validate a policy. Every bound is stated, not implied: a policy a renderer
 /// silently clamps is a policy whose receipt lies about what was rendered.
 pub fn validate_render_policy(policy: &RenderPolicy) -> Result<(), GraphicsContractError> {
+    if let Some(coverage) = &policy.foliage_coverage {
+        if ![2, 4, 8].contains(&coverage.samples) {
+            return Err(GraphicsContractError::malformed(format!(
+                "render policy foliage_coverage.samples is {}, expected 2, 4 or 8",
+                coverage.samples
+            )));
+        }
+    }
     if let Some(grade) = &policy.grade {
         bounded_i32(grade.lift_r_bp, -1000, 1000, "grade.lift_r_bp")?;
         bounded_i32(grade.lift_g_bp, -1000, 1000, "grade.lift_g_bp")?;

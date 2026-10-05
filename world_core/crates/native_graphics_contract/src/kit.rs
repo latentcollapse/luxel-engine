@@ -24,8 +24,9 @@ use crate::asset_projection::{
     GraphicsAssetProjection, project_render_asset, validate_graphics_asset_projection,
 };
 use crate::scene_composition::{AssetNamespace, append_asset_resources};
+use crate::scatter::Placement;
 use crate::{
-    GraphicsContractError, GraphicsScenePacketBody, InstanceImportance, InstancePacket, Transform3d,
+    GraphicsContractError, GraphicsScenePacketBody, InstanceImportance, InstancePacket, InstanceVariation, Transform3d,
     sha256_prefixed,
 };
 
@@ -164,18 +165,62 @@ const FERNS: [(f32, f32, f32); 12] = [
     (-2.4, 5.6, 230.0),
 ];
 
+/// Fallen blocks (kit2's ruin, CONVERGE-3 R-1) sink this fraction of their
+/// height into the ground under them, wherever that ground is.
+const FALLEN_SINK_FRACTION: f32 = 0.15;
+
+/// Rotate `v` by the unit quaternion `q` (x, y, z, w).
+fn rotate(q: [f32; 4], v: [f32; 3]) -> [f32; 3] {
+    let [x, y, z, w] = q;
+    let t = [2.0 * (y * v[2] - z * v[1]), 2.0 * (z * v[0] - x * v[2]), 2.0 * (x * v[1] - y * v[0])];
+    [
+        v[0] + w * t[0] + (y * t[2] - z * t[1]),
+        v[1] + w * t[1] + (z * t[0] - x * t[2]),
+        v[2] + w * t[2] + (x * t[1] - y * t[0]),
+    ]
+}
+
 fn yaw(degrees: f32) -> [f32; 4] {
     let half = degrees.to_radians() * 0.5;
     [0.0, half.sin(), 0.0, half.cos()]
 }
 
-/// The kit's half of a converge2 packet. `ground(x, z)` is the terrain height
-/// at a world position; `trees` are the authored tree spots (x, z, scale).
+/// Footprint discs (centre x, z; radius) of the ruin's two standing pieces at
+/// `anchor`: the gate on the anchor, the wall end at its layout offset
+/// (`tools/build_kit.py` RUIN_PIECES: 0.3, 8.3 m), both under the ruin's yaw
+/// and scale. Scatter keeps ground cover and rocks out of them.
+pub fn ruin_footprints(anchor: [f32; 3]) -> Vec<([f32; 2], f32)> {
+    let end = rotate(yaw(RUIN_YAW_DEG), [0.3 * RUIN_SCALE, 0.0, 8.3 * RUIN_SCALE]);
+    vec![
+        ([anchor[0], anchor[2]], 3.9 * RUIN_SCALE),
+        ([anchor[0] + end[0], anchor[2] + end[2]], 3.3 * RUIN_SCALE),
+    ]
+}
+
+/// Where the kit's trees, rocks and ferns go.
+pub enum KitLayout<'a> {
+    /// converge2: the authored tree spots (x, z, scale) and the `ROCKS` and
+    /// `FERNS` constants, exactly as N-5 placed them.
+    Authored { trees: &'a [(f32, f32, f32)] },
+    /// converge3 (N-7): scattered placements, each with its own tint.
+    Scattered(&'a ScatteredLayout),
+}
+
+/// N-7 placements per kit asset (`crate::scatter`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ScatteredLayout {
+    pub trees: Vec<Placement>,
+    pub rocks: Vec<(&'static str, Placement)>,
+    pub ferns: Vec<Placement>,
+}
+
+/// The kit's half of a converge2/converge3 packet. `ground(x, z)` is the
+/// terrain height at a world position.
 pub fn apply_kit(
     body: &mut GraphicsScenePacketBody,
     kit: &KitSet,
     anchor: [f32; 3],
-    trees: &[(f32, f32, f32)],
+    layout: KitLayout<'_>,
     ground: impl Fn(f32, f32) -> f32,
 ) -> Result<(), GraphicsContractError> {
     body.instances.retain(|instance| {
@@ -189,7 +234,9 @@ pub fn apply_kit(
         append_asset_resources(body, &namespace, &asset.projection)?;
         namespaces.insert(asset.name.as_str(), namespace);
     }
-    let mut place = |name: &str, tag: String, importance: InstanceImportance, translation: [f32; 3], rotation: [f32; 4], scale: f32| -> Result<(), GraphicsContractError> {
+    // The ruin is placed first, so its meshes' instances start here.
+    let ruin_start = body.instances.len();
+    let mut place = |name: &str, tag: String, importance: InstanceImportance, translation: [f32; 3], rotation: [f32; 4], scale: f32, variation: Option<InstanceVariation>| -> Result<(), GraphicsContractError> {
         let asset = kit.asset(name)?;
         let namespace = &namespaces[name];
         for (k, mesh) in asset.projection.meshes.iter().enumerate() {
@@ -199,23 +246,62 @@ pub fn apply_kit(
                 material_id: namespace.material(&mesh.packet.material_id)?.clone(),
                 importance,
                 transform: Transform3d { translation_xyz_m: translation, rotation_xyzw: rotation, scale_xyz: [scale; 3] },
+                variation,
             });
         }
         Ok(())
     };
     let [ax, _, az] = anchor;
-    place("ruin", "ruin".into(), InstanceImportance::Landmark, anchor, yaw(RUIN_YAW_DEG), RUIN_SCALE)?;
-    for (index, (x, z, scale)) in trees.iter().copied().enumerate() {
-        let spin = index as f32 * 137.5;
-        place("tree", format!("tree-{index:02}"), InstanceImportance::Background, [x, ground(x, z), z], yaw(spin), scale)?;
+    place("ruin", "ruin".into(), InstanceImportance::Landmark, anchor, yaw(RUIN_YAW_DEG), RUIN_SCALE, None)?;
+    match layout {
+        KitLayout::Authored { trees } => {
+            for (index, (x, z, scale)) in trees.iter().copied().enumerate() {
+                let spin = index as f32 * 137.5;
+                place("tree", format!("tree-{index:02}"), InstanceImportance::Background, [x, ground(x, z), z], yaw(spin), scale, None)?;
+            }
+            for (index, (dx, dz, asset, spin, scale)) in ROCKS.into_iter().enumerate() {
+                let (x, z) = (ax + dx, az + dz);
+                place(asset, format!("rock-{index:02}"), InstanceImportance::Background, [x, ground(x, z) - ROCK_SINK_M * scale, z], yaw(spin), scale, None)?;
+            }
+            for (index, (dx, dz, spin)) in FERNS.into_iter().enumerate() {
+                let (x, z) = (ax + dx, az + dz);
+                place("fern", format!("fern-{index:02}"), InstanceImportance::Background, [x, ground(x, z), z], yaw(spin), 1.0, None)?;
+            }
+        }
+        KitLayout::Scattered(scattered) => {
+            let tinted = |p: &Placement| Some(InstanceVariation { tint_rgb: p.tint_rgb });
+            for (index, p) in scattered.trees.iter().enumerate() {
+                place("tree", format!("tree-s{index:04}"), InstanceImportance::Background, p.translation, p.rotation_xyzw, p.scale, tinted(p))?;
+            }
+            for (index, (asset, p)) in scattered.rocks.iter().enumerate() {
+                place(asset, format!("rock-s{index:04}"), InstanceImportance::Background, p.translation, p.rotation_xyzw, p.scale, tinted(p))?;
+            }
+            for (index, p) in scattered.ferns.iter().enumerate() {
+                place("fern", format!("fern-s{index:04}"), InstanceImportance::Background, p.translation, p.rotation_xyzw, p.scale, tinted(p))?;
+            }
+        }
     }
-    for (index, (dx, dz, asset, spin, scale)) in ROCKS.into_iter().enumerate() {
-        let (x, z) = (ax + dx, az + dz);
-        place(asset, format!("rock-{index:02}"), InstanceImportance::Background, [x, ground(x, z) - ROCK_SINK_M * scale, z], yaw(spin), scale)?;
-    }
-    for (index, (dx, dz, spin)) in FERNS.into_iter().enumerate() {
-        let (x, z) = (ax + dx, az + dz);
-        place("fern", format!("fern-{index:02}"), InstanceImportance::Background, [x, ground(x, z), z], yaw(spin), 1.0)?;
+    // The ruin's fallen blocks lie metres from its anchor, where the ground is
+    // not at the anchor's height: each one is grounded on the terrain under it.
+    let ruin = kit.asset("ruin")?;
+    for (k, mesh) in ruin.projection.meshes.iter().enumerate() {
+        if !mesh.packet.mesh_id.contains("_fallen_") {
+            continue;
+        }
+        let instance = &mut body.instances[ruin_start + k];
+        let t = &instance.transform;
+        let world: Vec<[f32; 3]> = mesh
+            .packet
+            .positions_m
+            .iter()
+            .map(|p| {
+                let r = rotate(t.rotation_xyzw, [p[0] * t.scale_xyz[0], p[1] * t.scale_xyz[1], p[2] * t.scale_xyz[2]]);
+                [r[0] + t.translation_xyz_m[0], r[1] + t.translation_xyz_m[1], r[2] + t.translation_xyz_m[2]]
+            })
+            .collect();
+        let lowest_gap = world.iter().map(|w| w[1] - ground(w[0], w[2])).fold(f32::INFINITY, f32::min);
+        let (low, high) = world.iter().fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), w| (lo.min(w[1]), hi.max(w[1])));
+        instance.transform.translation_xyz_m[1] += -FALLEN_SINK_FRACTION * (high - low) - lowest_gap;
     }
     Ok(())
 }

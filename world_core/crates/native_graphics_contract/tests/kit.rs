@@ -54,7 +54,7 @@ fn converge2_requires_a_kit_and_no_other_arm_accepts_one() {
     assert!(error.contains("requires a kit"), "{error}");
     let empty = KitSet { set_id: "empty".into(), lock_sha256: "sha256:0".into(), assets: Vec::new() };
     let error = lower(ParityPolicyCandidate::Converge1, Some(&empty), Campaign2View::Close).expect_err("kit refused");
-    assert!(error.contains("only valid with the converge2"), "{error}");
+    assert!(error.contains("only valid with the converge2 or converge3"), "{error}");
 }
 
 fn kit() -> KitSet {

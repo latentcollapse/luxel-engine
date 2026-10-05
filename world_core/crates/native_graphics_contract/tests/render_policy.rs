@@ -9,7 +9,7 @@
 
 use wge_native_graphics_contract::{
     BloomPolicy, DitherPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, SamplerPolicy,
-    ShadowFitPolicy, ShadowPolicy, SkyModel, SkyPolicy, AtmospherePolicy, DebugPolicy, IblPolicy, TerrainSurfacePolicy, VignettePolicy, canonical_json, seal_scene_packet, validate_render_policy,
+    ShadowFitPolicy, ShadowPolicy, SkyModel, SkyPolicy, AtmospherePolicy, DebugPolicy, FoliageCoveragePolicy, IblPolicy, TerrainSurfacePolicy, VignettePolicy, canonical_json, seal_scene_packet, validate_render_policy,
     validate_scene_packet, GraphicsContractError, GraphicsScenePacketBody, POLICY_SCALE,
     SCENE_PACKET_SCHEMA,
 };
@@ -510,6 +510,7 @@ fn a_full_policy_survives_serde_round_trip_and_revalidates() {
         debug: Some(DebugPolicy { albedo_override_bp: 5000 }),
         // Disabled: an enabled axis needs the baked textures (tests/ibl.rs).
         ibl: Some(IblPolicy { enabled: false }),
+        foliage_coverage: Some(FoliageCoveragePolicy { samples: 4 }),
     });
     b.schema_version = SCENE_PACKET_SCHEMA.into();
     validate_render_policy(b.render_policy.as_ref().unwrap()).expect("full policy validates");
@@ -553,4 +554,20 @@ fn source_digest_is_bound_to_the_policy() {
     let b = body();
     assert!(b.world_artifact_sha256.starts_with("sha256:"));
     assert_ne!(b.world_artifact_sha256, SOURCE_SHA);
+}
+
+#[test]
+fn foliage_coverage_takes_two_four_or_eight_samples() {
+    for samples in [2u8, 4, 8] {
+        let policy = RenderPolicy { foliage_coverage: Some(FoliageCoveragePolicy { samples }), ..RenderPolicy::default() };
+        validate_render_policy(&policy).expect("valid sample count");
+    }
+    for samples in [0u8, 1, 3, 16] {
+        let policy = RenderPolicy { foliage_coverage: Some(FoliageCoveragePolicy { samples }), ..RenderPolicy::default() };
+        let error = validate_render_policy(&policy).expect_err("refused");
+        assert!(error.to_string().contains("foliage_coverage"), "{error}");
+    }
+    // Absent serialises to nothing.
+    let json = String::from_utf8(serde_json::to_vec(&RenderPolicy::default()).unwrap()).unwrap();
+    assert!(!json.contains("foliage_coverage"));
 }

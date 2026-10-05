@@ -330,3 +330,40 @@ end
     )
     @test length(WGEGraphics._parse_meshes(small_normal_mesh, Set(["terrain"]))) == 1
 end
+
+@testset "W-1 wet zone and standing water decode, and refuse what they must" begin
+    zone(; water=(albedo_rgb=[0.018, 0.022, 0.016], roughness=0.02, edge_wobble=0.2, wobble_cycles_per_m=0.45, surface_y_m=12.49), extra...) =
+        JSON3.read(JSON3.write(merge((center_xz_m=[31.7, 27.2], radii_xz_m=[3.8, 2.7], falloff_m=0.6,
+                                      albedo_scale=0.6, roughness_scale=0.25, normal_scale=0.4),
+                                     water === nothing ? NamedTuple() : (standing_water=water,), NamedTuple(extra))))
+    parsed = WGEGraphics._parse_wet_zone(zone())
+    @test parsed.radii_xz_m == (3.8f0, 2.7f0)
+    @test parsed.standing_water.surface_y_m == 12.49f0
+    @test WGEGraphics._parse_wet_zone(zone(water=nothing)).standing_water === nothing
+    refuses(z) = try
+        WGEGraphics._parse_wet_zone(z); false
+    catch e
+        e isa WGEGraphics.ProtocolError
+    end
+    @test refuses(zone(stray=1))                                   # unknown field
+    @test refuses(zone(albedo_scale=1.5))                          # brightens
+    @test refuses(zone(radii_xz_m=[0.0, 2.7]))                     # degenerate ellipse
+    @test refuses(zone(water=(albedo_rgb=[0.02, 0.02, 0.02], roughness=0.02, edge_wobble=0.8, wobble_cycles_per_m=0.45, surface_y_m=0.0)))
+    @test refuses(zone(water=(albedo_rgb=[0.02, 0.02, 0.02], roughness=0.02, edge_wobble=0.2, wobble_cycles_per_m=0.45)))  # no surface height
+end
+
+@testset "N-7 instance variation decodes, defaults to no tint, and refuses out-of-range tints" begin
+    inst(; extra...) = JSON3.read(JSON3.write(merge((instance_id="i", mesh_id="m", material_id="mat", importance="background",
+        transform=(translation_xyz_m=[0, 0, 0], rotation_xyzw=[0, 0, 0, 1], scale_xyz=[1, 1, 1])), NamedTuple(extra))))
+    plain = WGEGraphics.InstancePacket("i", "m", "mat", WGEGraphics.BackgroundImportance(),
+        WGEGraphics.TransformPacket((0f0, 0f0, 0f0), (0f0, 0f0, 0f0, 1f0), (1f0, 1f0, 1f0)))
+    @test plain.tint_rgb == (1.0f0, 1.0f0, 1.0f0)
+    mesh = WGEGraphics.MeshPacket("m", [(0f0, 0f0, 0f0)], [(0f0, 1f0, 0f0)], [(0f0, 0f0)], UInt32[], "mat",
+                                  NTuple{4,Float32}[])
+    parse(i) = WGEGraphics._parse_instances(JSON3.read(JSON3.write([i])), [mesh], Set(["mat"]))
+    @test only(parse(inst())).tint_rgb == (1.0f0, 1.0f0, 1.0f0)
+    @test only(parse(inst(variation=(tint_rgb=[1.05, 0.97, 0.99],)))).tint_rgb == (1.05f0, 0.97f0, 0.99f0)
+    refuses(i) = try parse(i); false catch e; e isa WGEGraphics.ProtocolError end
+    @test refuses(inst(variation=(tint_rgb=[2.0, 1.0, 1.0],)))
+    @test refuses(inst(variation=(tint_rgb=[1.0, 1.0, 1.0], stray=1)))
+end

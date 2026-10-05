@@ -31,7 +31,7 @@ use crate::{
     GraphicsScenePacketBody, LightIntent, LightKind, sha256_prefixed,
 };
 use crate::render_policy::{
-    DebugPolicy, IblPolicy, MeshSurfacePolicy, RenderPolicy, ShadowFitPolicy, ShadowPolicy, SkyModel,
+    DebugPolicy, FoliageCoveragePolicy, IblPolicy, MeshSurfacePolicy, RenderPolicy, ShadowFitPolicy, ShadowPolicy, SkyModel,
     SkyPolicy,
 };
 
@@ -55,6 +55,12 @@ pub enum CalibrationRig {
     OvercastIbl,
     GrazingIbl,
     SunAlbedoGreyIbl,
+    /// CONVERGE-3 L-2a: three of the rigs above with the foliage-coverage
+    /// policy (4x MSAA, alpha-to-coverage), for the foliage views. Not in
+    /// `ALL`: the frozen calibration runs stay what they were.
+    SunCoverage,
+    OvercastCoverage,
+    SunIblCoverage,
 }
 
 impl CalibrationRig {
@@ -69,8 +75,14 @@ impl CalibrationRig {
         Self::SunAlbedoGreyIbl,
     ];
 
+    /// The rigs that carry the foliage-coverage policy.
+    pub const COVERAGE: [Self; 3] = [Self::SunCoverage, Self::OvercastCoverage, Self::SunIblCoverage];
+
     pub fn name(self) -> &'static str {
         match self {
+            Self::SunCoverage => "sun-coverage",
+            Self::OvercastCoverage => "overcast-coverage",
+            Self::SunIblCoverage => "sun-ibl-coverage",
             Self::Sun => "sun",
             Self::Overcast => "overcast",
             Self::Grazing => "grazing",
@@ -82,9 +94,24 @@ impl CalibrationRig {
         }
     }
 
-    /// The lighting setup without the IBL switch.
-    pub fn lighting(self) -> Self {
+    /// Whether this rig renders with the foliage-coverage policy.
+    pub fn coverage(self) -> bool {
+        Self::COVERAGE.contains(&self)
+    }
+
+    /// The same rig without the foliage-coverage policy.
+    pub fn without_coverage(self) -> Self {
         match self {
+            Self::SunCoverage => Self::Sun,
+            Self::OvercastCoverage => Self::Overcast,
+            Self::SunIblCoverage => Self::SunIbl,
+            other => other,
+        }
+    }
+
+    /// The lighting setup without the IBL or coverage switches.
+    pub fn lighting(self) -> Self {
+        match self.without_coverage() {
             Self::SunIbl => Self::Sun,
             Self::OvercastIbl => Self::Overcast,
             Self::GrazingIbl => Self::Grazing,
@@ -94,7 +121,7 @@ impl CalibrationRig {
     }
 
     pub fn ibl(self) -> bool {
-        self.lighting() != self
+        self.lighting() != self.without_coverage()
     }
 
     /// Rigs whose fixed exposure is set on the grey card (the ±5% gate).
@@ -103,7 +130,7 @@ impl CalibrationRig {
     }
 
     pub fn parse(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|rig| rig.name() == name)
+        Self::ALL.into_iter().chain(Self::COVERAGE).find(|rig| rig.name() == name)
     }
 
     /// Overwrite the body's lights, environment and render policy with this
@@ -115,10 +142,10 @@ impl CalibrationRig {
         let (direction_xyz, color_rgb, intensity) = match rig {
             // Toward the sun: camera-right (−X, the cameras look +Z) and toward
             // the camera (−Z), 35° up. The light travels the other way.
-            Self::Sun | Self::SunAlbedoGrey | Self::SunIbl | Self::SunAlbedoGreyIbl => {
+            Self::Sun | Self::SunAlbedoGrey | Self::SunIbl | Self::SunAlbedoGreyIbl | Self::SunCoverage | Self::SunIblCoverage => {
                 ([0.579_228, -0.573_576, 0.579_228], [1.0, 0.96, 0.90], 3.0)
             }
-            Self::Overcast | Self::OvercastIbl => ([0.0, -1.0, 0.0], [1.0, 1.0, 1.0], 0.0),
+            Self::Overcast | Self::OvercastIbl | Self::OvercastCoverage => ([0.0, -1.0, 0.0], [1.0, 1.0, 1.0], 0.0),
             // Toward the sun: behind the row (+Z), 15° to camera-right, 10° up.
             Self::Grazing | Self::GrazingIbl => ([0.254_887, -0.173_648, -0.951_251], [1.0, 0.86, 0.70], 3.0),
         };
@@ -172,6 +199,7 @@ impl CalibrationRig {
             sky: Some(sky),
             debug: (rig == Self::SunAlbedoGrey).then_some(DebugPolicy { albedo_override_bp: 5000 }),
             ibl: ibl.then_some(IblPolicy { enabled: true }),
+            foliage_coverage: self.coverage().then_some(FoliageCoveragePolicy { samples: 4 }),
             ..RenderPolicy::default()
         });
         crate::ibl::apply_ibl(body)

@@ -481,10 +481,10 @@ fn run() -> Result<(), String> {
             };
             // N-5: converge2's kit, the same explicit-input seam. The lock path
             // comes from the environment; its GLBs are digest-verified on load.
-            let kit = if parity_candidate == ParityPolicyCandidate::Converge2 {
+            let kit = if parity_candidate.uses_kit() {
                 let lock = env::var("WGE_KIT_SET").map_err(|_| {
-                    "converge2 needs WGE_KIT_SET=<lock>, e.g. tools/kit/kit1.lock.json \
-                     (build the kit first with tools/build_kit.py)"
+                    "converge2 and converge3 need WGE_KIT_SET=<lock>: tools/kit/kit1.lock.json \
+                     or tools/kit/kit2.lock.json (build it first with tools/build_kit.py --set kit1|kit2)"
                         .to_owned()
                 })?;
                 let root = env::current_dir().map_err(|error| error.to_string())?;

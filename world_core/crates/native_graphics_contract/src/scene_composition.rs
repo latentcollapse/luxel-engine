@@ -315,6 +315,7 @@ fn append_scene_instance(
         material_id: namespace.material(material_id)?.clone(),
         importance: project_importance(object.importance),
         transform: lower_transform(&object.transform)?,
+        variation: None,
     });
     Ok(())
 }

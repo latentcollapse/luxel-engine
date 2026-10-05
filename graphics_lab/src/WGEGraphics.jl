@@ -52,6 +52,27 @@ end
 
 const MAX_TERRAIN_LAYERS = 3
 
+# CONVERGE-3 W-1 wet ground around still water. Mirrors
+# native_graphics_contract::TerrainWetZone; only the layered terrain shades it.
+# Still water the terrain paints inside the wet zone's ellipse.
+struct StandingWater
+    albedo_rgb::NTuple{3,Float32}
+    roughness::Float32
+    edge_wobble::Float32
+    wobble_cycles_per_m::Float32
+    surface_y_m::Float32
+end
+
+struct TerrainWetZone
+    center_xz_m::NTuple{2,Float32}
+    radii_xz_m::NTuple{2,Float32}
+    falloff_m::Float32
+    albedo_scale::Float32
+    roughness_scale::Float32
+    normal_scale::Float32
+    standing_water::Union{Nothing,StandingWater}
+end
+
 struct TerrainPacket
     terrain_id::String
     width_m::Float32
@@ -62,11 +83,15 @@ struct TerrainPacket
     slope_grade::Vector{Float32}
     region_codes::Vector{UInt8}
     layers::Union{Nothing,TerrainLayersPacket}
+    wet_zone::Union{Nothing,TerrainWetZone}
 end
 
 # The eight-field form predates N-4: no layers, the single-material terrain.
 TerrainPacket(terrain_id, width_m, length_m, resolution, material_id, heights_m, slope_grade, region_codes) =
-    TerrainPacket(terrain_id, width_m, length_m, resolution, material_id, heights_m, slope_grade, region_codes, nothing)
+    TerrainPacket(terrain_id, width_m, length_m, resolution, material_id, heights_m, slope_grade, region_codes, nothing, nothing)
+# The nine-field form predates W-1: no wet zone.
+TerrainPacket(terrain_id, width_m, length_m, resolution, material_id, heights_m, slope_grade, region_codes, layers) =
+    TerrainPacket(terrain_id, width_m, length_m, resolution, material_id, heights_m, slope_grade, region_codes, layers, nothing)
 
 abstract type CameraProjection end
 
@@ -192,7 +217,14 @@ struct InstancePacket
     material_id::String
     importance::InstanceImportanceValue
     transform::TransformPacket
+    # N-7 per-instance variety: linear multiplier on the material's base
+    # colour. (1, 1, 1) when the packet carries no `variation`.
+    tint_rgb::NTuple{3,Float32}
 end
+
+# The five-field form predates N-7: no variation.
+InstancePacket(instance_id, mesh_id, material_id, importance, transform) =
+    InstancePacket(instance_id, mesh_id, material_id, importance, transform, (1.0f0, 1.0f0, 1.0f0))
 
 struct DirectionalLightPacket
     direction_xyz::NTuple{3,Float32}
@@ -339,6 +371,12 @@ struct IblPolicy
     enabled::Bool
 end
 
+# Alpha-to-coverage foliage (CONVERGE-3 L-2a): the scene at `samples`x MSAA,
+# alpha-mask materials writing coverage. Absence is the single-sample path.
+struct FoliageCoveragePolicy
+    samples::Int
+end
+
 # Diagnostic albedo override (CALIBRATION-1). Absence renders authored albedo.
 struct DebugPolicy
     albedo_override_bp::Int32
@@ -358,7 +396,26 @@ struct RenderPolicy
     atmosphere::Union{Nothing,AtmospherePolicy}
     debug::Union{Nothing,DebugPolicy}
     ibl::Union{Nothing,IblPolicy}
+    foliage_coverage::Union{Nothing,FoliageCoveragePolicy}
 end
+
+# The thirteen-axis form predates L-2a: no foliage coverage.
+RenderPolicy(
+    grade::GradePolicy,
+    bloom::BloomPolicy,
+    vignette::VignettePolicy,
+    dither::DitherPolicy,
+    terrain_surface::TerrainSurfacePolicy,
+    sampler::SamplerPolicy,
+    shadow::ShadowPolicy,
+    mesh_surface::MeshSurfacePolicy,
+    shadow_fit::Union{Nothing,ShadowFitPolicy},
+    sky::Union{Nothing,SkyPolicy},
+    atmosphere::Union{Nothing,AtmospherePolicy},
+    debug::Union{Nothing,DebugPolicy},
+    ibl::Union{Nothing,IblPolicy},
+) = RenderPolicy(grade, bloom, vignette, dither, terrain_surface, sampler, shadow, mesh_surface,
+                 shadow_fit, sky, atmosphere, debug, ibl, nothing)
 
 RenderPolicy() = RenderPolicy(
     GradePolicy(),
@@ -433,6 +490,7 @@ const RENDER_POLICY_KEYS = (
     "atmosphere",
     "debug",
     "ibl",
+    "foliage_coverage",
 )
 
 abstract type OverlayPacket end
@@ -816,6 +874,15 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     else
         nothing
     end
+    foliage_coverage = if haskey(value, "foliage_coverage")
+        f = _object(value["foliage_coverage"], "render_policy.foliage_coverage")
+        _exact_keys(f, ("samples",), "render_policy.foliage_coverage")
+        samples = _integer(f["samples"], "render_policy.foliage_coverage.samples")
+        samples in (2, 4, 8) || throw(ProtocolError("malformed_packet", "render_policy.foliage_coverage.samples must be 2, 4 or 8"))
+        FoliageCoveragePolicy(samples)
+    else
+        nothing
+    end
     atmosphere !== nothing && sky === nothing && throw(ProtocolError(
         "malformed_packet",
         "render_policy.atmosphere requires the view-direction sky (render_policy.sky)",
@@ -834,6 +901,7 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
         atmosphere,
         debug,
         ibl,
+        foliage_coverage,
     )
 end
 
@@ -874,7 +942,7 @@ function _parse_terrain(value::JSON3.Object, materials::Vector{MaterialPacket}):
             "slope_grade",
             "region_codes",
         ),
-        ("layers",),
+        ("layers", "wet_zone"),
         "terrain",
     )
     resolution = _integer(value["resolution"], "terrain.resolution")
@@ -898,7 +966,53 @@ function _parse_terrain(value::JSON3.Object, materials::Vector{MaterialPacket}):
     any(material.material_id == material_id for material in materials) ||
         throw(ProtocolError("provenance", "terrain references an unknown material"))
     layers = haskey(value, "layers") ? _parse_terrain_layers(value["layers"], materials) : nothing
-    return TerrainPacket(terrain_id, width, length, resolution, material_id, heights, slope, regions, layers)
+    wet_zone = haskey(value, "wet_zone") ? _parse_wet_zone(value["wet_zone"]) : nothing
+    wet_zone !== nothing && layers === nothing &&
+        throw(ProtocolError("unsupported_capability", "terrain wet_zone is shaded by the layered terrain only"))
+    return TerrainPacket(terrain_id, width, length, resolution, material_id, heights, slope, regions, layers, wet_zone)
+end
+
+function _parse_wet_zone(value)::TerrainWetZone
+    object = _object(value, "terrain.wet_zone")
+    _exact_keys(
+        object,
+        ("center_xz_m", "radii_xz_m", "falloff_m", "albedo_scale", "roughness_scale", "normal_scale"),
+        ("standing_water",),
+        "terrain.wet_zone",
+    )
+    vector(source, key, count, label) = begin
+        entry = source[key]
+        entry isa AbstractVector && length(entry) == count ||
+            throw(ProtocolError("malformed_packet", "$label.$key must have $count values"))
+        ntuple(i -> _finite_float32(entry[i], "$label.$key"), count)
+    end
+    scalar(key) = _finite_float32(object[key], "terrain.wet_zone.$key")
+    water = if haskey(object, "standing_water")
+        w = _object(object["standing_water"], "terrain.wet_zone.standing_water")
+        _exact_keys(w, ("albedo_rgb", "roughness", "edge_wobble", "wobble_cycles_per_m", "surface_y_m"), "terrain.wet_zone.standing_water")
+        label = "terrain.wet_zone.standing_water"
+        parsed = StandingWater(
+            vector(w, "albedo_rgb", 3, label),
+            _finite_float32(w["roughness"], "$label.roughness"),
+            _finite_float32(w["edge_wobble"], "$label.edge_wobble"),
+            _finite_float32(w["wobble_cycles_per_m"], "$label.wobble_cycles_per_m"),
+            _finite_float32(w["surface_y_m"], "$label.surface_y_m"),
+        )
+        all(c -> 0.0f0 <= c <= 1.0f0, parsed.albedo_rgb) && 0.0f0 <= parsed.roughness <= 1.0f0 &&
+            0.0f0 <= parsed.edge_wobble <= 0.5f0 && parsed.wobble_cycles_per_m > 0.0f0 ||
+            throw(ProtocolError("malformed_packet", "$label values are out of range"))
+        parsed
+    else
+        nothing
+    end
+    zone = TerrainWetZone(
+        vector(object, "center_xz_m", 2, "terrain.wet_zone"), vector(object, "radii_xz_m", 2, "terrain.wet_zone"),
+        scalar("falloff_m"), scalar("albedo_scale"), scalar("roughness_scale"), scalar("normal_scale"), water,
+    )
+    all(>(0.0f0), zone.radii_xz_m) && zone.falloff_m > 0.0f0 &&
+        0.0f0 < zone.albedo_scale <= 1.0f0 && 0.0f0 < zone.roughness_scale <= 1.0f0 && 0.0f0 <= zone.normal_scale <= 1.0f0 ||
+        throw(ProtocolError("malformed_packet", "terrain.wet_zone values are out of range"))
+    return zone
 end
 
 function _parse_ramp(value, label::String, low::Integer, high::Integer)::Union{Nothing,NTuple{2,Int32}}
@@ -1401,7 +1515,7 @@ function _parse_instances(
     sizehint!(instances, length(array))
     for instance in array
         object = _object(instance, "instance")
-        _exact_keys(object, ("instance_id", "mesh_id", "material_id", "importance", "transform"), "instance")
+        _exact_keys(object, ("instance_id", "mesh_id", "material_id", "importance", "transform"), ("variation",), "instance")
         id = _string(object["instance_id"], "instance.instance_id")
         _valid_id(id, "instance_id")
         id in ids && throw(ProtocolError("malformed_packet", "duplicate instance $id"))
@@ -1431,7 +1545,17 @@ function _parse_instances(
             throw(ProtocolError("malformed_packet", "instance scale must be positive"))
         all(value -> value <= MAX_NATIVE_COORDINATE_M, scale) ||
             throw(ProtocolError("malformed_packet", "instance scale exceeds native physical bounds"))
-        push!(instances, InstancePacket(id, mesh_id, material_id, importance, TransformPacket(translation, rotation, scale)))
+        tint = if haskey(object, "variation")
+            variation = _object(object["variation"], "instance.variation")
+            _exact_keys(variation, ("tint_rgb",), "instance.variation")
+            t = _tuple(variation["tint_rgb"], Val(3), "instance.variation.tint_rgb")
+            all(c -> 0.5f0 <= c <= 1.5f0, t) ||
+                throw(ProtocolError("malformed_packet", "instance variation tint must be in [0.5, 1.5]"))
+            t
+        else
+            (1.0f0, 1.0f0, 1.0f0)
+        end
+        push!(instances, InstancePacket(id, mesh_id, material_id, importance, TransformPacket(translation, rotation, scale), tint))
     end
     return instances
 end

@@ -208,6 +208,8 @@ struct TerrainLayerResources
     bindings::Lava.TextureBindings
     sampler::Lava.LavaSampler
     uniforms::NTuple{7,Vec4f}
+    # The bound (texture, sampler) list, so the wet variant can add slot 16.
+    textures::Vector{Lava.SampledTexture}
 end
 
 """N-2 IBL textures for one packet: the baked environment atlas and BRDF table
@@ -221,7 +223,7 @@ struct IblResources
     sampler::Lava.LavaSampler
 end
 
-mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,MCP,TXP,DP,TSP,MSP,MCSP,RP}
+mutable struct LavaBackend{MCVP,C,Q,PP,SP,SVP,TP,TLP,TWP,OP,MP,MCP,TXP,DP,TSP,MSP,MCSP,RP}
     context::C
     queue::Q
     probe_pipeline::PP
@@ -229,6 +231,7 @@ mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,MCP,TXP,DP,TSP,MSP,MCSP,RP
     sky_view_pipeline::SVP
     terrain_pipeline::TP
     terrain_layered_pipeline::TLP
+    terrain_wet_pipeline::TWP
     overlay_pipeline::OP
     mesh_pipeline::MP
     mesh_cutout_pipeline::MCP
@@ -271,6 +274,16 @@ mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,MCP,TXP,DP,TSP,MSP,MCSP,RP
     resolve_compiled::Bool
     mesh_cutout_compiled::Bool
     mesh_cutout_shadow_compiled::Bool
+    terrain_wet_compiled::Bool
+    # W-1 planar reflection: the mirrored pass culls with its own camera, so it
+    # keeps its own mesh cache; wet-terrain bindings (layer textures + the
+    # reflection image) are cached so the window path does not allocate a
+    # descriptor set every frame.
+    reflection_mesh_resources::Union{Nothing,MeshResources}
+    wet_terrain_bindings::Dict{Tuple{String,UInt},Lava.TextureBindings}
+    # L-2a: alpha-mask meshes on a multisampled target write coverage.
+    mesh_coverage_pipeline::MCVP
+    mesh_coverage_compiled::Bool
 end
 
 const BACKEND_REF = Ref{Union{Nothing,LavaBackend}}(nothing)
@@ -1600,6 +1613,76 @@ function _terrain_layered_vertex(
     return nothing
 end
 
+"""`_terrain_layered_vertex` plus the W-1 wet zone on varyings 28-31."""
+function _terrain_layered_wet_vertex(
+    heights::Lava.LavaDeviceArray{Float32,1},
+    slopes::Lava.LavaDeviceArray{Float32,1},
+    regions::Lava.LavaDeviceArray{UInt8,1},
+    resolution::Int32,
+    width_m::Float32,
+    length_m::Float32,
+    camera_position::Vec4f,
+    camera_right::Vec4f,
+    camera_up::Vec4f,
+    camera_forward::Vec4f,
+    camera_projection::Vec4f,
+    camera_mode::Float32,
+    light_position::Vec4f,
+    light_right::Vec4f,
+    light_up::Vec4f,
+    light_forward::Vec4f,
+    light_projection::Vec4f,
+    light_mode::Float32,
+    base_color::Vec4f,
+    metallic::Float32,
+    roughness::Float32,
+    clearcoat::Float32,
+    clearcoat_roughness::Float32,
+    normal_scale::Float32,
+    occlusion_strength::Float32,
+    light_direction::Vec4f,
+    light_color::Vec4f,
+    light_intensity::Float32,
+    environment_top::Vec4f,
+    environment_horizon::Vec4f,
+    environment_ground::Vec4f,
+    fog_color::Vec4f,
+    fog_density::Float32,
+    exposure::Float32,
+    texture_enabled::Float32,
+    emissive_factor::Vec4f,
+    shadow::Vec4f,
+    uv_repeat::Float32,
+    sky_parameters::Vec4f,
+    atmosphere_parameters::Vec4f,
+    surface_options::Vec4f,
+    layer0_a::Vec4f,
+    layer0_b::Vec4f,
+    layer1_a::Vec4f,
+    layer1_b::Vec4f,
+    layer2_a::Vec4f,
+    layer2_b::Vec4f,
+    macro_parameters::Vec4f,
+    wet_a::Vec4f,
+    wet_b::Vec4f,
+    wet_c::Vec4f,
+    wet_d::Vec4f,
+)
+    _emit_terrain_vertex(heights, slopes, regions, resolution, width_m, length_m, camera_position, camera_right, camera_up, camera_forward, camera_projection, camera_mode, light_position, light_right, light_up, light_forward, light_projection, light_mode, base_color, metallic, roughness, clearcoat, clearcoat_roughness, normal_scale, occlusion_strength, light_direction, light_color, light_intensity, environment_top, environment_horizon, environment_ground, fog_color, fog_density, exposure, texture_enabled, emissive_factor, shadow, uv_repeat, sky_parameters, atmosphere_parameters, surface_options)
+    Lava.gfx_output(21, layer0_a)
+    Lava.gfx_output(22, layer0_b)
+    Lava.gfx_output(23, layer1_a)
+    Lava.gfx_output(24, layer1_b)
+    Lava.gfx_output(25, layer2_a)
+    Lava.gfx_output(26, layer2_b)
+    Lava.gfx_output(27, macro_parameters)
+    Lava.gfx_output(28, wet_a)
+    Lava.gfx_output(29, wet_b)
+    Lava.gfx_output(30, wet_c)
+    Lava.gfx_output(31, wet_d)
+    return nothing
+end
+
 function _mesh_vertex(
     positions::Lava.LavaDeviceArray{Vec4f,1},
     normals::Lava.LavaDeviceArray{Vec4f,1},
@@ -2394,6 +2477,37 @@ function _mesh_cutout_fragment()
     return nothing
 end
 
+"""Alpha-mask fragment for a multisampled target (L-2a): instead of discarding
+below the cutoff, write the alpha sharpened around the cutoff over one
+pixel's alpha gradient, `(a - cutoff) / fwidth(a) + 0.5`, as coverage
+(alpha-to-coverage; alpha-to-one makes the covered samples opaque). Up close
+the edge stays as crisp as the alpha test; far away a leaf thinner than a
+pixel keeps partial coverage instead of vanishing."""
+function _mesh_coverage_fragment()
+    surface_parameters = Lava.gfx_input(Vec4f, 15)
+    normal = Lava.gfx_input(Vec4f, 1)
+    tangent = Lava.gfx_input(Vec4f, 16)
+    back = surface_parameters[4] > 0.5f0 && !Lava.front_facing()
+    facing_normal = back ? Vec4f(-normal[1], -normal[2], -normal[3], -normal[4]) : normal
+    facing_tangent = back ? Vec4f(-tangent[1], -tangent[2], -tangent[3], -tangent[4]) : tangent
+    lit = _surface_fragment_color(facing_normal, facing_tangent)
+    coverage = _textured_color(
+        Lava.gfx_input(Vec4f, 0),
+        Lava.gfx_input(Vec2f, 3),
+        Lava.gfx_input(Vec4f, 7)[4],
+    )[4]
+    width = abs(Lava.dFdx(coverage)) + abs(Lava.dFdy(coverage))
+    sharpened = clamp((coverage - surface_parameters[3]) / max(width, 1.0f-4) + 0.5f0, 0.0f0, 1.0f0)
+    # Far away a texel's alpha is the average of leaf and gap, often below the
+    # cutoff: sharpening alone rounds that thin coverage to nothing. The raw
+    # alpha, scaled so the cutoff maps to one half, keeps it; the larger of
+    # the two keeps edges crisp up close and thin leaves present far away.
+    raw = clamp(coverage * 0.5f0 / max(surface_parameters[3], 1.0f-4), 0.0f0, 1.0f0)
+    alpha = max(sharpened, raw)
+    Lava.gfx_output(0, Vec4f(lit[1], lit[2], lit[3], alpha))
+    return nothing
+end
+
 @inline function _surface_fragment_color(normal::Vec4f, tangent::Vec4f)::Vec4f
     base_color = Lava.gfx_input(Vec4f, 0)
     world_position = Lava.gfx_input(Vec4f, 2)
@@ -2549,7 +2663,42 @@ noise scales albedo by (1 + amplitude x (2m - 1)). The terrain material's base
 colour is deliberately NOT applied: layer materials are neutral and the scans
 carry the colour.
 """
-function _terrain_layered_fragment()
+_terrain_layered_fragment() = _terrain_layered_shade(Val(false))
+
+"""Layered terrain with the W-1 wet zone (`TerrainWetZone`): the same shading,
+with albedo darkened (linear) and saturated, normals flattened and roughness
+lowered by the zone's weight, and standing water (flat, dark, smooth) inside
+its noise-displaced ellipse. Varyings 28-31 carry the zone."""
+_terrain_layered_wet_fragment() = _terrain_layered_shade(Val(true))
+
+"""Width of the standing-water shore, in ellipse units (~3 cm on the pool)."""
+const WATER_EDGE_ELLIPSE = 0.012f0
+"""Shallow margin of the pool, in ellipse units: the bed shows through it."""
+const WATER_SHALLOW_ELLIPSE = 0.28f0
+
+"""Wet-zone weights at a world position: `(wetness, water, depth, 0)`. The
+shore is the ellipse displaced by `wet_d[1] x (2 noise - 1)`; wetness is 1
+inside it and falls to 0 over `falloff` metres outside (measured along the ray
+from the centre); water is 1 inside it, with a narrow soft edge, when the zone
+has standing water (`wet_c[4] >= 0`); depth rises from 0 at the shore to 1
+over the outer `WATER_SHALLOW_ELLIPSE` of the pool, where the bed shows."""
+@inline function _wet_zone_weights(world_position::Vec4f, wet_a::Vec4f, wet_b::Vec4f, wet_c::Vec4f, wet_d::Vec4f, noise::Float32)::Vec4f
+    dx = world_position[1] - wet_a[1]
+    dz = world_position[3] - wet_a[2]
+    e = sqrt((dx / wet_a[3]) * (dx / wet_a[3]) + (dz / wet_a[4]) * (dz / wet_a[4]))
+    shore = e - wet_d[1] * (noise * 2.0f0 - 1.0f0)
+    outside = shore > 1.0f0 ? sqrt(dx * dx + dz * dz) * (shore - 1.0f0) / max(e, 1.0f-4) : 0.0f0
+    wetness = 1.0f0 - _ramp(0.0f0, wet_b[1], outside)
+    water = wet_c[4] >= 0.0f0 ? 1.0f0 - _ramp(1.0f0 - WATER_EDGE_ELLIPSE, 1.0f0, shore) : 0.0f0
+    depth = water * (1.0f0 - _ramp(1.0f0 - WATER_SHALLOW_ELLIPSE, 1.0f0, shore))
+    return Vec4f(wetness, water, depth, 0.0f0)
+end
+
+"""Fresnel reflectance of still water (F0 0.02, Schlick) at `cos_theta`."""
+@inline _water_fresnel(cos_theta::Float32)::Float32 =
+    0.02f0 + 0.98f0 * (1.0f0 - clamp(cos_theta, 0.0f0, 1.0f0))^5
+
+@inline function _terrain_layered_shade(::Val{wet}) where {wet}
     normal = Lava.gfx_input(Vec4f, 1)
     world_position = Lava.gfx_input(Vec4f, 2)
     material = Lava.gfx_input(Vec4f, 4)
@@ -2625,11 +2774,57 @@ function _terrain_layered_fragment()
     )
     roughness_sample = _mix(_mix(rough0, rough1, weight1), rough2, weight2)
     occlusion_sample = _mix(_mix(occlusion0, occlusion1, weight1), occlusion2, weight2)
+    water = 0.0f0
+    depth = 0.0f0
+    wet_c = Vec4f(0.0f0, 0.0f0, 0.0f0, -1.0f0)
+    wet_d = Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0)
+    reflection = Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
+    if wet
+        # CALIBRATION-1 wet recipe, weighted: albedo x scale in linear light
+        # with +10% saturation, tangent normal slope x scale, roughness x scale.
+        wet_a = Lava.gfx_input(Vec4f, 28)
+        wet_b = Lava.gfx_input(Vec4f, 29)
+        wet_c = Lava.gfx_input(Vec4f, 30)
+        wet_d = Lava.gfx_input(Vec4f, 31)
+        shore_noise = Lava.sample_texture_2d(UInt32(13), u * wet_d[2], v * wet_d[2], UInt32(0))
+        weights = _wet_zone_weights(world_position, wet_a, wet_b, wet_c, wet_d, shore_noise)
+        wetness = weights[1]
+        water = weights[2]
+        depth = weights[3]
+        # The planar reflection, at this fragment's own pixel: the mirrored
+        # camera puts every point of the water plane where the real camera
+        # does. Sampled unconditionally so derivatives stay defined; in the
+        # reflection pass itself slot 16 is a stand-in and this is unused.
+        frag = Lava.frag_coord_xy()
+        reflection = _sample_texture(UInt32(16), Vec2f(frag[1] * macro_parameters[3], frag[2] * macro_parameters[4]))
+        darken = _mix(1.0f0, wet_b[2], wetness)
+        luminance = 0.2126f0 * albedo[1] + 0.7152f0 * albedo[2] + 0.0722f0 * albedo[3]
+        saturate = 1.0f0 + 0.1f0 * wetness
+        albedo = Vec4f(
+            darken * (luminance + saturate * (albedo[1] - luminance)),
+            darken * (luminance + saturate * (albedo[2] - luminance)),
+            darken * (luminance + saturate * (albedo[3] - luminance)),
+            albedo[4],
+        )
+        flatten = _mix(1.0f0, wet_b[4], wetness)
+        tangent_space = Vec4f(tangent_space[1] * flatten, tangent_space[2] * flatten, tangent_space[3], tangent_space[4])
+        roughness_sample = roughness_sample * _mix(1.0f0, wet_b[3], wetness)
+        # Standing water: smooth, unoccluded, flat (its normal is set below).
+        roughness_sample = _mix(roughness_sample, wet_c[4], water)
+        occlusion_sample = _mix(occlusion_sample, 1.0f0, water)
+    end
     macro_scale = 1.0f0 + macro_parameters[2] * (macro_value * 2.0f0 - 1.0f0)
-    surface_color = _albedo_override(
-        Vec4f(albedo[1] * macro_scale, albedo[2] * macro_scale, albedo[3] * macro_scale, 1.0f0),
-        surface_options,
-    )
+    ground_color = Vec4f(albedo[1] * macro_scale, albedo[2] * macro_scale, albedo[3] * macro_scale, 1.0f0)
+    shading_normal = _apply_tangent_normal(normal, tangent, tangent_space)
+    if wet
+        # Water lies flat whatever the ground's slope. Its body is its own
+        # colour where deep and the (wet) bed seen through it where shallow.
+        body = _mix4(Vec4f(ground_color[1] * 0.55f0, ground_color[2] * 0.55f0, ground_color[3] * 0.55f0, 1.0f0),
+                     Vec4f(wet_c[1], wet_c[2], wet_c[3], 1.0f0), depth)
+        ground_color = _mix4(ground_color, body, water)
+        shading_normal = _normalize_vector(_mix4(shading_normal, Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0), water))
+    end
+    surface_color = _albedo_override(ground_color, surface_options)
     view_direction = Vec4f(
         camera_position[1] - world_position[1],
         camera_position[2] - world_position[2],
@@ -2638,7 +2833,7 @@ function _terrain_layered_fragment()
     )
     lit_color = _material_response(
         surface_color,
-        _apply_tangent_normal(normal, tangent, tangent_space),
+        shading_normal,
         light_direction,
         light_color,
         lighting_parameters[1],
@@ -2660,6 +2855,54 @@ function _terrain_layered_fragment()
         surface_options[3],
         TextureIbl(),
     )
+    if wet
+        if wet_d[4] > 0.5f0
+            # Reflection pass: the mirror sees only what stands above the water
+            # plane, and not the ground the water lies on.
+            (world_position[2] < wet_d[3] || water > 0.5f0) && Lava.discard()
+        else
+            # Main pass: the water is its body lit directly, plus the scene
+            # reflected by the still surface, by Fresnel. The planar reflection
+            # replaces the ambient/IBL specular (and the negligible ambient
+            # diffuse of so dark a body) rather than adding to it: counted
+            # twice, the sky made the pool 28% of the sky's luminance. Full
+            # occlusion (sample 0, strength 1) zeroes every ambient term in
+            # both lighting branches, leaving direct light only.
+            direct = _material_response(
+                surface_color,
+                shading_normal,
+                light_direction,
+                light_color,
+                lighting_parameters[1],
+                environment_top,
+                environment_horizon,
+                environment_ground,
+                0.0f0,
+                1.0f0,
+                surface_parameters[1],
+                surface_parameters[2],
+                _shadow_visibility(light_space, shadow[1], shadow[2]),
+                view_direction,
+                roughness_sample,
+                0.0f0,
+                1.0f0,
+                Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0),
+                Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0),
+                sky_parameters,
+                surface_options[3],
+                TextureIbl(),
+            )
+            view_unit = _normalize_vector(view_direction)
+            fresnel = _water_fresnel(view_unit[2])
+            water_color = Vec4f(
+                direct[1] * (1.0f0 - fresnel) + reflection[1] * fresnel,
+                direct[2] * (1.0f0 - fresnel) + reflection[2] * fresnel,
+                direct[3] * (1.0f0 - fresnel) + reflection[3] * fresnel,
+                lit_color[4],
+            )
+            lit_color = _mix4(lit_color, water_color, water)
+        end
+    end
     Lava.gfx_output(0, _apply_aerial_perspective(
         lit_color,
         world_position,
@@ -2739,6 +2982,14 @@ function backend()::LavaBackend
             cull=NoCull(),
             depth=DepthLess(),
         )
+        terrain_wet_pipeline = GraphicsPipeline(
+            ;
+            vertex=_terrain_layered_wet_vertex,
+            fragment=_terrain_layered_wet_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthLess(),
+        )
         overlay_pipeline = GraphicsPipeline(
             ;
             vertex=_overlay_vertex,
@@ -2763,6 +3014,15 @@ function backend()::LavaBackend
             blend=Opaque(),
             cull=NoCull(),
             depth=DepthLess(),
+        )
+        mesh_coverage_pipeline = GraphicsPipeline(
+            ;
+            vertex=_mesh_vertex,
+            fragment=_mesh_coverage_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthLess(),
+            alpha_to_coverage=true,
         )
         texture_pipeline = GraphicsPipeline(
             ;
@@ -2820,6 +3080,7 @@ function backend()::LavaBackend
             sky_view_pipeline,
             terrain_pipeline,
             terrain_layered_pipeline,
+            terrain_wet_pipeline,
             overlay_pipeline,
             mesh_pipeline,
             mesh_cutout_pipeline,
@@ -2861,6 +3122,11 @@ function backend()::LavaBackend
             false,
             false,
             false,
+            false,
+            false,
+            nothing,
+            Dict{Tuple{String,UInt},Lava.TextureBindings}(),
+            mesh_coverage_pipeline,
             false,
         )
         BACKEND_REF[] = created
@@ -2912,18 +3178,41 @@ function _framebuffer!(
     width_px::Int,
     height_px::Int,
     depth::Bool=false,
-    purpose::Symbol=:scene,
+    purpose::Symbol=:scene;
+    samples::Int=1,
 )::Lava.LavaFramebuffer
-    key = (width_px, height_px, depth, purpose)
+    # Single-sample keys are the historical ones; a multisampled target is its
+    # own framebuffer under a purpose that names its sample count.
+    key = (width_px, height_px, depth, samples == 1 ? purpose : Symbol(purpose, :_msaa, samples))
     return get!(state.framebuffers, key) do
-        Lava.LavaFramebuffer(
+        samples == 1 ? Lava.LavaFramebuffer(
             width_px,
             height_px;
             ctx=state.context,
             depth=depth,
             color_format=Vulkan.FORMAT_R32G32B32A32_SFLOAT,
+        ) : Lava.LavaFramebuffer(
+            width_px,
+            height_px;
+            ctx=state.context,
+            depth=depth,
+            color_format=Vulkan.FORMAT_R32G32B32A32_SFLOAT,
+            samples=samples,
         )
     end
+end
+
+"""MSAA samples of the scene target: the foliage-coverage policy's, else 1.
+A device without alpha-to-one cannot honour it (alpha-to-coverage would leave
+foliage edges translucent in the capture), so the policy is refused there."""
+function _scene_samples(packet::WGEGraphics.GraphicsScenePacket)::Int
+    coverage = packet.render_policy.foliage_coverage
+    coverage === nothing && return 1
+    Lava.alpha_to_one_supported() || throw(AdapterError(
+        "unsupported_capability",
+        "render_policy.foliage_coverage needs alphaToOne, which this device does not have",
+    ))
+    return coverage.samples
 end
 
 function _linear_to_srgb(value::Float32)::Float32
@@ -3735,6 +4024,79 @@ function _terrain_layer_uniforms(
     return Tuple(vectors)
 end
 
+"""W-1 wet zone as the four varyings `_terrain_layered_wet_vertex` forwards:
+`a = (centre x, centre z, radius x, radius z)`,
+`b = (falloff m, albedo scale, roughness scale, normal scale)`,
+`c = (water albedo rgb, water roughness)`, roughness -1 meaning no standing water,
+`d = (edge wobble, wobble cycles per m, water surface y, 1 in the reflection pass)`."""
+function _wet_zone_uniforms(zone::WGEGraphics.TerrainWetZone; reflection_pass::Bool=false)::NTuple{4,Vec4f}
+    water = zone.standing_water
+    return (
+        Vec4f(zone.center_xz_m[1], zone.center_xz_m[2], zone.radii_xz_m[1], zone.radii_xz_m[2]),
+        Vec4f(zone.falloff_m, zone.albedo_scale, zone.roughness_scale, zone.normal_scale),
+        water === nothing ? Vec4f(0.0f0, 0.0f0, 0.0f0, -1.0f0) : Vec4f(water.albedo_rgb..., water.roughness),
+        water === nothing ? Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0) :
+            Vec4f(water.edge_wobble, water.wobble_cycles_per_m, water.surface_y_m, reflection_pass ? 1.0f0 : 0.0f0),
+    )
+end
+
+"""Layer bindings plus slot 16: the water's reflection image, or the IBL
+stand-in when there is none (the reflection pass cannot sample its own
+target). Cached per packet and image."""
+function _wet_terrain_bindings!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket,
+                                layers::TerrainLayerResources, reflection_texture)
+    key = (packet.content_sha256, reflection_texture === nothing ? UInt(0) : objectid(reflection_texture.view))
+    return get!(state.wet_terrain_bindings, key) do
+        ibl = _ibl_resources!(state, packet)
+        slot16 = reflection_texture === nothing ? ibl.placeholder * ibl.sampler :
+                 reflection_texture * Lava.LavaSampler(ctx=state.context, filter=:linear, wrap=:clamp)
+        Lava.bind_textures(Lava.SampledTexture[layers.textures..., slot16])
+    end
+end
+
+"""The camera mirrored about the horizontal plane y = `plane_y`. Right, up
+and forward are mirrored explicitly (not rebuilt by cross product), so every
+point on the plane projects to the same pixel as in `frame`: the water can
+look up its reflection at its own fragment position."""
+function _mirrored_frame(frame::CameraFrame, plane_y::Float32)::CameraFrame
+    mirror(v::Vec4f) = Vec4f(v[1], -v[2], v[3], v[4])
+    position = Vec4f(frame.position[1], 2.0f0 * plane_y - frame.position[2], frame.position[3], frame.position[4])
+    return CameraFrame(position, mirror(frame.right), mirror(frame.up), mirror(frame.forward),
+                       frame.projection, frame.mode, frame.width_px, frame.height_px)
+end
+
+"""`_record_scene_passes!`, preceded by the W-1 planar reflection when the
+terrain has standing water: the scene recorded from the mirrored camera into
+its own target, with everything below the water plane (and the water's own
+ground) clipped, then sampled by the water in the main pass. Without
+standing water this is exactly `_record_scene_passes!`. Both render paths
+call this, so they cannot drift."""
+function _record_scene_with_reflection!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    camera_frame::CameraFrame,
+    lighting::DirectionalLighting,
+    environment_lighting::EnvironmentLighting,
+    material::WGEGraphics.MaterialPacket,
+    texture_enabled::Float32,
+    scene_framebuffer::Lava.LavaFramebuffer,
+    scene_target::Lava.OffscreenTarget,
+)
+    zone = packet.terrain.wet_zone
+    water = zone === nothing ? nothing : zone.standing_water
+    if water === nothing || packet.terrain.layers === nothing
+        return _record_scene_passes!(state, packet, camera_frame, lighting, environment_lighting, material,
+                                     texture_enabled, scene_framebuffer, scene_target)
+    end
+    reflection_framebuffer = _framebuffer!(state, scene_framebuffer.width, scene_framebuffer.height, true, :reflection)
+    _record_scene_passes!(state, packet, _mirrored_frame(camera_frame, water.surface_y_m), lighting,
+                          environment_lighting, material, texture_enabled, reflection_framebuffer,
+                          OffscreenTarget(reflection_framebuffer); reflection_pass=true)
+    reflection = _framebuffer_texture(reflection_framebuffer, state)
+    return _record_scene_passes!(state, packet, camera_frame, lighting, environment_lighting, material,
+                                 texture_enabled, scene_framebuffer, scene_target; reflection_texture=reflection)
+end
+
 function _terrain_layer_resources!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
@@ -3757,7 +4119,7 @@ function _terrain_layer_resources!(
     sampler = _lod_sampler!(state, max_lod; filter=:linear, wrap=:repeat)
     ibl = _ibl_resources!(state, packet)
     base, middle, top = sets
-    bindings = Lava.bind_textures([
+    textures = Lava.SampledTexture[
         base.albedo_texture * sampler,
         base.normal_texture * sampler,
         base.roughness_texture * sampler,
@@ -3774,8 +4136,9 @@ function _terrain_layer_resources!(
         macro_texture * sampler,
         ibl.environment * ibl.sampler,
         ibl.brdf_lut * ibl.sampler,
-    ])
-    created = TerrainLayerResources(packet.content_sha256, bindings, sampler, _terrain_layer_uniforms(packet))
+    ]
+    bindings = Lava.bind_textures(textures)
+    created = TerrainLayerResources(packet.content_sha256, bindings, sampler, _terrain_layer_uniforms(packet), textures)
     state.terrain_layer_resources = created
     return created
 end
@@ -4753,8 +5116,10 @@ function _mesh_resources!(
     visibility::MeshVisibility=_mesh_visibility(packet, frame),
     ;
     shadow::Bool=false,
+    cache::Symbol=shadow ? :shadow : :main,
 )::Union{Nothing,MeshResources}
-    current = shadow ? state.shadow_mesh_resources : state.mesh_resources
+    current = cache === :shadow ? state.shadow_mesh_resources :
+              cache === :reflection ? state.reflection_mesh_resources : state.mesh_resources
     current !== nothing && current.cache_key == packet.content_sha256 && return current
     groups = Dict{Tuple{String,String},Vector{WGEGraphics.InstancePacket}}()
     for instance in packet.instances
@@ -4806,7 +5171,16 @@ function _mesh_resources!(
         ]
         rotations = Vec4f[Vec4f(instance.transform.rotation_xyzw...) for instance in batch_instances]
         scales = Vec4f[Vec4f(instance.transform.scale_xyz..., 0.0f0) for instance in batch_instances]
-        colors = Vec4f[Vec4f(material.base_color_rgba...) for _ in batch_instances]
+        # N-7: each instance's tint multiplies the material's colour; an
+        # untinted instance multiplies by exactly 1.0 (byte-identical).
+        colors = Vec4f[
+            Vec4f(
+                material.base_color_rgba[1] * instance.tint_rgb[1],
+                material.base_color_rgba[2] * instance.tint_rgb[2],
+                material.base_color_rgba[3] * instance.tint_rgb[3],
+                material.base_color_rgba[4],
+            ) for instance in batch_instances
+        ]
         material_parameters = Vec4f[
             Vec4f(material.metallic, material.roughness, material.normal_scale, material.occlusion_strength) for _ in batch_instances
         ]
@@ -4871,8 +5245,10 @@ function _mesh_resources!(
         visibility.culled_instance_count,
         total_vertices,
     )
-    if shadow
+    if cache === :shadow
         state.shadow_mesh_resources = created
+    elseif cache === :reflection
+        state.reflection_mesh_resources = created
     else
         state.mesh_resources = created
     end
@@ -5284,7 +5660,9 @@ function _record_scene_passes!(
     material::WGEGraphics.MaterialPacket,
     texture_enabled::Float32,
     scene_framebuffer::Lava.LavaFramebuffer,
-    scene_target::Lava.OffscreenTarget,
+    scene_target::Lava.OffscreenTarget;
+    reflection_pass::Bool=false,
+    reflection_texture=nothing,
 )
     prepare_started_ns = time_ns()
     prepare_gpu_timing_slot = _begin_gpu_pass_timing(state, GPU_PASS_TIMING_LABELS.prepare)
@@ -5309,7 +5687,7 @@ function _record_scene_passes!(
         _surface_sampler_spec(packet.render_policy, :terrain),
     )
     visibility = _mesh_visibility(packet, camera_frame)
-    mesh_resources = _mesh_resources!(state, packet, camera_frame, visibility)
+    mesh_resources = _mesh_resources!(state, packet, camera_frame, visibility; cache=reflection_pass ? :reflection : :main)
     _end_gpu_pass_timing!(state, prepare_gpu_timing_slot)
     prepare_time_us = _elapsed_us(prepare_started_ns)
     terrain_vertices = 6 * (packet.terrain.resolution - 1)^2
@@ -5412,21 +5790,45 @@ function _record_scene_passes!(
         end
     else
         layer_resources = _terrain_layer_resources!(state, packet, shadow_resources)
-        draw!(
-            state.queue,
-            state.terrain_layered_pipeline,
-            scene_target,
-            terrain_vertices;
-            args=(terrain_arguments..., layer_resources.uniforms...),
-            descriptor_set_layout=layer_resources.bindings.layout,
-            descriptor_set=layer_resources.bindings.set,
-            clear_color=nothing,
-        )
-        state.draw_calls += 1
-        if !state.terrain_layered_compiled
-            state.terrain_layered_compiled = true
-            state.pipeline_compilations += 1
+        wet_zone = packet.terrain.wet_zone
+        if wet_zone === nothing
+            draw!(
+                state.queue,
+                state.terrain_layered_pipeline,
+                scene_target,
+                terrain_vertices;
+                args=(terrain_arguments..., layer_resources.uniforms...),
+                descriptor_set_layout=layer_resources.bindings.layout,
+                descriptor_set=layer_resources.bindings.set,
+                clear_color=nothing,
+            )
+            if !state.terrain_layered_compiled
+                state.terrain_layered_compiled = true
+                state.pipeline_compilations += 1
+            end
+        else
+            wet_bindings = _wet_terrain_bindings!(state, packet, layer_resources, reflection_pass ? nothing : reflection_texture)
+            # macro_parameters.zw: the target's inverse size, for the water's
+            # screen-space lookup into the reflection image.
+            m = layer_resources.uniforms[7]
+            layer_uniforms = (layer_resources.uniforms[1:6]...,
+                              Vec4f(m[1], m[2], 1.0f0 / Float32(scene_framebuffer.width), 1.0f0 / Float32(scene_framebuffer.height)))
+            draw!(
+                state.queue,
+                state.terrain_wet_pipeline,
+                scene_target,
+                terrain_vertices;
+                args=(terrain_arguments..., layer_uniforms..., _wet_zone_uniforms(wet_zone; reflection_pass=reflection_pass)...),
+                descriptor_set_layout=wet_bindings.layout,
+                descriptor_set=wet_bindings.set,
+                clear_color=nothing,
+            )
+            if !state.terrain_wet_compiled
+                state.terrain_wet_compiled = true
+                state.pipeline_compilations += 1
+            end
         end
+        state.draw_calls += 1
     end
     if mesh_resources !== nothing
         for batch in mesh_resources.batches
@@ -5440,9 +5842,13 @@ function _record_scene_passes!(
             )
             batch_texture_enabled = _material_texture_enabled(batch_material)
             cutout = _material_cutout(batch_material)
+            # L-2a: on a multisampled target an alpha-mask material writes
+            # coverage instead of discarding (double-sided opaque ones have no
+            # cutoff and stay on the cutout pipeline).
+            coverage = cutout && scene_framebuffer.samples > 1 && batch_material.alpha_mode === :mask
             draw!(
                 state.queue,
-                cutout ? state.mesh_cutout_pipeline : state.mesh_pipeline,
+                coverage ? state.mesh_coverage_pipeline : cutout ? state.mesh_cutout_pipeline : state.mesh_pipeline,
                 scene_target,
                 batch.vertex_count;
                 args=(
@@ -5491,7 +5897,12 @@ function _record_scene_passes!(
                 depth_clear=nothing,
             )
             state.draw_calls += 1
-            if cutout && !state.mesh_cutout_compiled
+            if coverage
+                if !state.mesh_coverage_compiled
+                    state.mesh_coverage_compiled = true
+                    state.pipeline_compilations += 1
+                end
+            elseif cutout && !state.mesh_cutout_compiled
                 state.mesh_cutout_compiled = true
                 state.pipeline_compilations += 1
             elseif !cutout && !state.mesh_compiled
@@ -5613,9 +6024,9 @@ function _render_scene(
 
     render_width = 2 * width
     render_height = 2 * height
-    scene_framebuffer = _framebuffer!(state, render_width, render_height, true, :scene_hdr)
+    scene_framebuffer = _framebuffer!(state, render_width, render_height, true, :scene_hdr; samples=_scene_samples(packet))
     scene_target = OffscreenTarget(scene_framebuffer)
-    scene = _record_scene_passes!(
+    scene = _record_scene_with_reflection!(
         state,
         packet,
         camera_frame,
@@ -5949,9 +6360,9 @@ function render_window_frames!(
         Lava.acquire_next_image!(session.window)
         render_width = 2 * width
         render_height = 2 * height
-        scene_framebuffer = _framebuffer!(state, render_width, render_height, true, :scene_hdr)
+        scene_framebuffer = _framebuffer!(state, render_width, render_height, true, :scene_hdr; samples=_scene_samples(packet))
         scene_target = OffscreenTarget(scene_framebuffer)
-        _record_scene_passes!(
+        _record_scene_with_reflection!(
             state,
             packet,
             camera_frame,

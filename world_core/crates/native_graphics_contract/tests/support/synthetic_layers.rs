@@ -3,8 +3,7 @@
 //! depend on the network, so they exercise the same builder with generated art.
 
 use wge_native_graphics_contract::{
-    LayerCoverage, LayerSource, LayerTextureSizes, MacroRamp, SquareRgba8, TerrainLayerSet,
-    build_terrain_layer_set,
+    LayerCoverage, LayerSource, LayerTextureSizes, MacroRamp, SquareRgba8, TerrainLayerSet, build_terrain_layer_set,
 };
 
 pub fn checker(side: u32, a: [u8; 4], b: [u8; 4]) -> SquareRgba8 {
@@ -32,7 +31,12 @@ pub fn source(layer_id: &str, tint: [u8; 4], metres_mm: u32, coverage: Option<La
 }
 
 pub fn sizes() -> LayerTextureSizes {
-    LayerTextureSizes { albedo: 64, normal_gl: 32, roughness: 16, ao: 16 }
+    LayerTextureSizes {
+        albedo: 64,
+        normal_gl: 32,
+        roughness: 16,
+        ao: 16,
+    }
 }
 
 pub fn synthetic_set() -> TerrainLayerSet {
@@ -48,14 +52,21 @@ pub fn synthetic_set() -> TerrainLayerSet {
                 Some(LayerCoverage {
                     slope_bp: None,
                     height_mm: Some([17500, 14500]),
-                    macro_ramp: Some(MacroRamp { threshold_bp: 5600, softness_bp: 900 }),
+                    macro_ramp: Some(MacroRamp {
+                        threshold_bp: 5600,
+                        softness_bp: 900,
+                    }),
                 }),
             ),
             source(
                 "rock",
                 [110, 110, 105, 255],
                 3000,
-                Some(LayerCoverage { slope_bp: Some([900, 1600]), height_mm: None, macro_ramp: None }),
+                Some(LayerCoverage {
+                    slope_bp: Some([900, 1600]),
+                    height_mm: None,
+                    macro_ramp: None,
+                }),
             ),
         ],
         32,

@@ -144,3 +144,22 @@ fn calibration_glb_prepares_with_zero_findings_and_frames_every_view() {
     }
     assert!((GREY_CARD_TARGET_SRGB8 - 141.1).abs() < 0.05);
 }
+
+#[test]
+fn coverage_rigs_are_their_base_rig_plus_the_policy_and_stay_out_of_all() {
+    use wge_native_graphics_contract::CalibrationRig;
+    for (rig, base, ibl) in [
+        (CalibrationRig::SunCoverage, CalibrationRig::Sun, false),
+        (CalibrationRig::OvercastCoverage, CalibrationRig::Overcast, false),
+        (CalibrationRig::SunIblCoverage, CalibrationRig::SunIbl, true),
+    ] {
+        assert_eq!(CalibrationRig::parse(rig.name()), Some(rig));
+        assert!(!CalibrationRig::ALL.contains(&rig), "{} would change --rigs all", rig.name());
+        assert!(rig.coverage() && !base.coverage());
+        assert_eq!(rig.without_coverage(), base);
+        assert_eq!(rig.lighting(), base.lighting());
+        assert_eq!(rig.ibl(), ibl);
+        assert_eq!(rig.exposure_calibrated(), base.exposure_calibrated());
+    }
+    assert!(CalibrationRig::ALL.iter().all(|rig| !rig.coverage()));
+}
