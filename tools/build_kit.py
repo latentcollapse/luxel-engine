@@ -24,9 +24,15 @@ ARM as data) to the per-asset sizes below, chosen against the measured frame
 budget (kit <= 24 MB of packet). JPEG base colours with a separate alpha map
 are merged into RGBA; BLEND becomes MASK at 0.5.
 
+Sets:
+  * kit1 — CONVERGE-2 N-5, as above.
+  * kit2 — CONVERGE-3 R-1: kit1 with the ruin damaged (tools/ruin_damage.py:
+           stepped boolean breaks, fallen blocks). Every other asset is built
+           exactly as in kit1.
+
 Usage:
-    python3 tools/build_kit.py            # build and verify against the lock
-    python3 tools/build_kit.py --pin      # build and (re)write the lock
+    python3 tools/build_kit.py [--set kit1|kit2]          # build and verify against the lock
+    python3 tools/build_kit.py [--set kit1|kit2] --pin    # build and (re)write the lock
 """
 
 import argparse
@@ -45,11 +51,11 @@ from build_calibration_glb import Gltf, Mesh, box_reduce, linear_to_srgb, png_by
 from fetch_models import file_path  # noqa: E402
 from gltf_model import node_primitives, verified  # noqa: E402
 import leaf_cards  # noqa: E402
+import ruin_damage  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS_MANIFEST = "tools/models/kit1.json"
-LOCK = "tools/kit/kit1.lock.json"
-OUT_DIR = "artifacts/kit/kit1"
+KIT_SETS = ("kit1", "kit2")
 
 # Ruin layout: (fort node, yaw degrees, (x, z) of the footprint centre in metres).
 # A gateway with the wall broken off beside it: the wall end stands 2 m clear of
@@ -199,9 +205,12 @@ class Materials:
         return self.cache[index]
 
 
-def footprint_placed(primitives, yaw_degrees, center_xz):
-    """Recentre a piece on its own footprint (base on y = 0), then yaw and move it."""
-    allp = np.concatenate([p["positions"] for p in primitives])
+def footprint_placed(primitives, yaw_degrees, center_xz, footprint=None):
+    """Recentre a piece on its own footprint (base on y = 0), then yaw and move it.
+
+    `footprint` (default: `primitives`) is what the recentring is measured on,
+    so loose parts of a piece (fallen blocks) move with it."""
+    allp = np.concatenate([p["positions"] for p in (footprint or primitives)])
     lo, hi = allp.min(axis=0), allp.max(axis=0)
     shift = np.array([(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2])
     yaw = np.radians(yaw_degrees)
@@ -220,17 +229,31 @@ def triangles(primitives):
     return int(sum(len(p["indices"]) // 3 for p in primitives))
 
 
-def build_ruin(manifest, models):
+def build_ruin(manifest, models, damaged=False, workdir=None):
     model = models["modular_fort_01"]
     document, buffers = verified(manifest, model)
     gltf = Gltf()
     materials = Materials(gltf, manifest, model, document)
+    names = [m["name"] for m in document["materials"]]
     pieces = []
     for node, yaw, center in RUIN_PIECES:
-        placed = footprint_placed(node_primitives(document, buffers, node), yaw, center)
+        source = node_primitives(document, buffers, node)
+        piece = {"node": node, "yaw_deg": yaw, "center_xz_m": list(center)}
+        fallen = []
+        if damaged and node in ruin_damage.RUIN_DAMAGE:
+            primitives, fallen, piece["damage"] = ruin_damage.damage_piece(source, names, node, workdir)
+        else:
+            primitives = source
+        placed = footprint_placed(primitives, yaw, center, footprint=source)
         for k, primitive in enumerate(placed):
             gltf.mesh(f"ruin_{node.removeprefix('modular_fort_01_')}_{k}", mesh_of(primitive), materials.get(primitive["material"]))
-        pieces.append({"node": node, "yaw_deg": yaw, "center_xz_m": list(center), "triangles": triangles(placed)})
+        piece["triangles"] = triangles(placed)
+        if fallen:
+            blocks = footprint_placed(fallen, yaw, center, footprint=source)
+            for k, block in enumerate(blocks):
+                gltf.mesh(f"ruin_{node.removeprefix('modular_fort_01_')}_fallen_{k}", mesh_of(block), materials.get(block["material"]))
+            piece["fallen_triangles"] = triangles(blocks)
+        pieces.append(piece)
     return gltf, {"pieces": pieces, "textures_px": materials.texture_px}
 
 
@@ -319,16 +342,19 @@ def build_fern(manifest, models):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--pin", action="store_true")
+    parser.add_argument("--set", choices=KIT_SETS, default="kit1")
     args = parser.parse_args()
+    kit_set = args.set
+    out_rel, lock_rel = f"artifacts/kit/{kit_set}", f"tools/kit/{kit_set}.lock.json"
     manifest = json.load(open(os.path.join(REPO, MODELS_MANIFEST)))
     models = {model["asset"]: model for model in manifest["models"]}
-    out_dir = os.path.join(REPO, OUT_DIR)
+    out_dir = os.path.join(REPO, out_rel)
     os.makedirs(out_dir, exist_ok=True)
-    build = {"schema_version": "wge.kit-build/v1", "set_id": "kit1", "models_manifest": MODELS_MANIFEST,
+    build = {"schema_version": "wge.kit-build/v1", "set_id": kit_set, "models_manifest": MODELS_MANIFEST,
              "blender": blender_version(), "assets": {}}
     with tempfile.TemporaryDirectory() as workdir:
         builders = {
-            "ruin": lambda: build_ruin(manifest, models),
+            "ruin": lambda: build_ruin(manifest, models, damaged=kit_set == "kit2", workdir=workdir),
             "rock_a": lambda: build_rock(manifest, models, ROCKS[0][1], ROCKS[0][2], workdir, "rock_a"),
             "rock_b": lambda: build_rock(manifest, models, ROCKS[1][1], ROCKS[1][2], workdir, "rock_b"),
             "tree": lambda: build_tree(manifest, models, workdir),
@@ -339,15 +365,15 @@ def main():
             data = gltf.bytes()
             with open(os.path.join(out_dir, f"{name}.glb"), "wb") as handle:
                 handle.write(data)
-            report.update({"glb": f"{OUT_DIR}/{name}.glb", "glb_bytes": len(data), "glb_sha256": sha256_bytes(data)})
+            report.update({"glb": f"{out_rel}/{name}.glb", "glb_bytes": len(data), "glb_sha256": sha256_bytes(data)})
             build["assets"][name] = report
             print(f"{name:7s} {len(data) / 1e6:5.2f} MB {report['glb_sha256'][:23]}")
-    with open(os.path.join(out_dir, "kit1.build.json"), "w") as handle:
+    with open(os.path.join(out_dir, f"{kit_set}.build.json"), "w") as handle:
         json.dump(build, handle, indent=2)
         handle.write("\n")
 
-    lock_path = os.path.join(REPO, LOCK)
-    lock = {"schema_version": "wge.kit-lock/v1", "set_id": "kit1", "blender": build["blender"],
+    lock_path = os.path.join(REPO, lock_rel)
+    lock = {"schema_version": "wge.kit-lock/v1", "set_id": kit_set, "blender": build["blender"],
             "assets": {name: {"glb": a["glb"], "bytes": a["glb_bytes"], "sha256": a["glb_sha256"]}
                        for name, a in build["assets"].items()}}
     if args.pin:
@@ -355,13 +381,13 @@ def main():
         with open(lock_path, "w") as handle:
             json.dump(lock, handle, indent=2)
             handle.write("\n")
-        print("pinned", LOCK)
+        print("pinned", lock_rel)
     else:
         pinned = json.load(open(lock_path))
         if pinned != lock:
-            raise SystemExit(f"kit build does not match {LOCK} (different Blender or inputs?); "
+            raise SystemExit(f"kit build does not match {lock_rel} (different Blender or inputs?); "
                              "inspect, then rebuild with --pin if the change is intended")
-        print("matches", LOCK)
+        print("matches", lock_rel)
 
 
 if __name__ == "__main__":
