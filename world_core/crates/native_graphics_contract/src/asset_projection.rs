@@ -97,6 +97,8 @@ pub fn project_render_asset(
                 clearcoat: 0.0,
                 clearcoat_roughness: 0.045,
                 alpha_mode: project_alpha_mode(material.alpha_mode),
+                alpha_cutoff: material.alpha_cutoff,
+                double_sided: material.double_sided.then_some(true),
                 texture_ids,
                 normal_texture_id: material.normal_texture_id.clone(),
                 roughness_texture_id: material.metallic_roughness_texture_id.clone(),

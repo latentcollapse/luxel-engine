@@ -14,10 +14,11 @@ Vulkan = "9f14b124-c50e-4008-a7d4-969b3a6cd68a"
 VulkanCore = "16167f82-ea26-5cba-b1de-ed6fd5e30a11"
 
 [sources]
-# The worker is intentionally pinned to the audited upstream commit. Raycore
-# is direct here so its upstream master revision cannot drift through Lava's
+# The worker is pinned to the audited upstream commit 11c7e31, vendored with
+# one additive patch (fragment discard; see vendor/README.md). Raycore is
+# direct here so its upstream master revision cannot drift through Lava's
 # transitive source declaration.
-Lava = {url = "https://github.com/SimonDanisch/Lava.jl", rev = "11c7e31bdf62408d22bf379e9e59510f69d2103e"}
+Lava = {path = "vendor/Lava"}
 Raycore = {url = "https://github.com/JuliaGeometry/Raycore.jl", rev = "d93743b3ac0e8462ac8f9ba26d082f5402b4629d"}
 Vulkan = {url = "https://github.com/JuliaGPU/Vulkan.jl", rev = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"}
 VulkanCore = {url = "https://github.com/JuliaGPU/VulkanCore.jl", rev = "1d02829e8fa92da430d879db4dd7bf564a872035"}

@@ -1,0 +1,62 @@
+diff --color -ru a/src/compiler/spirv/emit.jl b/src/compiler/spirv/emit.jl
+--- a/src/compiler/spirv/emit.jl	2026-09-28 04:32:19.597317760 -0400
++++ b/src/compiler/spirv/emit.jl	2026-10-04 18:50:18.020541462 -0400
+@@ -6840,6 +6840,8 @@
+             return emit_rt_hit_attrib_load_at!(state, inst)
+         elseif fn_name == "lava_rt_ignore_intersection"
+             return emit_rt_ignore_intersection!(state, inst)
++        elseif fn_name == "lava_gfx_discard"
++            return emit_gfx_discard!(state, inst)
+         elseif fn_name == "lava_rt_terminate_ray"
+             return emit_rt_terminate_ray!(state, inst)
+         elseif fn_name == "lava_rt_hit_object_trace_ray"
+diff --color -ru a/src/compiler/spirv/module.jl b/src/compiler/spirv/module.jl
+--- a/src/compiler/spirv/module.jl	2026-09-28 04:32:19.597317760 -0400
++++ b/src/compiler/spirv/module.jl	2026-10-04 18:50:18.018863156 -0400
+@@ -113,6 +113,7 @@
+     const OpLabel                   = UInt16(248)
+     const OpBranch                  = UInt16(249)
+     const OpBranchConditional       = UInt16(250)
++    const OpKill                    = UInt16(252)
+     const OpReturn                  = UInt16(253)
+     const OpReturnValue             = UInt16(254)
+     const OpBitwiseOr               = UInt16(197)
+diff --color -ru a/src/compiler/spirv/raytracing.jl b/src/compiler/spirv/raytracing.jl
+--- a/src/compiler/spirv/raytracing.jl	2026-09-28 04:32:19.597317760 -0400
++++ b/src/compiler/spirv/raytracing.jl	2026-10-04 18:50:18.021397853 -0400
+@@ -508,6 +508,11 @@
+ Emit OpTerminateRayKHR — block terminator in any-hit shaders.
+ Accepts the current hit and stops traversal immediately.
+ """
++function emit_gfx_discard!(state::SPIRVEmitterState, inst::LLVM.CallInst)
++    encode_instruction!(state.mod.functions, Op.OpKill)
++    state.rt_block_terminated = true
++end
++
+ function emit_rt_terminate_ray!(state::SPIRVEmitterState, inst::LLVM.CallInst)
+     encode_instruction!(state.mod.functions, Op.OpTerminateRayKHR)
+     state.rt_block_terminated = true
+diff --color -ru a/src/device/gfx_intrinsics.jl b/src/device/gfx_intrinsics.jl
+--- a/src/device/gfx_intrinsics.jl	2026-09-28 04:32:19.597317760 -0400
++++ b/src/device/gfx_intrinsics.jl	2026-10-04 18:50:18.021555055 -0400
+@@ -71,6 +71,20 @@
+     raw != 0x00
+ end
+ 
++# Fragment-only block terminator: OpKill. The fragment writes nothing,
++# colour or depth.
++@inline function discard()
++    Base.llvmcall(("""
++        declare void @lava_gfx_discard() #0
++        define void @entry() #0 {
++            call void @lava_gfx_discard()
++            ret void
++        }
++        attributes #0 = { alwaysinline }
++    """, "entry"), Cvoid, Tuple{})
++end
++push!(KNOWN_INTRINSICS, "lava_gfx_discard")
++
+ # ── Output Builtins (Vertex/Geometry/TessEval) ──
+ 
+ # Low-level: 4 scalars

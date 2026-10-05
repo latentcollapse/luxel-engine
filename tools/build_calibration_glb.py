@@ -17,6 +17,13 @@ Geometry, local frame (metres, +Y up, the camera side is +Z):
     2.5 cm chamfer, and a 2 x 1 m slab leaning back 15 deg; bark adds a
     cylinder, terrain is a slab only, emissive is a sphere only.
 
+Foliage (CONVERGE-2 N-6, only when the manifest has a `foliage` section, i.e.
+the `calibration2` set): pinned Poly Haven models (tools/fetch_models.py), one
+node per specimen, standing on the ground in front of the plinth at z = 3 m.
+The JPEG base colour and the separate alpha map are merged into one RGBA
+texture; BLEND materials are conditioned to MASK at 0.5. Without the section
+the output is calibration1, byte for byte.
+
 UVs are metric (arc length on the sphere and cylinder, planar on boxes)
 divided by the scan's physical size, so one texture repeat covers exactly the
 area the scan measured. Node transforms are identity: conditioning does not
@@ -57,6 +64,7 @@ COLUMN_PITCH_M = 3.0
 SLAB_LEAN_DEG = 15.0
 BEVEL_M = 0.025
 GROUND_HALF_X_M = 17.0
+FOLIAGE_Z_M = 3.0
 
 COLUMNS = (
     # (column id, source asset, derivation, bodies)
@@ -245,6 +253,59 @@ def flatten_normals(normal01, factor):
     v[..., :2] *= factor
     v /= np.linalg.norm(v, axis=-1, keepdims=True)
     return v * 0.5 + 0.5
+
+
+def rgba_png_bytes(rgba01):
+    buffer = io.BytesIO()
+    Image.fromarray(np.clip(np.rint(rgba01 * 255.0), 0, 255).astype(np.uint8), "RGBA").save(buffer, format="PNG", compress_level=6)
+    return buffer.getvalue()
+
+
+def box_reduce(array, size):
+    h, w = array.shape[:2]
+    if h != w or h % size:
+        raise SystemExit(f"{w}x{h} does not box-reduce to {size}")
+    f = h // size
+    return array.reshape(size, f, size, f, -1).mean(axis=(1, 3))
+
+
+def foliage_material(gltf, models_manifest, model, document, material_index):
+    """The source material, conditioned: RGBA base colour (diff + alpha map) at
+    512 px averaged in linear light, normals at 512 px renormalised, the ARM map
+    (R = AO, G = roughness, B = metal; glTF reads G and B) at 256 px. MASK keeps
+    its cutoff; BLEND becomes MASK at 0.5 (WGE does not blend)."""
+    from fetch_models import file_path
+
+    source = document["materials"][material_index]
+    pbr = source["pbrMetallicRoughness"]
+    asset = model["asset"]
+
+    def image(info):
+        uri = document["images"][document["textures"][info["index"]]["source"]]["uri"]
+        return np.asarray(Image.open(file_path(models_manifest, model, uri)).convert("RGB"), np.float64) / 255.0
+
+    albedo = linear_to_srgb(box_reduce(srgb_to_linear(image(pbr["baseColorTexture"])), 512))
+    alpha_map = np.asarray(Image.open(file_path(models_manifest, model, "maps/alpha.png")).convert("L"), np.float64) / 255.0
+    alpha = box_reduce(alpha_map[..., None], 512)
+    normal = box_reduce(image(source["normalTexture"]) * 2.0 - 1.0, 512)
+    normal = normal / np.maximum(np.linalg.norm(normal, axis=-1, keepdims=True), 1e-8) * 0.5 + 0.5
+    arm = box_reduce(image(pbr["metallicRoughnessTexture"]), 256)
+    mode = source.get("alphaMode", "OPAQUE")
+    if mode not in ("MASK", "BLEND"):
+        raise SystemExit(f"{asset}: foliage material is {mode}, expected MASK or BLEND")
+    return gltf.material({
+        "name": f"foliage_{asset}",
+        "alphaMode": "MASK",
+        "alphaCutoff": source.get("alphaCutoff", 0.5) if mode == "MASK" else 0.5,
+        "doubleSided": True,
+        "pbrMetallicRoughness": {
+            "baseColorTexture": {"index": gltf.texture(f"{asset}_albedo_alpha", rgba_png_bytes(np.concatenate([albedo, alpha], axis=-1)))},
+            "metallicRoughnessTexture": {"index": gltf.texture(f"{asset}_arm", png_bytes(arm))},
+            "metallicFactor": pbr.get("metallicFactor", 1.0),
+            "roughnessFactor": pbr.get("roughnessFactor", 1.0),
+        },
+        "normalTexture": {"index": gltf.texture(f"{asset}_normal", png_bytes(normal))},
+    })
 
 
 def wet_albedo(albedo01):
@@ -444,6 +505,29 @@ def main():
             elif body == "cylinder":
                 cylinder(mesh, 0.2, 1.4, scale, np.array([cx, PLINTH_TOP_M, -0.15]))
             emit(f"{column}_{body}", mesh, material, column, body)
+
+    if "foliage" in manifest:
+        from gltf_model import node_triangles, verified
+
+        foliage = manifest["foliage"]
+        models_manifest = json.load(open(os.path.join(REPO, foliage["models_manifest"])))
+        models = {model["asset"]: model for model in models_manifest["models"]}
+        materials_by_asset = {}
+        specimens = []
+        for specimen in foliage["specimens"]:
+            model = models[specimen["asset"]]
+            document, buffers = verified(models_manifest, model)
+            positions, normals, uvs, indices, material_index = node_triangles(document, buffers, specimen["node"])
+            lo, hi = positions.min(axis=0), positions.max(axis=0)
+            # Footprint centred on (x, FOLIAGE_Z_M), base on the ground (y = 0).
+            positions = positions - [(lo[0] + hi[0]) / 2, lo[1], (lo[2] + hi[2]) / 2] + [specimen["x_m"], 0.0, FOLIAGE_Z_M]
+            if specimen["asset"] not in materials_by_asset:
+                materials_by_asset[specimen["asset"]] = foliage_material(gltf, models_manifest, model, document, material_index)
+            mesh = Mesh()
+            mesh.p, mesh.n, mesh.uv, mesh.i = list(positions), list(normals), list(uvs), list(indices)
+            emit(f"foliage_{specimen['asset']}", mesh, materials_by_asset[specimen["asset"]], "foliage", "specimen")
+            specimens.append({**specimen, "size_m": [round(float(v), 3) for v in hi - lo], "triangles": len(indices) // 3})
+        layout["foliage"] = {"models_manifest": foliage["models_manifest"], "z_m": FOLIAGE_Z_M, "specimens": specimens}
 
     data = gltf.bytes()
     out_dir = os.path.join(REPO, manifest["cache_dir"])

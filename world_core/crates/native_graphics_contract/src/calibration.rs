@@ -211,6 +211,12 @@ const GROUND_LOCAL_X_M: [f64; 2] = [-17.0, 17.0];
 const GROUND_LOCAL_Z_M: [f64; 2] = [-3.0, 4.0];
 const GROUND_CLEARANCE_M: f64 = 0.03;
 const PLINTH_TOP_M: f32 = 0.15;
+/// CONVERGE-2 N-6: the foliage specimens of the `calibration2` set stand on the
+/// ground in front of the plinth (`tools/build_calibration_glb.py`,
+/// `FOLIAGE_Z_M`), spread over x = 10..14 m. The views aim at this point.
+const FOLIAGE_CENTER_LOCAL_M: [f32; 3] = [12.0, 0.4, 3.0];
+/// Camera distances of the foliage views: close, mid, far.
+pub const FOLIAGE_VIEW_DISTANCES_M: [u16; 3] = [5, 10, 40];
 const SLAB_LEAN_DEG: f32 = 15.0;
 
 pub fn render_request() -> RenderConditioningRequest {
@@ -420,6 +426,11 @@ pub enum CalibrationView {
     Close(String),
     /// 10° over one column's slab, along its width.
     Grazing(String),
+    /// CONVERGE-2 N-6: the foliage specimens from N metres, one fixed field of
+    /// view and one ray, so silhouette area scales exactly as 1/d². The camera
+    /// is a constant, valid for any calibration set; a set without foliage
+    /// renders the same view as the silhouette baseline.
+    Foliage(u16),
 }
 
 impl CalibrationView {
@@ -428,6 +439,7 @@ impl CalibrationView {
             Self::Row => "row".into(),
             Self::Close(column) => format!("close-{column}"),
             Self::Grazing(column) => format!("grazing-{column}"),
+            Self::Foliage(distance) => format!("foliage-{distance}m"),
         }
     }
 
@@ -437,6 +449,7 @@ impl CalibrationView {
         let mut views = vec![Self::Row, Self::Close("calibration".into())];
         views.extend(CALIBRATION_COLUMNS.iter().map(|c| Self::Close((*c).into())));
         views.extend(CALIBRATION_COLUMNS.iter().filter(|c| **c != "emissive").map(|c| Self::Grazing((*c).into())));
+        views.extend(FOLIAGE_VIEW_DISTANCES_M.map(Self::Foliage));
         views
     }
 
@@ -470,6 +483,13 @@ impl CalibrationView {
                     center[2] + distance * graze.sin() * normal[2],
                 ];
                 (position, center, 40.0, 960, 640)
+            }
+            Self::Foliage(distance) => {
+                let rise = 0.25f32;
+                let norm = (1.0 + rise * rise).sqrt();
+                let d = f32::from(*distance);
+                let c = FOLIAGE_CENTER_LOCAL_M;
+                ([c[0], c[1] + d * rise / norm, c[2] + d / norm], c, 45.0, 960, 640)
             }
         };
         let world_position = placement.point(position);

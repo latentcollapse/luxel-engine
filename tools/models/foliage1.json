@@ -1,0 +1,169 @@
+{
+  "schema_version": "wge.model-manifest/v1",
+  "set_id": "foliage1",
+  "provider": "polyhaven.com",
+  "license": "CC0-1.0",
+  "cache_dir": "artifacts/models",
+  "resolution": "1k",
+  "note": "WGE_CONVERGE2_CONTRACTS.md N-6 foliage row. The glTF base colour is a JPEG without alpha; the Alpha map is merged into an RGBA base colour by tools/build_calibration_glb.py. grass_medium_01 is authored BLEND and is conditioned to MASK at 0.5.",
+  "models": [
+    {
+      "asset": "fern_02",
+      "extra_maps": [
+        "Alpha"
+      ],
+      "authors": [
+        "Rico Cilliers",
+        "Rob Tuytel"
+      ],
+      "dimensions_mm": [
+        1973,
+        1724,
+        428
+      ],
+      "files": {
+        "fern_02.gltf": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/fern_02/fern_02_1k.gltf",
+          "provider_md5": "cf276874d37bfb73c299504a6b355b77",
+          "bytes": 6899,
+          "sha256": "sha256:33974295ee19670af4877705fc7d91f33f42d6302f0d44a625e072271223031f"
+        },
+        "fern_02.bin": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/fern_02/fern_02.bin",
+          "provider_md5": "c061e9255f7d36ae9ce0e92ef3e100b2",
+          "bytes": 176176,
+          "sha256": "sha256:fe1abb762bcbbc7ad9e86925c8080437a62add257d9280e9142fdc85c226e64c"
+        },
+        "textures/fern_02_arm_1k.jpg": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fern_02/fern_02_arm_1k.jpg",
+          "provider_md5": "1bbb2b22951f450720d28e17d93a2987",
+          "bytes": 280359,
+          "sha256": "sha256:ebfb5d76ce9cbdaec20bcd22dce9b755f0b1b8650ef29ca13555e3e6961025d7"
+        },
+        "textures/fern_02_diff_1k.jpg": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fern_02/fern_02_diff_1k.jpg",
+          "provider_md5": "82c18a6cfd5ae91c37c0e078f591181c",
+          "bytes": 315705,
+          "sha256": "sha256:a828a6e7b4c01c826911e2eac4b3afc7457dab7b3b392a31c681ed88b7d50029"
+        },
+        "textures/fern_02_nor_gl_1k.jpg": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/fern_02/fern_02_nor_gl_1k.jpg",
+          "provider_md5": "43aed63dff79554f6064627515afd9d7",
+          "bytes": 367222,
+          "sha256": "sha256:45bce132c6e96a0864bc89ab5da51361ab3f4afa83a6669ae499ab5ca811f621"
+        },
+        "maps/alpha.png": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/png/1k/fern_02/fern_02_alpha_1k.png",
+          "provider_md5": "1421e5e36946c23a7ddcc907de89025c",
+          "bytes": 114589,
+          "sha256": "sha256:ea3c64284c7ebdeedf484d2d816eae92825ec526140c3bb83859ddc7a64001f9"
+        }
+      }
+    },
+    {
+      "asset": "shrub_02",
+      "extra_maps": [
+        "Alpha"
+      ],
+      "authors": [
+        "Rico Cilliers"
+      ],
+      "dimensions_mm": [
+        5341,
+        2061,
+        2071
+      ],
+      "files": {
+        "shrub_02.gltf": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/shrub_02/shrub_02_1k.gltf",
+          "provider_md5": "8f7254d279c0c49c0b3edfe260aa5c86",
+          "bytes": 8083,
+          "sha256": "sha256:99de0a70fe88ad414615cc8d8e020617c8512e2abfe08b911b153a6fcc40d93e"
+        },
+        "shrub_02.bin": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/4k/shrub_02/shrub_02.bin",
+          "provider_md5": "683b5475238310899eac1458520903e6",
+          "bytes": 758692,
+          "sha256": "sha256:5c1b79da1cfdbac90599542ccd1f75ba433a3a4d356b1ea03655adb39b0e2c96"
+        },
+        "textures/shrub_02_arm_1k.jpg": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_02/shrub_02_arm_1k.jpg",
+          "provider_md5": "28c218aeb7cab930d99ee16578984241",
+          "bytes": 313715,
+          "sha256": "sha256:7186bf604d5c02f873aef6de2346cc06b6fa48f47d054edbef36d2c3772c0890"
+        },
+        "textures/shrub_02_diff_1k.jpg": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_02/shrub_02_diff_1k.jpg",
+          "provider_md5": "3f4ae281928de030c7d4e41ad5b88a8b",
+          "bytes": 395120,
+          "sha256": "sha256:9956eff294034d70516d867e9668428a23d782feb3d4c34061dce5e44bacd5a8"
+        },
+        "textures/shrub_02_nor_gl_1k.jpg": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/shrub_02/shrub_02_nor_gl_1k.jpg",
+          "provider_md5": "51a7f2db7e06a207171fd725585241d5",
+          "bytes": 490815,
+          "sha256": "sha256:54c24e433365d5410223b7ebd2b33042b80831f80976e10768114db5ef6911d7"
+        },
+        "maps/alpha.png": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/png/1k/shrub_02/shrub_02_alpha_1k.png",
+          "provider_md5": "64a1f609d80ea076b43412498a3d2db5",
+          "bytes": 91741,
+          "sha256": "sha256:5c2c31bac311051db77443e1780078403c2df0a832c40fe6ed7bcd982695cdf0"
+        }
+      }
+    },
+    {
+      "asset": "grass_medium_01",
+      "extra_maps": [
+        "Alpha"
+      ],
+      "authors": [
+        "Rico Cilliers",
+        "Rob Tuytel"
+      ],
+      "dimensions_mm": [
+        7266,
+        1259,
+        1177
+      ],
+      "files": {
+        "grass_medium_01.gltf": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/1k/grass_medium_01/grass_medium_01_1k.gltf",
+          "provider_md5": "28dd8247f3faa749bf87a0b84be01e7e",
+          "bytes": 27110,
+          "sha256": "sha256:3e5e2a314c94e16de54fd7c28e41709731fbd2b1613ab539f1544f622ddb6a85"
+        },
+        "grass_medium_01.bin": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/gltf/8k/grass_medium_01/grass_medium_01.bin",
+          "provider_md5": "e0527a0561c2dae5b7b5c1b478d8c6bf",
+          "bytes": 1006632,
+          "sha256": "sha256:f4587cabdb96a2e96d8be644923dc954a248edfaaa717a0ff224cacb898bee1f"
+        },
+        "textures/grass_medium_01_arm_1k.jpg": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_01/grass_medium_01_arm_1k.jpg",
+          "provider_md5": "37ed2730a507b681af2e9f9f7ef3ae5e",
+          "bytes": 679518,
+          "sha256": "sha256:9a3a30f72bc02f4398967c5b08f2d20cce30bd423a2613b42a727034296fa3ae"
+        },
+        "textures/grass_medium_01_diff_1k.jpg": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_01/grass_medium_01_diff_1k.jpg",
+          "provider_md5": "6b18ed50d776fd20c1304d9994bd764e",
+          "bytes": 395673,
+          "sha256": "sha256:71495bd6a11fddcab0aaff38246fea1a7b802a705483f1c7cbca53955daa8050"
+        },
+        "textures/grass_medium_01_nor_gl_1k.jpg": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/jpg/1k/grass_medium_01/grass_medium_01_nor_gl_1k.jpg",
+          "provider_md5": "fcf43dd1253f56e4c361079f34155c37",
+          "bytes": 956166,
+          "sha256": "sha256:cae298d3d1d7ff7c7e210ad8ac772b96706e356f9315a6b04fde373ce01ccf1e"
+        },
+        "maps/alpha.png": {
+          "url": "https://dl.polyhaven.org/file/ph-assets/Models/png/1k/grass_medium_01/grass_medium_01_alpha_1k.png",
+          "provider_md5": "6b5b251ef1ca9a69ab9f49def66d758a",
+          "bytes": 648718,
+          "sha256": "sha256:711a8e49af758d6a6ce1f610db858899a27be19da6d1866bd35c13bc7b8ffeff"
+        }
+      }
+    }
+  ]
+}

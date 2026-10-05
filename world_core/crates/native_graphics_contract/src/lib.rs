@@ -354,6 +354,15 @@ pub struct MaterialIntent {
     pub clearcoat: f32,
     pub clearcoat_roughness: f32,
     pub alpha_mode: AlphaMode,
+    /// Coverage threshold for `AlphaMode::Mask`: required for `Mask`, refused
+    /// otherwise. Absent from serialization when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha_cutoff: Option<f32>,
+    /// `Some(true)` lights back faces with the flipped normal. The only
+    /// accepted encoding of single-sided is `None`, so opaque packets keep
+    /// their bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub double_sided: Option<bool>,
     pub texture_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub normal_texture_id: Option<String>,
@@ -3127,6 +3136,8 @@ pub fn lower_reference_world(
         clearcoat: 0.0,
         clearcoat_roughness: 0.5,
         alpha_mode: AlphaMode::Opaque,
+        alpha_cutoff: None,
+        double_sided: None,
         texture_ids: vec![terrain_albedo_texture.texture_id.clone()],
         normal_texture_id: normal_texture_id.clone(),
         roughness_texture_id: roughness_texture_id.clone(),
@@ -3147,6 +3158,8 @@ pub fn lower_reference_world(
             clearcoat: 0.12,
             clearcoat_roughness: 0.32,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![stone_albedo_texture.texture_id.clone()],
             normal_texture_id: normal_texture_id.clone(),
             roughness_texture_id: roughness_texture_id.clone(),
@@ -3191,6 +3204,8 @@ pub fn lower_reference_world(
             clearcoat: 0.0,
             clearcoat_roughness: 0.5,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![foliage_albedo_texture.texture_id.clone()],
             normal_texture_id: normal_texture_id.clone(),
             roughness_texture_id: roughness_texture_id.clone(),
@@ -3211,6 +3226,8 @@ pub fn lower_reference_world(
         clearcoat: 0.35,
         clearcoat_roughness: 0.18,
         alpha_mode: AlphaMode::Opaque,
+        alpha_cutoff: None,
+        double_sided: None,
         texture_ids: vec![beacon_albedo_texture.texture_id.clone()],
         normal_texture_id: normal_texture_id.clone(),
         roughness_texture_id: roughness_texture_id.clone(),
@@ -3543,6 +3560,8 @@ pub fn lower_showcase_packet(
             clearcoat: 0.18,
             clearcoat_roughness: 0.24,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![showcase_stone_texture.texture_id.clone()],
             normal_texture_id: common_normal.clone(),
             roughness_texture_id: common_roughness.clone(),
@@ -3560,6 +3579,8 @@ pub fn lower_showcase_packet(
             clearcoat: 0.32,
             clearcoat_roughness: 0.12,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![showcase_metal_texture.texture_id.clone()],
             normal_texture_id: common_normal.clone(),
             roughness_texture_id: common_roughness.clone(),
@@ -3577,6 +3598,8 @@ pub fn lower_showcase_packet(
             clearcoat: 0.08,
             clearcoat_roughness: 0.20,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![showcase_glow_texture.texture_id.clone()],
             normal_texture_id: common_normal,
             roughness_texture_id: common_roughness,
@@ -4565,6 +4588,8 @@ pub fn lower_campaign2_packet_with(
             clearcoat: 0.86,
             clearcoat_roughness: 0.045,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![wet_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4582,6 +4607,8 @@ pub fn lower_campaign2_packet_with(
             clearcoat: 0.06,
             clearcoat_roughness: 0.30,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![foliage_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4599,6 +4626,8 @@ pub fn lower_campaign2_packet_with(
             clearcoat: 0.04,
             clearcoat_roughness: 0.35,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![bark_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4616,6 +4645,8 @@ pub fn lower_campaign2_packet_with(
             clearcoat: 0.24,
             clearcoat_roughness: 0.18,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![hero_stone_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4633,6 +4664,8 @@ pub fn lower_campaign2_packet_with(
             clearcoat: 0.46,
             clearcoat_roughness: 0.08,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![hero_metal_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4650,6 +4683,8 @@ pub fn lower_campaign2_packet_with(
             clearcoat: 0.16,
             clearcoat_roughness: 0.12,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![hero_glow_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture.clone(),
@@ -4667,6 +4702,8 @@ pub fn lower_campaign2_packet_with(
             clearcoat: 0.08,
             clearcoat_roughness: 0.28,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![hero_stone_texture.texture_id.clone()],
             normal_texture_id: normal_texture.clone(),
             roughness_texture_id: roughness_texture,
@@ -5497,6 +5534,25 @@ fn validate_material(material: &MaterialIntent) -> Result<(), GraphicsContractEr
     {
         return Err(GraphicsContractError::malformed(
             "material normal scale or occlusion strength is outside its bounds",
+        ));
+    }
+    match (material.alpha_mode, material.alpha_cutoff) {
+        (AlphaMode::Mask, Some(cutoff)) if cutoff.is_finite() && cutoff > 0.0 && cutoff < 1.0 => {}
+        (AlphaMode::Mask, _) => {
+            return Err(GraphicsContractError::malformed(
+                "mask material requires an alpha cutoff in (0, 1)",
+            ));
+        }
+        (AlphaMode::Opaque | AlphaMode::Blend, Some(_)) => {
+            return Err(GraphicsContractError::malformed(
+                "alpha cutoff is only valid on mask materials",
+            ));
+        }
+        (AlphaMode::Opaque | AlphaMode::Blend, None) => {}
+    }
+    if material.double_sided == Some(false) {
+        return Err(GraphicsContractError::malformed(
+            "single-sided materials omit double_sided",
         ));
     }
     finite_values(&material.emissive_factor_rgb, "material emissive factor")?;
@@ -6443,6 +6499,8 @@ mod tests {
                 clearcoat: 0.0,
                 clearcoat_roughness: 0.5,
                 alpha_mode: AlphaMode::Opaque,
+                alpha_cutoff: None,
+                double_sided: None,
                 texture_ids: Vec::new(),
                 normal_texture_id: None,
                 roughness_texture_id: None,

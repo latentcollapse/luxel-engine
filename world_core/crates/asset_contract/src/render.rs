@@ -140,6 +140,11 @@ pub struct RenderMaterial {
     pub metallic: f32,
     pub roughness: f32,
     pub alpha_mode: RenderAlphaMode,
+    /// glTF `alphaCutoff`, present exactly when `alpha_mode` is `Mask`
+    /// (glTF default 0.5). Absent from serialization otherwise, so packages
+    /// of opaque assets keep their digests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alpha_cutoff: Option<f32>,
     pub double_sided: bool,
     pub base_color_texture_id: Option<String>,
     pub metallic_roughness_texture_id: Option<String>,
@@ -873,6 +878,16 @@ fn validate_render_material(material: &RenderMaterial) -> Result<(), AssetContra
             material.material_id
         )));
     }
+    match (material.alpha_mode, material.alpha_cutoff) {
+        (RenderAlphaMode::Mask, Some(cutoff)) if cutoff.is_finite() && cutoff > 0.0 && cutoff < 1.0 => {}
+        (RenderAlphaMode::Opaque | RenderAlphaMode::Blend, None) => {}
+        _ => {
+            return Err(AssetContractError::Contract(format!(
+                "render material {} alpha cutoff must be in (0, 1) for MASK and absent otherwise",
+                material.material_id
+            )));
+        }
+    }
     for texture_id in [
         material.base_color_texture_id.as_deref(),
         material.metallic_roughness_texture_id.as_deref(),
@@ -999,6 +1014,20 @@ fn parse_material(
             RenderAlphaMode::Opaque
         }
     };
+    let alpha_cutoff = (alpha_mode == RenderAlphaMode::Mask).then(|| {
+        let cutoff = number_value(material.get("alphaCutoff"), 0.5);
+        if !cutoff.is_finite() || cutoff <= 0.0 || cutoff >= 1.0 {
+            finding(
+                findings,
+                RenderFindingCode::InvalidMaterial,
+                &material_id,
+                "alphaCutoff must be finite and inside (0, 1)",
+            );
+            0.5
+        } else {
+            cutoff
+        }
+    });
     let base_color_texture_id =
         material_texture_id(document, pbr, "baseColorTexture", &material_id, findings);
     let metallic_roughness_texture_id = material_texture_id(
@@ -1030,6 +1059,7 @@ fn parse_material(
         metallic,
         roughness,
         alpha_mode,
+        alpha_cutoff,
         double_sided: material
             .get("doubleSided")
             .and_then(Value::as_bool)
@@ -1288,6 +1318,7 @@ fn collect_textures(
             );
         }
     }
+    let mask_cutoffs = mask_coverage_cutoffs(materials, findings);
     let mut result = Vec::new();
     let images = array_or_empty(document, "images")?;
     for (texture_index, color_space) in usages {
@@ -1366,7 +1397,11 @@ fn collect_textures(
         let mip_chain = match request.mip_policy {
             RenderMipPolicy::SingleLevelExplicit => Vec::new(),
             RenderMipPolicy::GenerateCpuChain => {
-                generate_mip_chain(width, height, &rgba8, color_space)
+                let mut chain = generate_mip_chain(width, height, &rgba8, color_space);
+                if let Some(cutoff) = mask_cutoffs.get(&texture_index) {
+                    preserve_alpha_coverage(&rgba8, &mut chain, *cutoff);
+                }
+                chain
             }
         };
         let mip_levels = u32::try_from(mip_chain.len() + 1).map_err(|_| {
@@ -1390,6 +1425,102 @@ fn collect_textures(
     }
     result.sort_by(|left, right| left.texture_id.cmp(&right.texture_id));
     Ok(result)
+}
+
+/// Base-colour textures of MASK materials, with the cutoff their mips must
+/// preserve coverage at. A texture shared by two MASK materials with different
+/// cutoffs cannot preserve both and is a finding.
+fn mask_coverage_cutoffs(
+    materials: &[Value],
+    findings: &mut Vec<RenderFinding>,
+) -> BTreeMap<usize, f32> {
+    let mut cutoffs = BTreeMap::<usize, f32>::new();
+    for material in materials {
+        if material.get("alphaMode").and_then(Value::as_str) != Some("MASK") {
+            continue;
+        }
+        let Some(texture_index) = material
+            .get("pbrMetallicRoughness")
+            .and_then(|pbr| pbr.get("baseColorTexture"))
+            .and_then(|info| info.get("index"))
+            .and_then(Value::as_u64)
+            .and_then(|index| usize::try_from(index).ok())
+        else {
+            continue;
+        };
+        let cutoff = number_value(material.get("alphaCutoff"), 0.5);
+        if let Some(existing) = cutoffs.insert(texture_index, cutoff) {
+            if existing != cutoff {
+                finding(
+                    findings,
+                    RenderFindingCode::InvalidMaterial,
+                    &format!("texture_{texture_index}"),
+                    "MASK materials sharing a base colour texture must share one alphaCutoff",
+                );
+            }
+        }
+    }
+    cutoffs
+}
+
+/// Fraction of texels that pass the alpha test (`alpha >= cutoff`).
+fn alpha_coverage(rgba8: &[u8], cutoff: f32) -> f64 {
+    let texels = rgba8.len() / 4;
+    if texels == 0 {
+        return 0.0;
+    }
+    let threshold = f64::from(cutoff) * 255.0;
+    let passing = rgba8
+        .chunks_exact(4)
+        .filter(|texel| f64::from(texel[3]) >= threshold)
+        .count();
+    passing as f64 / texels as f64
+}
+
+fn scaled_alpha(alpha: u8, scale: f64) -> u8 {
+    (f64::from(alpha) * scale).round().clamp(0.0, 255.0) as u8
+}
+
+/// Coverage-preserving alpha mips (Castaño 2010). A box filter averages
+/// alpha, so an alpha-tested texture loses coverage at every level and
+/// foliage thins to sticks at distance. Each level's alpha is scaled so the
+/// fraction of texels passing `cutoff` matches the base level. The scale is
+/// found by bisection over the box-filtered (unscaled) level, so no level
+/// inherits a previous level's rescale. Colour channels are untouched.
+fn preserve_alpha_coverage(base: &[u8], levels: &mut [RenderTextureMip], cutoff: f32) {
+    let target = alpha_coverage(base, cutoff);
+    let threshold = f64::from(cutoff) * 255.0;
+    for level in levels {
+        let coverage_at = |scale: f64| {
+            let texels = level.rgba8.len() / 4;
+            let passing = level
+                .rgba8
+                .chunks_exact(4)
+                .filter(|texel| f64::from(scaled_alpha(texel[3], scale)) >= threshold)
+                .count();
+            passing as f64 / texels as f64
+        };
+        // Coverage is monotone in the scale. Bisect for the smallest scale
+        // whose coverage reaches the target, then keep whichever neighbour
+        // lands closer.
+        let (mut low, mut high) = (0.0f64, 255.0f64);
+        for _ in 0..40 {
+            let middle = 0.5 * (low + high);
+            if coverage_at(middle) >= target {
+                high = middle;
+            } else {
+                low = middle;
+            }
+        }
+        let scale = if (coverage_at(low) - target).abs() < (coverage_at(high) - target).abs() {
+            low
+        } else {
+            high
+        };
+        for texel in level.rgba8.chunks_exact_mut(4) {
+            texel[3] = scaled_alpha(texel[3], scale);
+        }
+    }
 }
 
 /// Build a complete deterministic RGBA8 mip chain in the authority plane.
@@ -1612,6 +1743,7 @@ fn default_material() -> RenderMaterial {
         metallic: 0.0,
         roughness: 1.0,
         alpha_mode: RenderAlphaMode::Opaque,
+        alpha_cutoff: None,
         double_sided: false,
         base_color_texture_id: None,
         metallic_roughness_texture_id: None,
@@ -1952,4 +2084,99 @@ fn finding(
         subject: subject.into(),
         detail: detail.into(),
     });
+}
+
+#[cfg(test)]
+mod alpha_coverage_tests {
+    use super::*;
+
+    /// A foliage-like mask: smooth blobs from summed radial falloffs, so
+    /// coverage is a property of shape rather than of single texels.
+    fn leaf_mask(size: u32) -> Vec<u8> {
+        let mut state = 0x2545_f491_u32;
+        let mut next = || {
+            state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            f64::from(state >> 8) / f64::from(1u32 << 24)
+        };
+        let blobs: Vec<(f64, f64, f64)> =
+            (0..40).map(|_| (next(), next(), 0.02 + 0.05 * next())).collect();
+        let mut rgba = vec![0u8; size as usize * size as usize * 4];
+        for y in 0..size {
+            for x in 0..size {
+                let (u, v) = (f64::from(x) / f64::from(size), f64::from(y) / f64::from(size));
+                let field: f64 = blobs
+                    .iter()
+                    .map(|(cx, cy, r)| (1.0 - ((u - cx).hypot(v - cy) / r)).max(0.0))
+                    .sum();
+                let offset = ((y * size + x) * 4) as usize;
+                rgba[offset..offset + 3].copy_from_slice(&[60, 120, 40]);
+                rgba[offset + 3] = if field > 0.15 { 255 } else { 0 };
+            }
+        }
+        rgba
+    }
+
+    #[test]
+    fn mask_mips_keep_base_coverage() {
+        let base = leaf_mask(256);
+        let target = alpha_coverage(&base, 0.5);
+        assert!((0.1..0.9).contains(&target), "fixture coverage {target}");
+        let plain = generate_mip_chain(256, 256, &base, RenderTextureColorSpace::Srgb);
+        let mut preserved = plain.clone();
+        preserve_alpha_coverage(&base, &mut preserved, 0.5);
+        for (plain_level, level) in plain.iter().zip(&preserved) {
+            if level.width_px < 8 {
+                break;
+            }
+            let coverage = alpha_coverage(&level.rgba8, 0.5);
+            assert!(
+                (coverage - target).abs() <= 0.02,
+                "{}px: coverage {coverage:.4} vs base {target:.4}",
+                level.width_px
+            );
+            let colour = |rgba: &[u8]| rgba.chunks_exact(4).map(|t| [t[0], t[1], t[2]]).collect::<Vec<_>>();
+            assert_eq!(colour(&plain_level.rgba8), colour(&level.rgba8));
+        }
+    }
+
+    #[test]
+    fn box_filtered_mask_mips_lose_coverage() {
+        // The defect the rescale exists for: without it, a thin-feature mask
+        // drops below the cutoff at distance.
+        let base = leaf_mask(256);
+        let target = alpha_coverage(&base, 0.5);
+        let plain = generate_mip_chain(256, 256, &base, RenderTextureColorSpace::Srgb);
+        let worst = plain
+            .iter()
+            .filter(|level| level.width_px >= 8)
+            .map(|level| (alpha_coverage(&level.rgba8, 0.5) - target).abs())
+            .fold(0.0, f64::max);
+        assert!(worst > 0.02, "fixture does not exercise coverage loss ({worst:.4})");
+    }
+
+    #[test]
+    fn mask_cutoffs_follow_mask_base_colour_only() {
+        let materials: Vec<Value> = serde_json::from_str(
+            r#"[
+                {"alphaMode": "MASK", "alphaCutoff": 0.4, "pbrMetallicRoughness": {"baseColorTexture": {"index": 2}}},
+                {"alphaMode": "OPAQUE", "pbrMetallicRoughness": {"baseColorTexture": {"index": 3}}},
+                {"alphaMode": "MASK", "pbrMetallicRoughness": {"baseColorTexture": {"index": 5}}, "normalTexture": {"index": 6}}
+            ]"#,
+        )
+        .unwrap();
+        let mut findings = Vec::new();
+        let cutoffs = mask_coverage_cutoffs(&materials, &mut findings);
+        assert!(findings.is_empty());
+        assert_eq!(cutoffs.into_iter().collect::<Vec<_>>(), vec![(2, 0.4), (5, 0.5)]);
+
+        let conflicting: Vec<Value> = serde_json::from_str(
+            r#"[
+                {"alphaMode": "MASK", "alphaCutoff": 0.4, "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}}},
+                {"alphaMode": "MASK", "alphaCutoff": 0.6, "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}}}
+            ]"#,
+        )
+        .unwrap();
+        mask_coverage_cutoffs(&conflicting, &mut findings);
+        assert_eq!(findings.len(), 1);
+    }
 }

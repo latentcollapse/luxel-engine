@@ -426,6 +426,8 @@ pub fn build_terrain_layer_set(
             clearcoat: 0.0,
             clearcoat_roughness: 0.5,
             alpha_mode: AlphaMode::Opaque,
+            alpha_cutoff: None,
+            double_sided: None,
             texture_ids: vec![albedo.texture_id.clone()],
             normal_texture_id: Some(normal.texture_id.clone()),
             roughness_texture_id: Some(roughness.texture_id.clone()),

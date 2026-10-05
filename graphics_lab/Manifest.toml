@@ -409,9 +409,7 @@ version = "1.0.0+0"
 
 [[deps.Lava]]
 deps = ["AcceleratedKernels", "Adapt", "Atomix", "GLFW", "GPUArrays", "GPUArraysCore", "GPUCompiler", "GeometryBasics", "KernelAbstractions", "LLVM", "LinearAlgebra", "PrecompileTools", "Raycore", "SPIRV_LLVM_Backend_jll", "SPIRV_Tools_jll", "Serialization", "StaticArrays", "UnsafeAtomics", "Vulkan"]
-git-tree-sha1 = "795df8f1fb847d261f4da4d944448c4d96683862"
-repo-rev = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
-repo-url = "https://github.com/SimonDanisch/Lava.jl"
+path = "vendor/Lava"
 uuid = "3a680b1f-cb25-4bee-9cf7-bc880b76dc8c"
 version = "0.1.0"
 

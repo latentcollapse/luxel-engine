@@ -43,6 +43,7 @@ fn package() -> RenderAssetPackage {
             metallic: 0.1,
             roughness: 0.65,
             alpha_mode: RenderAlphaMode::Opaque,
+            alpha_cutoff: None,
             double_sided: false,
             base_color_texture_id: Some("albedo".into()),
             metallic_roughness_texture_id: None,

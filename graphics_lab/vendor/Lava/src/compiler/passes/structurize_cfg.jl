@@ -1,0 +1,570 @@
+# LLVM pass: CFG structurization for Vulkan SPIR-V compliance.
+#
+# Ported from Abacus compilation.jl (fixup_structured_cfg!, isolate_shared_merge_targets!,
+# insert_cfg_trampoline!).
+#
+# Vulkan requires structured control flow (no irreducible loops, single-entry/single-exit
+# regions). Complex Julia code (CartesianIndices, bounds checking, error paths) generates
+# CFGs that violate this. The standard LLVM pass sequence handles most cases:
+#   LowerSwitch -> UnifyFunctionExitNodes -> FixIrreducible -> StructurizeCFG
+#
+# However, StructurizeCFG needs pre-processing: when a block is the target of multiple
+# conditional branches from different nesting levels, StructurizeCFG can produce wrong
+# back-edge conditions (loop exits after 1 iteration). This pass inserts trampoline blocks
+# to give each construct its own unique merge target, analogous to clspv's
+# FixupStructuredCFGPass / isolateContinue().
+#
+# Pass pipeline order (assembled in compilation.jl):
+#   SimplifyCFG -> fixup_structured_cfg! -> LowerSwitch -> UnifyFunctionExitNodes
+#   -> FixIrreducible -> StructurizeCFG -> InstCombine
+
+"""
+    fixup_structured_cfg!(mod::LLVM.Module)
+
+Pre-StructurizeCFG fixup pass, analogous to clspv's `FixupStructuredCFGPass`.
+
+Detects blocks that are the successor of multiple conditional branches from different
+nesting levels and inserts trampoline blocks so each construct gets its own unique
+merge target. Without this, StructurizeCFG can produce incorrect back-edge conditions
+causing loops to exit after a single iteration.
+"""
+function fixup_structured_cfg!(mod::LLVM.Module)
+    for f in LLVM.functions(mod)
+        isempty(LLVM.blocks(f)) && continue
+        isolate_shared_merge_targets!(f)
+    end
+end
+
+"""
+    merge_equivalent_loop_phis!(mod::LLVM.Module)
+
+Merge phi nodes in the same block that have identical incoming value/predecessor
+pairs. StructurizeCFGPass frequently duplicates loop-carried phis (e.g., hits
+accumulator, induction variable) when a loop contains a `continue` statement
+that creates an "early" back-edge bypassing the loop tail. The duplicates trace
+the same underlying value but reach the header via different intermediate
+phi/block chains, and LLVM's own value-numbering doesn't eliminate them because
+the chains themselves look structurally distinct.
+
+This pass runs a GVN-style fixed-point merge: two phis in the same block are
+treated as equivalent if, for every predecessor edge, their operands are either
+the same LLVM value or already proven equivalent in a previous round. Merging
+collapses both phi SSA names to a single value, which prevents SPIR-V emission
+from producing two loop-header phis that pick up the increment on different
+back-edges — the source of the walk-with-`continue` miscompile.
+"""
+function merge_equivalent_loop_phis!(mod::LLVM.Module)
+    merged = 0
+    for f in LLVM.functions(mod)
+        isempty(LLVM.blocks(f)) && continue
+        while true
+            changed = false
+            for bb in LLVM.blocks(f)
+                phis = LLVM.PHIInst[]
+                for inst in LLVM.instructions(bb)
+                    inst isa LLVM.PHIInst && push!(phis, inst)
+                end
+                length(phis) >= 2 || continue
+                # Pairwise equivalence check
+                for i in 1:length(phis), j in (i+1):length(phis)
+                    a = phis[i]; b = phis[j]
+                    LLVM.value_type(a) == LLVM.value_type(b) || continue
+                    ai = collect(LLVM.incoming(a))
+                    bi = collect(LLVM.incoming(b))
+                    length(ai) == length(bi) || continue
+                    amap = Dict{LLVM.BasicBlock, LLVM.Value}(blk => val for (val, blk) in ai)
+                    bmap = Dict{LLVM.BasicBlock, LLVM.Value}(blk => val for (val, blk) in bi)
+                    keys(amap) == keys(bmap) || continue
+                    ok = true
+                    for bb_pred in keys(amap)
+                        av = amap[bb_pred]; bv = bmap[bb_pred]
+                        av == bv && continue
+                        (av.ref == b.ref && bv.ref == a.ref) && continue
+                        (av.ref == a.ref && bv.ref == b.ref) && continue
+                        # Allow: one is the other phi (self-equivalence via rewrite)
+                        (av.ref == b.ref) && continue
+                        (bv.ref == a.ref) && continue
+                        ok = false; break
+                    end
+                    ok || continue
+                    LLVM.replace_uses!(b, a)
+                    LLVM.API.LLVMInstructionEraseFromParent(b.ref)
+                    merged += 1
+                    changed = true
+                    break
+                end
+                changed && break
+            end
+            changed || break
+        end
+    end
+    return merged
+end
+
+"""
+    replace_undef_phi_operands_with_constants!(mod::LLVM.Module)
+
+For every phi node, replace `undef` / `poison` operands of scalar integer/float
+types with LLVM constants (int 0, float 0.0, bool false). Applies after
+StructurizeCFG, which inserts `undef` as the "don't-care" value on predecessors
+that reach the phi via guard-controlled paths that are semantically never taken.
+
+Why: SPIR-V's OpUndef "may yield a different bit pattern per consumption"
+(RADV interprets this literally), which breaks the guard phis StructurizeCFG
+relies on — the guard bool becomes non-deterministic and the "unreachable" undef
+path executes for real, feeding garbage to downstream uses. Deterministic zero
+constants dominate all predecessors (they're LLVM global constants), preserve
+SSA, and match what LLVM's own freeze-then-propagate would produce.
+
+Pointer-typed phi operands are left as undef; SPIR-V's OpConstantNull is
+forbidden on PhysicalStorageBuffer, and the SPIR-V emitter has a dedicated
+workaround that materializes an `OpConvertUToPtr` from ulong_0 in the
+predecessor block (see emit.jl's deferred-phi handling).
+"""
+function replace_undef_phi_operands_with_constants!(mod::LLVM.Module)
+    replaced = 0
+    for f in LLVM.functions(mod)
+        isempty(LLVM.blocks(f)) && continue
+        for bb in LLVM.blocks(f)
+            phis = LLVM.PHIInst[]
+            for inst in LLVM.instructions(bb)
+                inst isa LLVM.PHIInst && push!(phis, inst)
+            end
+            for phi in phis
+                ty = LLVM.value_type(phi)
+                # Only rewrite scalar types where LLVM.null produces a constant
+                # that the SPIR-V emitter accepts. Pointer types are handled in
+                # emit.jl via OpConvertUToPtr.
+                ty isa LLVM.IntegerType || ty isa LLVM.LLVMFloat ||
+                    ty isa LLVM.LLVMDouble || ty isa LLVM.LLVMHalf || continue
+                incoming_list = [(v, b) for (v, b) in LLVM.incoming(phi)]
+                any(v -> v isa LLVM.UndefValue || v isa LLVM.PoisonValue,
+                    (v for (v, _) in incoming_list)) || continue
+                zero = LLVM.null(ty)
+                builder = LLVM.IRBuilder()
+                LLVM.position!(builder, phi)
+                new_phi = LLVM.phi!(builder, ty)
+                new_incoming = Tuple{LLVM.Value, LLVM.BasicBlock}[]
+                for (v, b) in incoming_list
+                    new_v = (v isa LLVM.UndefValue || v isa LLVM.PoisonValue) ? zero : v
+                    push!(new_incoming, (new_v, b))
+                end
+                LLVM.append!(LLVM.incoming(new_phi), new_incoming)
+                LLVM.replace_uses!(phi, new_phi)
+                LLVM.API.LLVMInstructionEraseFromParent(phi.ref)
+                replaced += 1
+                LLVM.dispose(builder)
+            end
+        end
+    end
+    return replaced
+end
+
+"""
+    isolate_shared_merge_targets!(f::LLVM.Function)
+
+Find blocks that are successors of multiple conditional branches and insert
+trampolines for all but the first source. This ensures each structured construct
+has a unique merge target for SPIR-V's OpSelectionMerge/OpLoopMerge.
+"""
+function isolate_shared_merge_targets!(f::LLVM.Function)
+    # Build map: target_block -> [source_blocks that conditionally branch to it]
+    cond_sources = Dict{LLVM.BasicBlock, Vector{LLVM.BasicBlock}}()
+    for bb in LLVM.blocks(f)
+        term = LLVM.terminator(bb)
+        term isa LLVM.BrInst || continue
+        LLVM.isconditional(term) || continue
+        for succ in LLVM.successors(term)
+            # Skip self-loops (loop back-edges). These are handled correctly by
+            # the SPIR-V backend as OpLoopMerge, not OpSelectionMerge. Including
+            # them creates dead trampoline blocks that break PHI node invariants.
+            succ == bb && continue
+            sources = get!(cond_sources, succ, LLVM.BasicBlock[])
+            # Avoid counting the same source twice (both branches to same target)
+            bb in sources || push!(sources, bb)
+        end
+    end
+
+    for (target, sources) in cond_sources
+        length(sources) <= 1 && continue
+
+        # Keep the first source unchanged, redirect all others through trampolines.
+        # The first source (in block order) keeps the direct edge; later ones get
+        # trampolines. This matches clspv's isolateContinue() strategy.
+        for src in sources[2:end]
+            insert_cfg_trampoline!(f, src, target)
+        end
+    end
+end
+
+"""
+    insert_cfg_trampoline!(f, src, target)
+
+Isolate `src`'s control-flow construct from `target` by routing every edge
+from "inside `src`'s construct" into `target` through a fresh trampoline
+block. "Inside `src`'s construct" = every block reachable from `src` without
+crossing `target`.
+
+Used by `isolate_shared_merge_targets!` (pre-structurize; multiple
+conditional-branch headers sharing a merge target) and by
+`fixup_continue_merge_conflicts!` (post-structurize; continue targets also
+acting as selection merges). Mirrors clspv's `isolateContinue()`.
+
+Thin wrapper over `insert_edge_trampoline!`: we just enumerate the
+"inside-of-src and branches-to-target" block set and hand it off.
+"""
+function insert_cfg_trampoline!(f::LLVM.Function, src::LLVM.BasicBlock,
+                                  target::LLVM.BasicBlock)
+    inside = Set{LLVM.BasicBlock}()
+    worklist = LLVM.BasicBlock[src]
+    while !isempty(worklist)
+        bb = pop!(worklist)
+        bb in inside && continue
+        bb == target && continue
+        push!(inside, bb)
+        term = LLVM.terminator(bb)
+        for succ in LLVM.successors(term)
+            push!(worklist, succ)
+        end
+    end
+
+    inside_branchers = [bb for bb in inside
+                         if any(==(target), LLVM.successors(LLVM.terminator(bb)))]
+    isempty(inside_branchers) && return
+    insert_edge_trampoline!(f, inside_branchers, target; name = "cfg_fixup")
+    return
+end
+
+# ── `loop-rotate`: tried, measured, NOT added ────────────────────────────────
+#
+# The obvious suspect for the barrier hazard in `test_shared_index_division.jl`
+# was that this pipeline never rotates loops, where AMD's — which the sequence
+# below otherwise mirrors — gets rotation from the general optimisation pipeline
+# long before structurization. A top-tested `while` was structurizing into a loop
+# whose header branches to the *continue target* to exit; a counted `for`, which
+# Julia already lowers rotated, did not, and only the `while` lost workgroup
+# memory across its barrier.
+#
+# Adding it is three lines — it is a loop pass, so it needs the
+# `function(loop(loop-rotate))` nesting rather than a bare `LLVM.run!`:
+#
+#     @dispose pb = LLVM.NewPMPassBuilder() begin
+#         LLVM.add!(pb, LLVM.NewPMFunctionPassManager()) do fpm
+#             LLVM.add!(fpm, LLVM.NewPMLoopPassManager()) do lpm
+#                 LLVM.add!(lpm, LLVM.LoopRotatePass())
+#             end
+#         end
+#         LLVM.run!(pb, mod)
+#     end
+#
+# **It works and it does not help.** The `while` loop's header does come out with
+# an unconditional `OpBranch` into the body afterwards — the rotation happened —
+# and the shared block is still corrupted exactly as before. The GEMM measured
+# 1.53x against the register-blocked kernel with it and 1.52x without, i.e. a
+# wash. So the loop shape is not the mechanism, and a transform pass in a
+# structurization pipeline with no benefit is a mysterious regression waiting to
+# happen. Left out, recorded here so it is not re-derived.
+
+"""
+    run_structurize_cfg_pipeline!(mod::LLVM.Module)
+
+Run the full CFG structurization pipeline required for Vulkan SPIR-V.
+
+This is the standard LLVM pass sequence used by AMD's GPU compiler, with our
+pre-StructurizeCFG fixup pass inserted:
+
+1. SimplifyCFG - merges nested conditionals sharing exit blocks
+2. fixup_structured_cfg! - trampoline insertion for shared merge targets
+3. LowerSwitch - converts switch to if-else chains (SPIR-V OpSwitch has limitations)
+4. UnifyFunctionExitNodes - ensures single return point (required by StructurizeCFG)
+5. FixIrreducible - converts irreducible loops to reducible ones
+6. LoopSimplify - creates dedicated exit blocks for nested loops, preventing
+   StructurizeCFG from producing constant `br i1 true` on inner loop back-edges
+   when inner loops have multi-level exits (exits bypassing outer loops)
+7. StructurizeCFG - the critical pass: converts arbitrary CFG to structured control flow
+8. InstCombine - cleanup bitcasts from StructurizeCFG's reg2mem patterns
+   NOTE: Do NOT run SimplifyCFG after StructurizeCFG -- it destroys structured flow!
+9. fixup_post_structurize! - insert trampolines for continue-target merge conflicts
+
+Deliberately NOT here: `loop-rotate`. See the note above it.
+
+# Bisecting this pipeline
+
+`LAVA_SKIP_PASSES` takes a comma-separated list of the names below and drops
+those passes. It exists because the pipeline's failure mode is a *miscompile* —
+a kernel that compiles, validates and computes the wrong answer — and the only
+handle on one of those is to find which pass introduces it. Dropping a pass will
+often produce invalid SPIR-V instead, and that is a useful answer too: it says
+the pass is load-bearing rather than implicated.
+
+    LAVA_SKIP_PASSES=InstCombine julia --project=. …
+
+Not a `Ref`, so nothing has to be threaded through or reset, and a stale setting
+cannot survive a process. Read per call; the cost is one `get(ENV, …)` per
+kernel compile.
+"""
+function skip_pass(name::AbstractString)
+    skips = get(ENV, "LAVA_SKIP_PASSES", "")
+    isempty(skips) && return false
+    name in split(skips, ',')
+end
+
+function run_structurize_cfg_pipeline!(mod::LLVM.Module)
+    checkpoint = PhaseTimer("        [structurize] ")
+    run_or_skip(name, f) = skip_pass(name) ? nothing : (f(); checkpoint(name))
+    run_or_skip("SimplifyCFG",            () -> LLVM.run!(LLVM.SimplifyCFGPass(), mod))
+    run_or_skip("fixup_structured_cfg",   () -> fixup_structured_cfg!(mod))
+    run_or_skip("LowerSwitch",            () -> LLVM.run!(LLVM.LowerSwitchPass(), mod))
+    run_or_skip("UnifyFunctionExitNodes", () -> LLVM.run!(LLVM.UnifyFunctionExitNodesPass(), mod))
+    run_or_skip("FixIrreducible",         () -> LLVM.run!(LLVM.FixIrreduciblePass(), mod))
+    run_or_skip("LoopSimplify",           () -> LLVM.run!(LLVM.LoopSimplifyPass(), mod))
+    run_or_skip("StructurizeCFG",         () -> LLVM.run!(LLVM.StructurizeCFGPass(), mod))
+    run_or_skip("InstCombine",            () -> LLVM.run!(LLVM.InstCombinePass(), mod))
+    # Collapse duplicated loop-carried phis that StructurizeCFG introduces for
+    # loops containing `continue`. See merge_equivalent_loop_phis! docstring.
+    run_or_skip("merge_equivalent_loop_phis", () -> merge_equivalent_loop_phis!(mod))
+    # Replace `undef` scalar phi operands introduced by StructurizeCFG with
+    # constant zeros so the SPIR-V emitter doesn't emit OpUndef — which RADV
+    # interprets non-deterministically and causes guard phis to pick the wrong
+    # branch. See replace_undef_phi_operands_with_constants! docstring.
+    run_or_skip("replace_undef_phi_operands",
+                () -> replace_undef_phi_operands_with_constants!(mod))
+    run_or_skip("fixup_post_structurize", () -> fixup_post_structurize!(mod))
+end
+
+# Post-StructurizeCFG fixup: insert trampolines for SPIR-V continue-construct conflicts.
+#
+# SPIR-V separates loops into "loop construct" and "continue construct". A selection
+# header in the loop construct cannot have its merge block in the continue construct.
+# StructurizeCFG often produces patterns where a conditional branch inside a loop
+# converges at the loop's continue target. This pass inserts trampoline blocks between
+# such selections and the continue target.
+function fixup_post_structurize!(mod::LLVM.Module)
+    for f in LLVM.functions(mod)
+        isempty(LLVM.blocks(f)) && continue
+        fixup_continue_merge_conflicts!(f)
+    end
+end
+
+# Find loops and insert trampolines where selections merge at the continue target.
+function fixup_continue_merge_conflicts!(f::LLVM.Function)
+    blocks = collect(LLVM.blocks(f))
+    length(blocks) <= 1 && return
+
+    # Compute RPO
+    rpo = compute_rpo(f)
+    rpo_pos = Dict{LLVM.BasicBlock, Int}()
+    for (i, bb) in enumerate(rpo)
+        rpo_pos[bb] = i
+    end
+
+    # Find loops: back-edges A→B where B appears before A in RPO
+    loops = Dict{LLVM.BasicBlock, Tuple{LLVM.BasicBlock, LLVM.BasicBlock}}()
+    for bb in blocks
+        term = LLVM.terminator(bb)
+        bb_pos = get(rpo_pos, bb, 0)
+        for succ in LLVM.successors(term)
+            succ_pos = get(rpo_pos, succ, 0)
+            if succ_pos > 0 && succ_pos <= bb_pos
+                header = succ
+                latch = bb
+                haskey(loops, header) && continue
+                # Find merge: first successor of a loop block that's outside the loop
+                merge_bb = find_loop_merge_llvm(header, latch, rpo, rpo_pos)
+                loops[header] = (merge_bb, latch)
+            end
+        end
+    end
+
+    isempty(loops) && return
+
+    # Collect all continue targets
+    continue_targets = Set{LLVM.BasicBlock}()
+    for (_, (_, latch)) in loops
+        push!(continue_targets, latch)
+    end
+
+    # Fix 1: For each conditional branch inside a loop, check if both branches
+    # converge at a continue target. If so, insert a trampoline.
+    for _iter1 in 1:100  # Safety limit to prevent infinite loops
+        found = false
+        for bb in collect(LLVM.blocks(f))
+            term = LLVM.terminator(bb)
+            term isa LLVM.BrInst || continue
+            LLVM.isconditional(term) || continue
+
+            # Skip loop headers (their branches are handled by OpLoopMerge)
+            haskey(loops, bb) && continue
+
+            succs = LLVM.successors(term)
+            true_bb = succs[1]
+            false_bb = succs[2]
+
+            # Check if both branches converge at a continue target.
+            merge_bb = find_shallow_convergence(true_bb, false_bb)
+            merge_bb === nothing && continue
+
+            if merge_bb in continue_targets
+                insert_cfg_trampoline!(f, bb, merge_bb)
+                found = true
+                break  # Restart since CFG changed
+            end
+        end
+        found || break
+    end
+
+    # Fix 2: For each inner loop whose merge block IS a continue target of an
+    # outer loop, insert a trampoline between the inner loop exit and the
+    # continue target. The inner loop's conditional exit branches to either the
+    # merge (= continue target) or the loop body. We redirect the merge-bound
+    # branch through a trampoline.
+    # Recompute loops since CFG may have changed.
+    rpo = compute_rpo(f)
+    rpo_pos = Dict{LLVM.BasicBlock, Int}()
+    for (i, bb) in enumerate(rpo)
+        rpo_pos[bb] = i
+    end
+    loops = Dict{LLVM.BasicBlock, Tuple{LLVM.BasicBlock, LLVM.BasicBlock}}()
+    for bb in collect(LLVM.blocks(f))
+        term = LLVM.terminator(bb)
+        bb_pos = get(rpo_pos, bb, 0)
+        for succ in LLVM.successors(term)
+            succ_pos = get(rpo_pos, succ, 0)
+            if succ_pos > 0 && succ_pos <= bb_pos
+                header = succ
+                latch = bb
+                haskey(loops, header) && continue
+                merge_bb = find_loop_merge_llvm(header, latch, rpo, rpo_pos)
+                loops[header] = (merge_bb, latch)
+            end
+        end
+    end
+
+    continue_targets = Set{LLVM.BasicBlock}()
+    for (_, (_, latch)) in loops
+        push!(continue_targets, latch)
+    end
+
+    for _iter2 in 1:100  # Safety limit to prevent infinite loops
+        found2 = false
+        for (header, (merge_bb, latch)) in loops
+            if merge_bb in continue_targets
+                insert_cfg_trampoline!(f, header, merge_bb)
+                found2 = true
+                break
+            end
+        end
+
+        found2 || break
+
+        # Recompute since CFG changed
+        begin
+            # Recompute RPO and loops
+            rpo = compute_rpo(f)
+            rpo_pos = Dict{LLVM.BasicBlock, Int}()
+            for (i, bb) in enumerate(rpo)
+                rpo_pos[bb] = i
+            end
+            loops = Dict{LLVM.BasicBlock, Tuple{LLVM.BasicBlock, LLVM.BasicBlock}}()
+            for bb in collect(LLVM.blocks(f))
+                term = LLVM.terminator(bb)
+                bb_pos = get(rpo_pos, bb, 0)
+                for succ in LLVM.successors(term)
+                    succ_pos = get(rpo_pos, succ, 0)
+                    if succ_pos > 0 && succ_pos <= bb_pos
+                        h = succ
+                        l = bb
+                        haskey(loops, h) && continue
+                        m = find_loop_merge_llvm(h, l, rpo, rpo_pos)
+                        loops[h] = (m, l)
+                    end
+                end
+            end
+            continue_targets = Set{LLVM.BasicBlock}()
+            for (_, (_, l)) in loops
+                push!(continue_targets, l)
+            end
+        end
+    end
+end
+
+# Find the merge block for a loop (first successor outside the loop body).
+function find_loop_merge_llvm(header::LLVM.BasicBlock, latch::LLVM.BasicBlock,
+                                rpo::Vector{LLVM.BasicBlock},
+                                rpo_pos::Dict{LLVM.BasicBlock, Int})
+    header_pos = rpo_pos[header]
+    latch_pos = rpo_pos[latch]
+
+    loop_blocks = Set{LLVM.BasicBlock}()
+    for bb in rpo
+        pos = rpo_pos[bb]
+        if pos >= header_pos && pos <= latch_pos
+            push!(loop_blocks, bb)
+        end
+    end
+
+    # Find first successor (in RPO order) that's outside the loop
+    for bb in rpo
+        bb in loop_blocks || continue
+        term = LLVM.terminator(bb)
+        for succ in LLVM.successors(term)
+            if !(succ in loop_blocks)
+                return succ
+            end
+        end
+    end
+
+    return latch  # Fallback
+end
+
+# Find where two branches converge (shallow: checks direct + 1-hop successors).
+# After StructurizeCFG, convergence is always at most 1-2 hops away.
+function find_shallow_convergence(a::LLVM.BasicBlock, b::LLVM.BasicBlock)
+    # Case 1: a is a direct successor of b (if-else with inverted condition)
+    b_succs = Set(LLVM.successors(LLVM.terminator(b)))
+    if a in b_succs
+        return a
+    end
+
+    # Case 2: b is a direct successor of a (if-then pattern)
+    a_succs = Set(LLVM.successors(LLVM.terminator(a)))
+    if b in a_succs
+        return b
+    end
+
+    # Case 3: common direct successor
+    common = intersect(a_succs, b_succs)
+    if !isempty(common)
+        return first(common)
+    end
+
+    # Case 4: a leads to X, b leads to X (1-hop from each)
+    a_2hop = Set{LLVM.BasicBlock}()
+    for s in a_succs
+        for ss in LLVM.successors(LLVM.terminator(s))
+            push!(a_2hop, ss)
+        end
+    end
+    b_2hop = Set{LLVM.BasicBlock}()
+    for s in b_succs
+        for ss in LLVM.successors(LLVM.terminator(s))
+            push!(b_2hop, ss)
+        end
+    end
+
+    # Check if b (or b's successors) reach something in a's direct successors
+    common2 = intersect(a_succs, b_2hop)
+    if !isempty(common2)
+        return first(common2)
+    end
+    common3 = intersect(a_2hop, b_succs)
+    if !isempty(common3)
+        return first(common3)
+    end
+    common4 = intersect(a_2hop, b_2hop)
+    if !isempty(common4)
+        return first(common4)
+    end
+
+    return nothing
+end

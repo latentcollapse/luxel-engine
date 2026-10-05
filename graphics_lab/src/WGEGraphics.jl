@@ -108,7 +108,22 @@ struct MaterialPacket
     normal_scale::Float32
     occlusion_strength::Float32
     emissive_factor_rgb::NTuple{3,Float32}
+    # CONVERGE-2 N-6. Present exactly for `:mask`; `nothing` otherwise.
+    alpha_cutoff::Union{Nothing,Float32}
+    # Absent on the wire means single-sided; the wire never carries `false`.
+    double_sided::Bool
 end
+
+# Packets written before N-6 carry neither field.
+MaterialPacket(
+    material_id, base_color_rgba, metallic, roughness, clearcoat, clearcoat_roughness,
+    alpha_mode, texture_ids, normal_texture_id, roughness_texture_id, occlusion_texture_id,
+    emissive_texture_id, normal_scale, occlusion_strength, emissive_factor_rgb,
+) = MaterialPacket(
+    material_id, base_color_rgba, metallic, roughness, clearcoat, clearcoat_roughness,
+    alpha_mode, texture_ids, normal_texture_id, roughness_texture_id, occlusion_texture_id,
+    emissive_texture_id, normal_scale, occlusion_strength, emissive_factor_rgb, nothing, false,
+)
 
 struct TextureMipPacket
     width_px::UInt32
@@ -1064,6 +1079,8 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
             "roughness_texture_id",
             "occlusion_texture_id",
             "emissive_texture_id",
+            "alpha_cutoff",
+            "double_sided",
         )
         _exact_keys(object, required_keys, optional_keys, "material")
         id = _string(object["material_id"], "material.material_id")
@@ -1107,6 +1124,21 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
         emissive_factor_rgb = _tuple(object["emissive_factor_rgb"], Val(3), "material.emissive_factor_rgb")
         all(channel -> 0.0f0 <= channel <= 16.0f0, emissive_factor_rgb) ||
             throw(ProtocolError("malformed_packet", "material emissive factor is outside [0, 16]"))
+        alpha_cutoff = haskey(object, "alpha_cutoff") ?
+            _finite_float32(object["alpha_cutoff"], "material.alpha_cutoff") : nothing
+        if alpha_mode == :mask
+            alpha_cutoff !== nothing && 0.0f0 < alpha_cutoff < 1.0f0 ||
+                throw(ProtocolError("malformed_packet", "mask material requires an alpha cutoff in (0, 1)"))
+        else
+            alpha_cutoff === nothing ||
+                throw(ProtocolError("malformed_packet", "alpha cutoff is only valid on mask materials"))
+        end
+        double_sided = false
+        if haskey(object, "double_sided")
+            object["double_sided"] === true ||
+                throw(ProtocolError("malformed_packet", "single-sided materials omit double_sided"))
+            double_sided = true
+        end
         push!(
             materials,
             MaterialPacket(
@@ -1125,6 +1157,8 @@ function _parse_materials(value::JSON3.Array)::Vector{MaterialPacket}
                 normal_scale,
                 occlusion_strength,
                 emissive_factor_rgb,
+                alpha_cutoff,
+                double_sided,
             ),
         )
     end

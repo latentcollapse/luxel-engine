@@ -221,7 +221,7 @@ struct IblResources
     sampler::Lava.LavaSampler
 end
 
-mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,TXP,DP,TSP,MSP,RP}
+mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,MCP,TXP,DP,TSP,MSP,MCSP,RP}
     context::C
     queue::Q
     probe_pipeline::PP
@@ -231,10 +231,12 @@ mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,TXP,DP,TSP,MSP,RP}
     terrain_layered_pipeline::TLP
     overlay_pipeline::OP
     mesh_pipeline::MP
+    mesh_cutout_pipeline::MCP
     texture_pipeline::TXP
     depth_pipeline::DP
     terrain_shadow_pipeline::TSP
     mesh_shadow_pipeline::MSP
+    mesh_cutout_shadow_pipeline::MCSP
     resolve_pipeline::RP
     framebuffers::Dict{Tuple{Int,Int,Bool,Symbol},Lava.LavaFramebuffer}
     terrain_resources::Union{Nothing,TerrainResources}
@@ -247,6 +249,7 @@ mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,TXP,DP,TSP,MSP,RP}
     texture_resources::Union{Nothing,TextureProbeResources}
     material_texture_resources::Dict{Tuple{String,String,SamplerSpec},MaterialTextureResources}
     material_textures::Dict{Tuple{String,String},MaterialTextures}
+    cutout_shadow_bindings::Dict{Tuple{String,String},Lava.TextureBindings}
     surface_samplers::Dict{Tuple{SamplerSpec,UInt32},Lava.LavaSampler}
     ibl_resources::Union{Nothing,IblResources}
     upload_bytes::UInt64
@@ -266,6 +269,8 @@ mutable struct LavaBackend{C,Q,PP,SP,SVP,TP,TLP,OP,MP,TXP,DP,TSP,MSP,RP}
     terrain_shadow_compiled::Bool
     mesh_shadow_compiled::Bool
     resolve_compiled::Bool
+    mesh_cutout_compiled::Bool
+    mesh_cutout_shadow_compiled::Bool
 end
 
 const BACKEND_REF = Ref{Union{Nothing,LavaBackend}}(nothing)
@@ -1822,6 +1827,53 @@ function _mesh_shadow_vertex(
     return nothing
 end
 
+function _mesh_cutout_shadow_vertex(
+    positions::Lava.LavaDeviceArray{Vec4f,1},
+    uvs::Lava.LavaDeviceArray{Vec2f,1},
+    translations::Lava.LavaDeviceArray{Vec4f,1},
+    rotations::Lava.LavaDeviceArray{Vec4f,1},
+    scales::Lava.LavaDeviceArray{Vec4f,1},
+    light_position::Vec4f,
+    light_right::Vec4f,
+    light_up::Vec4f,
+    light_forward::Vec4f,
+    light_projection::Vec4f,
+    light_mode::Float32,
+    coverage::Vec4f,
+)
+    _mesh_shadow_vertex(
+        positions,
+        translations,
+        rotations,
+        scales,
+        light_position,
+        light_right,
+        light_up,
+        light_forward,
+        light_projection,
+        light_mode,
+    )
+    Lava.gfx_output(1, uvs[Lava.vertex_index()])
+    Lava.gfx_output(2, coverage)
+    return nothing
+end
+
+"""Shadow caster for alpha-mask materials. `coverage` is (base alpha, texture
+enabled, cutoff, 0); the albedo is the only texture bound (binding 0)."""
+function _shadow_cutout_fragment()
+    light_space = Lava.gfx_input(Vec4f, 0)
+    uv = Lava.gfx_input(Vec2f, 1)
+    coverage = Lava.gfx_input(Vec4f, 2)
+    weight = clamp(coverage[2], 0.0f0, 1.0f0)
+    alpha = coverage[1] * (1.0f0 - weight + weight * Lava.sample_texture_2d(UInt32(0), uv[1], uv[2], UInt32(3)))
+    if alpha < coverage[3]
+        Lava.discard()
+    end
+    depth = clamp(light_space[3], 0.0f0, 1.0f0)
+    Lava.gfx_output(0, Vec4f(depth, depth, depth, 1.0f0))
+    return nothing
+end
+
 function _shadow_fragment()
     light_space = Lava.gfx_input(Vec4f, 0)
     depth = clamp(light_space[3], 0.0f0, 1.0f0)
@@ -2308,8 +2360,42 @@ function _resolve_fragment()
 end
 
 function _terrain_fragment()
-    base_color = Lava.gfx_input(Vec4f, 0)
+    lit = _surface_fragment_color(Lava.gfx_input(Vec4f, 1), Lava.gfx_input(Vec4f, 16))
+    Lava.gfx_output(0, lit)
+    return nothing
+end
+
+"""Alpha-mask and double-sided meshes (CONVERGE-2 N-6).
+
+`surface_parameters[3]` is the alpha cutoff (0 for a double-sided opaque
+material, which never discards) and `[4]` is 1 for double-sided. Back faces of a
+double-sided material are shaded with the normal and the whole tangent frame
+negated (glTF: "back-facing normals are reversed"). The discard comes after every
+texture sample, so implicit-LOD derivatives are taken while the whole quad is
+still running.
+"""
+function _mesh_cutout_fragment()
+    surface_parameters = Lava.gfx_input(Vec4f, 15)
     normal = Lava.gfx_input(Vec4f, 1)
+    tangent = Lava.gfx_input(Vec4f, 16)
+    back = surface_parameters[4] > 0.5f0 && !Lava.front_facing()
+    facing_normal = back ? Vec4f(-normal[1], -normal[2], -normal[3], -normal[4]) : normal
+    facing_tangent = back ? Vec4f(-tangent[1], -tangent[2], -tangent[3], -tangent[4]) : tangent
+    lit = _surface_fragment_color(facing_normal, facing_tangent)
+    coverage = _textured_color(
+        Lava.gfx_input(Vec4f, 0),
+        Lava.gfx_input(Vec2f, 3),
+        Lava.gfx_input(Vec4f, 7)[4],
+    )[4]
+    if coverage < surface_parameters[3]
+        Lava.discard()
+    end
+    Lava.gfx_output(0, lit)
+    return nothing
+end
+
+@inline function _surface_fragment_color(normal::Vec4f, tangent::Vec4f)::Vec4f
+    base_color = Lava.gfx_input(Vec4f, 0)
     world_position = Lava.gfx_input(Vec4f, 2)
     uv = Lava.gfx_input(Vec2f, 3)
     material = Lava.gfx_input(Vec4f, 4)
@@ -2324,7 +2410,6 @@ function _terrain_fragment()
     light_space = Lava.gfx_input(Vec4f, 13)
     material_emissive = Lava.gfx_input(Vec4f, 14)
     surface_parameters = Lava.gfx_input(Vec4f, 15)
-    tangent = Lava.gfx_input(Vec4f, 16)
     shadow = Lava.gfx_input(Vec4f, 17)
     sky_parameters = Lava.gfx_input(Vec4f, 18)
     atmosphere_parameters = Lava.gfx_input(Vec4f, 19)
@@ -2389,8 +2474,7 @@ function _terrain_fragment()
         sky_parameters,
         atmosphere_parameters,
     )
-    Lava.gfx_output(0, fogged_color)
-    return nothing
+    return fogged_color
 end
 
 # Layered-terrain far-field resampling (see `_terrain_layered_fragment`). A
@@ -2668,6 +2752,14 @@ function backend()::LavaBackend
             cull=NoCull(),
             depth=DepthLess(),
         )
+        mesh_cutout_pipeline = GraphicsPipeline(
+            ;
+            vertex=_mesh_vertex,
+            fragment=_mesh_cutout_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthLess(),
+        )
         texture_pipeline = GraphicsPipeline(
             ;
             vertex=_texture_probe_vertex,
@@ -2700,6 +2792,14 @@ function backend()::LavaBackend
             cull=NoCull(),
             depth=DepthLess(),
         )
+        mesh_cutout_shadow_pipeline = GraphicsPipeline(
+            ;
+            vertex=_mesh_cutout_shadow_vertex,
+            fragment=_shadow_cutout_fragment,
+            blend=Opaque(),
+            cull=NoCull(),
+            depth=DepthLess(),
+        )
         resolve_pipeline = GraphicsPipeline(
             ;
             vertex=_resolve_vertex,
@@ -2718,10 +2818,12 @@ function backend()::LavaBackend
             terrain_layered_pipeline,
             overlay_pipeline,
             mesh_pipeline,
+            mesh_cutout_pipeline,
             texture_pipeline,
             depth_pipeline,
             terrain_shadow_pipeline,
             mesh_shadow_pipeline,
+            mesh_cutout_shadow_pipeline,
             resolve_pipeline,
             Dict{Tuple{Int,Int,Bool,Symbol},Lava.LavaFramebuffer}(),
             nothing,
@@ -2734,6 +2836,7 @@ function backend()::LavaBackend
             nothing,
             Dict{Tuple{String,String,SamplerSpec},MaterialTextureResources}(),
             Dict{Tuple{String,String},MaterialTextures}(),
+            Dict{Tuple{String,String},Lava.TextureBindings}(),
             Dict{Tuple{SamplerSpec,UInt32},Lava.LavaSampler}(),
             nothing,
             UInt64(0),
@@ -2741,6 +2844,8 @@ function backend()::LavaBackend
             UInt64(0),
             UInt64(0),
             _gpu_timestamp_capable(context),
+            false,
+            false,
             false,
             false,
             false,
@@ -4163,10 +4268,19 @@ function _environment_lighting(environment::WGEGraphics.EnvironmentPacket)::Envi
 end
 
 function _validate_material(material::WGEGraphics.MaterialPacket)::Nothing
-    material.alpha_mode == :opaque ||
-        throw(AdapterError("unsupported_material", "native path requires opaque materials"))
+    material.alpha_mode == :blend && throw(
+        AdapterError(
+            "unsupported_material",
+            "native path does not blend; condition BLEND materials to MASK with an explicit cutoff",
+        ),
+    )
     return nothing
 end
+
+"""True when a material needs the cutout pipelines (mask or double-sided).
+Opaque single-sided materials keep the historical pipelines, byte-identical."""
+_material_cutout(material::WGEGraphics.MaterialPacket)::Bool =
+    material.alpha_mode == :mask || material.double_sided
 
 function _material(packet::WGEGraphics.GraphicsScenePacket, material_id::String)::WGEGraphics.MaterialPacket
     for material in packet.materials
@@ -4693,7 +4807,12 @@ function _mesh_resources!(
             Vec4f(material.metallic, material.roughness, material.normal_scale, material.occlusion_strength) for _ in batch_instances
         ]
         surface_parameters = Vec4f[
-            Vec4f(material.clearcoat, material.clearcoat_roughness, 0.0f0, 0.0f0) for _ in batch_instances
+            Vec4f(
+                material.clearcoat,
+                material.clearcoat_roughness,
+                material.alpha_cutoff === nothing ? 0.0f0 : material.alpha_cutoff,
+                material.double_sided ? 1.0f0 : 0.0f0,
+            ) for _ in batch_instances
         ]
         emissive_parameters = Vec4f[
             Vec4f(material.emissive_factor_rgb..., 1.0f0) for _ in batch_instances
@@ -4792,6 +4911,11 @@ function _render_shadow_map!(
     end
     if mesh_resources !== nothing
         for batch in mesh_resources.batches
+            material = _material(packet, batch.material_id)
+            if material.alpha_mode == :mask
+                _draw_cutout_shadow!(state, packet, target, frame, batch, material)
+                continue
+            end
             draw!(
                 state.queue,
                 state.mesh_shadow_pipeline,
@@ -4821,6 +4945,62 @@ function _render_shadow_map!(
         end
     end
     _transition_color_to_sampled!(state, shadow.framebuffer)
+    return nothing
+end
+
+function _cutout_shadow_bindings!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    material::WGEGraphics.MaterialPacket,
+)::Lava.TextureBindings
+    cache = state.cutout_shadow_bindings
+    any(key -> first(key) != packet.content_sha256, keys(cache)) && empty!(cache)
+    return get!(cache, (packet.content_sha256, material.material_id)) do
+        textures = _material_textures!(state, packet, material)
+        sampler = _surface_sampler!(state, _surface_sampler_spec(packet.render_policy, :mesh), textures.max_sampler_lod)
+        Lava.bind_textures([textures.albedo_texture * sampler])
+    end
+end
+
+function _draw_cutout_shadow!(
+    state::LavaBackend,
+    packet::WGEGraphics.GraphicsScenePacket,
+    target,
+    frame::CameraFrame,
+    batch::MeshBatchResources,
+    material::WGEGraphics.MaterialPacket,
+)
+    bindings = _cutout_shadow_bindings!(state, packet, material)
+    draw!(
+        state.queue,
+        state.mesh_cutout_shadow_pipeline,
+        target,
+        batch.vertex_count;
+        args=(
+            batch.positions,
+            batch.uvs,
+            batch.translations,
+            batch.rotations,
+            batch.scales,
+            frame.position,
+            frame.right,
+            frame.up,
+            frame.forward,
+            frame.projection,
+            frame.mode,
+            Vec4f(material.base_color_rgba[4], _material_texture_enabled(material), material.alpha_cutoff, 0.0f0),
+        ),
+        instances=batch.instance_count,
+        descriptor_set_layout=bindings.layout,
+        descriptor_set=bindings.set,
+        clear_color=nothing,
+        depth_clear=nothing,
+    )
+    state.draw_calls += 1
+    if !state.mesh_cutout_shadow_compiled
+        state.mesh_cutout_shadow_compiled = true
+        state.pipeline_compilations += 1
+    end
     return nothing
 end
 
@@ -5253,9 +5433,10 @@ function _record_scene_passes!(
                 _surface_sampler_spec(packet.render_policy, :mesh),
             )
             batch_texture_enabled = _material_texture_enabled(batch_material)
+            cutout = _material_cutout(batch_material)
             draw!(
                 state.queue,
-                state.mesh_pipeline,
+                cutout ? state.mesh_cutout_pipeline : state.mesh_pipeline,
                 scene_target,
                 batch.vertex_count;
                 args=(
@@ -5304,7 +5485,10 @@ function _record_scene_passes!(
                 depth_clear=nothing,
             )
             state.draw_calls += 1
-            if !state.mesh_compiled
+            if cutout && !state.mesh_cutout_compiled
+                state.mesh_cutout_compiled = true
+                state.pipeline_compilations += 1
+            elseif !cutout && !state.mesh_compiled
                 state.mesh_compiled = true
                 state.pipeline_compilations += 1
             end

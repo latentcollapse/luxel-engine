@@ -799,7 +799,7 @@ fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
             .collect::<Result<_, _>>()?
     };
     let all_views = CalibrationView::all();
-    let views: Vec<CalibrationView> = if view_filter == "all" {
+    let mut views: Vec<CalibrationView> = if view_filter == "all" {
         all_views
     } else {
         let tokens: Vec<&str> = view_filter.split(',').map(str::trim).collect();
@@ -831,6 +831,12 @@ fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
     }
     let projection = project_render_asset(package).map_err(|error| error.to_string())?;
     validate_graphics_asset_projection(&projection).map_err(|error| error.to_string())?;
+    // `all` means every view the GLB supports: the foliage views only when it
+    // carries foliage (calibration2). Named, they render on any set, which is
+    // how calibration1 provides the silhouette baseline.
+    if view_filter == "all" && !package.meshes.iter().any(|mesh| mesh.mesh_id.starts_with("foliage_")) {
+        views.retain(|view| !matches!(view, CalibrationView::Foliage(_)));
+    }
 
     let world = build_from_layout_path(&layout, &julia, &terrain_lab).map_err(|error| error.to_string())?;
     let reference = lower_reference_world(&world.world).map_err(|error| error.to_string())?;
