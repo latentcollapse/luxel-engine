@@ -276,7 +276,7 @@ after_metrics:
   gate_claim: "claim asserted only where a same-(class,N) pin exists; wind N>1 labeled unavailable"
   measured: "wind and rot cost the same at every N (blob/N=128: rot 196.8 vs wind 201.6 us attributed; N=1: 1.54 vs 2.04 us)"
 tests:
-  - "P0-G4d/G4f substitute coverage line in TetLab/results/spiral_p0_vulkan_compute.csv"
+  - "P0-G4d/G4f substitute coverage line in tet-lab/results/spiral-p0-vulkan-compute.csv"
 decision: keep
 ```
 
@@ -329,7 +329,7 @@ before_metrics:
 after_metrics:
   corner_wall: "3 runs spanning 39.10-214.56 us on soa+packed; other two layouts stable at ~208-214 us"
 tests:
-  - "sust_min_us/sust_max_us columns in TetLab/results/spiral_p0_vulkan_compute.csv"
+  - "sust_min_us/sust_max_us columns in tet-lab/results/spiral-p0-vulkan-compute.csv"
 decision: keep
 ```
 

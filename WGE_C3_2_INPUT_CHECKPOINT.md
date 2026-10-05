@@ -79,8 +79,8 @@ collapse when follow-up 1 lands.
 
 1. **Reboot.** Grok is archiving `/tmp` into a developer archive on disk; nothing
    load-bearing lives in `/tmp` for this work (all evidence above is in-repo).
-2. **TetLab/TetCage integration sprint** (user-authorized; TetLab still quarantined at
-   `graphics_lab/TetLab/`). Entry point: `TETCAGE_FUSION_HEADROOM.md` (graph-fused
+2. **tet-lab/TetCage integration sprint** (user-authorized; TetLab still quarantined at
+   `graphics_lab/tet-lab/`). Entry point: `tetcage-fusion-headroom.md` (graph-fused
    skin ≈ 9–11 µs, ~2.9× instance capacity) and the A/B doctrine in
    `WGE_PRE_DEMO_AUDIT.md` §2 DEFERRED — ARENA BASELINE vs ARENA+TetCageRT, publish
    metrics, spend the savings on density.

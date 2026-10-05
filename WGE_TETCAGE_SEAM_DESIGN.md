@@ -1,6 +1,6 @@
 # WGE TetCageRT Seam Design — Native Graphics Packet Integration
 
-Status: **design registered 2026-10-02; extends `TetLab/TETCAGERT_INTEGRATION_CONTRACT.md` (DESIGN ONLY) to the measured technology**
+Status: **design registered 2026-10-02; extends `tet-lab/tetcage-rt-integration-contract.md` (DESIGN ONLY) to the measured technology**
 Authority chain: WGE Rust kernel owns identity/policy/evidence; Julia/Lava execute; TetLab remains a quarantined research lane until Phase 1 lands behind the capability flag.
 
 ## 0. What changed since the integration contract was written
@@ -24,7 +24,7 @@ living world affordable — and it deliberately leaves the RT facet's memory the
 
 ## 1. The decisive constraint: no CUDA in the shipped game
 
-TetLab's pinned kernels are CUDA.jl (`TetLab/gpu/Project.toml`). WGE's product
+TetLab's pinned kernels are CUDA.jl (`tet-lab/gpu/Project.toml`). WGE's product
 envelope is Rust/Julia/Lava-Vulkan; a shipped arena demo that requires the CUDA
 runtime violates the doctrine and the "it just works when the window comes up"
 requirement. Therefore:
@@ -94,7 +94,7 @@ degenerate tets, unnormalized weights, envelope violation, reuse-count lies.
 
 ```text
 P-1  Post-reboot health: GPU kernel compiles again (F-I.4 clears). Run Spiral I v4
-     (budget one debug cycle) -> results/spiral_i_comparators.csv fills the
+     (budget one debug cycle) -> results/spiral-i-comparators.csv fills the
      crossover surface. GATE: negative envelope known per (class, N); policy
      defaults for direct_field vs cage_parametric are measured, not guessed.
      STATUS 2026-10-02: health PASS (F-I.4 closed by the 04:49 reboot; probe
@@ -103,19 +103,19 @@ P-1  Post-reboot health: GPU kernel compiles again (F-I.4 clears). Run Spiral I 
      of the never-executed N>1 territory also caught B_direct's vertex binding
      and an unwrapped identity comprehension); v5 fix → rerun ×2 ALL GATES PASS
      (HI-G4 stable columns byte-identical, sha16 `4a9144326ebed3cb`).
-     GATE MET: crossover surface filled in results/spiral_i_comparators.csv;
+     GATE MET: crossover surface filled in results/spiral-i-comparators.csv;
      HI-P1 amended at the (blob, N=128) corner (B_direct stops winning there
      in BOTH runs); policy defaults now measured. Full crossovers + honest
-     negative envelope in TetLab/TETCAGE_GOAL2_FINAL.md §4/§9.
+     negative envelope in tet-lab/tetcage-goal2-final.md §4/§9.
 P0   Vulkan compute parity port (spiral-G methodology): deform!/reconstruct! as one
      GLSL compute dispatch; oracle = TetDeform CPU path; gate max ≤ 0.5 px vs the
      analytic model, expected ~ulp; CSV evidence + sha pin. GATE: parity + wall
      within 2× of the CUDA pins on the same classes, or explain why.
-     >>> CLOSED 2026-10-02. Driver `graphics_lab/TetLab/vk/spiral_p0_compute.jl`;
-     canonical CSV `TetLab/results/spiral_p0_vulkan_compute.csv` sha16
+     >>> CLOSED 2026-10-02. Driver `graphics_lab/tet-lab/vk/spiral_p0_compute.jl`;
+     canonical CSV `tet-lab/results/spiral-p0-vulkan-compute.csv` sha16
      `84915b3c1c3932df` (run b); P0-G5 stable parity block (168 rows) sha256
      `5160e8a3e21e018c…` byte-identical x2; logs + run-A CSV archived at
-     `TetLab/logs/spiral_p0_run_{a,b}.{log,csv}`. ALL GATES PASS.
+     `tet-lab/logs/spiral-p0-run-{a,b}.{log,csv}`. ALL GATES PASS.
      PARITY: 7 classes x 2 families x N in {1,8,32,128} x 3 layouts = 168 rows.
      Worst object error 9.703e-07 (conifer) against a per-class bound of
      4·eps(f32)·maxcoord; worst screen error 1.09e-04 px against the 0.5 px
@@ -126,7 +126,7 @@ P0   Vulkan compute parity port (spiral-G methodology): deform!/reconstruct! as 
      the registered DRAM-write-bound corner already carrying a 2.04x CUDA
      band (55.08/112.21 us). G0-G6 all GREEN, including the negative control
      (cage_y quarter shifted 0.52 → obj 1.080 vs bound 5.700e-07: the gates
-     detect). Twelve defects registered in TETCAGERT_FAILURE_REGISTER.md
+     detect). Twelve defects registered in tetcage-rt-failure-register.md
      (F-P0.1…F-P0.9); no arithmetic defect in any of them.
      The 2.9× headroom claim was RE-MEASURED, not assumed, per §1: the shipped
      planar+packed form is at or under the CUDA pins wherever a same-cell pin
@@ -214,7 +214,7 @@ P3   ARENA A/B: ARENA BASELINE vs ARENA+TetCageRT, identical content/gameplay;
 - F-I.4 (reboot-dependent compile failure) and the untested-on-hardware Spiral I v4
   driver were the two known risks entering P-1; both are CLOSED (reboot;
   v5 fix, ×2 gates GREEN) and registered in
-  `TETCAGERT_FAILURE_REGISTER.md`. Entering P0: the measured wall ordering at
+  `tetcage-rt-failure-register.md`. Entering P0: the measured wall ordering at
   the (blob, N=128) corner is machine-state-sensitive across runs (2-run
   spread in the CSV's machine-state columns) — capacity claims at that
   working set carry that band.

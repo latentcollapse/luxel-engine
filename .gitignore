@@ -42,5 +42,5 @@ graphify-out/
 graphics_lab/TetLab.zip
 
 # TetCage primary source: 15 MB, fetched from the URL pinned (with SHA-256)
-# in graphics_lab/TetLab/references/TETCAGE_PAPER_PIN.md.
-graphics_lab/TetLab/references/*.pdf
+# in graphics_lab/tet-lab/references/tetcage-paper-pin.md.
+graphics_lab/tet-lab/references/*.pdf
