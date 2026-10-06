@@ -131,6 +131,21 @@ a source artifact pinned by pixel digest.
 - **The backdrop prefix** (`backdrop-`) is shared by Rust, the Julia
   reflection pass and the Python metric; a test pins all three.
 
+### Fix: the backdrop surfaced through the world (2026-10-06, `ab-converge4-n3d`)
+
+Review: "what that dark olive grey surface is back there ... is that other
+water?" It was the backdrop: a ray-cast test found it in front of the world
+terrain on 10.7% of the wide frame, 40-200 m out, up to 8.3 m above the
+world's ground. The seat was cleared by a constant 40 m sink, and the Gaea
+valley floor rises 50 m+ within 700 m of the seat. The builder now caps the
+field at `clear_depth_m` (30 m) below the seat floor inside the clear radius
+and asserts it; `the_real_backdrop_stays_under_the_world_terrain` checks the
+lowered packet. Poke-through after the fix: 0.00% in all three views.
+Evidence in `artifacts/parity/review-converge4-n3d/`, including a
+render-versus-predicted-shadow overlay (every foreground shadow has a caster)
+and the projection proving the two "unexplained" spots are crown shadows of
+trees at the frame edge.
+
 ### Measured (`artifacts/parity/ab-converge4-n3c`)
 
 | Gate | Result |

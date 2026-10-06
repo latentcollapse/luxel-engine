@@ -272,3 +272,42 @@ fn l1a_shadow_map_size_is_optional_bounded_and_absent_by_default() {
         assert_eq!(fit.map_size_px, None, "{earlier:?} keeps the historical 512 map");
     }
 }
+
+#[test]
+#[ignore = "needs the built kit2 and backdrop1 (tools/build_kit.py, tools/build_backdrop.py)"]
+fn the_real_backdrop_stays_under_the_world_terrain() {
+    // Review 2026-10-06: a flat dark olive surface behind the hill was the
+    // backdrop surfacing through the world (a constant 40 m sink against a
+    // valley floor that rose 50 m). The builder now caps the field; this
+    // checks the lowered packet, where it matters.
+    use wge_native_graphics_contract::still_water::TerrainSurface;
+    let kit = kit2();
+    let backdrop = load_backdrop_set(&repo_root().join("tools/backdrop/backdrop1.lock.json"), &repo_root())
+        .expect("built backdrop1 loads (run tools/build_backdrop.py --set backdrop1)");
+    let packet = lower(ParityPolicyCandidate::Converge4, Some(&kit), Some(&backdrop), Campaign2View::Wide)
+        .expect("converge4 lowers");
+    let body = &packet.body;
+    let surface = TerrainSurface::of(&body.terrain).expect("terrain surface");
+    let (half_w, half_l) = (body.terrain.width_m * 0.5, body.terrain.length_m * 0.5);
+    let mut checked = 0;
+    for instance in body.instances.iter().filter(|i| i.instance_id.starts_with(BACKDROP_INSTANCE_PREFIX)) {
+        let mesh = body.meshes.iter().find(|m| m.mesh_id == instance.mesh_id).expect("mesh");
+        let seat_y = instance.transform.translation_xyz_m[1];
+        for p in &mesh.positions_m {
+            if p[0].abs() > half_w || p[2].abs() > half_l {
+                continue;
+            }
+            checked += 1;
+            let ground = surface.height(p[0], p[2]);
+            assert!(
+                p[1] + seat_y < ground - 1.0,
+                "backdrop vertex at ({:.0}, {:.0}) is {:.1} m, world ground {:.1} m",
+                p[0],
+                p[2],
+                p[1] + seat_y,
+                ground
+            );
+        }
+    }
+    assert!(checked > 100, "the world footprint must contain backdrop vertices to check ({checked})");
+}

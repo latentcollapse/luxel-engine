@@ -24,7 +24,7 @@
   "edge_margin": 0.06,
   "clear_radius_m": 700,
   "rise_radius_m": 2500,
-  "sink_m": 40,
   "treeline_m": 1000,
-  "snowline_m": 1800
+  "snowline_m": 1800,
+  "clear_depth_m": 30
 }

@@ -18,9 +18,12 @@ build that differs from the lock is refused unless run with `--pin`.
 THE FIELD IS GENERATED WITHOUT REFERENCE TO THE PLAY SPACE (docs/integrations/gaea-programme.md
 section 1), THEN THE PLAY SPACE IS SEATED IN IT. The seat is a point of the
 field, chosen in the spec; it becomes the mesh origin, at the field's own
-ground height there. Around the seat the field is pushed down (`sink_m` inside
-`clear_radius_m`, easing back to natural height by `rise_radius_m`) so it can
-never surface inside the near world, whose own extension and ridge hide it.
+ground height there. Around the seat the field is capped at `clear_depth_m`
+below the seat floor inside `clear_radius_m`, easing back to natural height by
+`rise_radius_m`, so it can never surface inside the near world, whose own
+extension and ridge hide it. A cap, not a constant sink: the first backdrop
+sank by a fixed 40 m, the valley floor rose 50 m within 700 m of the seat, and
+the field came up through the world's hills (converge4 review, 2026-10-06).
 The field's outer margin eases down to the seat floor so no cut edge stands
 against the sky.
 
@@ -188,9 +191,14 @@ def seated_heights(spec: dict, height01: np.ndarray) -> tuple[np.ndarray, np.nda
     edge_distance = np.minimum.outer(np.minimum(u, 1.0 - u), np.minimum(u, 1.0 - u))
     edge_weight = smoothstep(0.0, margin, edge_distance)
     relative = relative * edge_weight
-    # Seat clearing: sunk under the near world, easing back out.
-    sink = float(spec["sink_m"]) * (1.0 - smoothstep(float(spec["clear_radius_m"]), float(spec["rise_radius_m"]), radius))
-    seated = relative - sink
+    # Seat clearing: inside the clear radius the field is capped well below the
+    # seat floor, then eases back to its own shape by the rise radius.
+    cap = -abs(float(spec["clear_depth_m"]))
+    w = 1.0 - smoothstep(float(spec["clear_radius_m"]), float(spec["rise_radius_m"]), radius)
+    seated = relative + (np.minimum(relative, cap) - relative) * w
+    inside = radius <= float(spec["clear_radius_m"])
+    if inside.any() and seated[inside].max() > cap + 1e-3:
+        raise SystemExit(f"seat clearing failed: field reaches {seated[inside].max():.1f} m inside the clear radius")
     facts = {
         "cell_m": round(cell, 4),
         "seat_floor_m": round(floor, 3),
