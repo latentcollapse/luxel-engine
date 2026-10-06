@@ -495,7 +495,7 @@ fn a_full_policy_survives_serde_round_trip_and_revalidates() {
             filter_radius_milli: 2400,
         }),
         mesh_surface: Some(MeshSurfacePolicy { wrap_repeat: true }),
-        shadow_fit: Some(ShadowFitPolicy { view_distance_m: 60 }),
+        shadow_fit: Some(ShadowFitPolicy { view_distance_m: 60, map_size_px: None }),
         sky: Some(SkyPolicy {
             sun_disc_radius_milli_deg: 650,
             sun_disc_gain_bp: 120_000,

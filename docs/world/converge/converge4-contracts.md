@@ -161,7 +161,18 @@ needs it.
 
 ## 2. L-1 — Cascaded shadows
 
-> **Status: NEXT.** Review (2026-10-06): "the shadows aren't all consistent
+> **L-1a IMPLEMENTED (2026-10-06), awaiting review** (`artifacts/parity/review-converge4-l1a/`).
+> The view-fitted shadow map gains an optional `map_size_px` (512/1024/2048/4096;
+> absent = the historical 512, not serialised, byte-identical) and converge4
+> fits 4096 texels over 250 m instead of 512 over 60 m
+> (`CONVERGE4_SHADOW_FIT`). Every tree in the frame is now inside the shadowed
+> slice, so distant trees shadow the meadow in the same direction as near ones;
+> near-field density goes from ~4.4 to ~8.4 texels/m. The audit's L-1 gate
+> (>= 20 texels/m within 30 m) is not met by one map: that is L-1b (cascades),
+> to be built if the review still sees soft near shadows. Shader cost: the
+> texel size moved from a literal 1/512 to the shadow uniform's third slot.
+>
+> Review (2026-10-06): "the shadows aren't all consistent
 > with the light source." To be verified numerically before changing anything.
 > `tools/shadow_measure.py` (crown-shadow darkening by camera distance) was
 > tried on n3c and is inconclusive: 48 of 2825 trees give clean samples on

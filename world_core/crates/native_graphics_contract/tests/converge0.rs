@@ -94,11 +94,11 @@ fn converge0_policy_carries_its_axes_and_full_json_is_unchanged() {
 
 #[test]
 fn new_policy_axes_are_bounded() {
-    let mut fit = RenderPolicy { shadow_fit: Some(ShadowFitPolicy { view_distance_m: 7 }), ..RenderPolicy::default() };
+    let mut fit = RenderPolicy { shadow_fit: Some(ShadowFitPolicy { view_distance_m: 7, map_size_px: None }), ..RenderPolicy::default() };
     assert!(validate_render_policy(&fit).is_err());
-    fit.shadow_fit = Some(ShadowFitPolicy { view_distance_m: 2001 });
+    fit.shadow_fit = Some(ShadowFitPolicy { view_distance_m: 2001, map_size_px: None });
     assert!(validate_render_policy(&fit).is_err());
-    fit.shadow_fit = Some(ShadowFitPolicy { view_distance_m: 60 });
+    fit.shadow_fit = Some(ShadowFitPolicy { view_distance_m: 60, map_size_px: None });
     assert!(validate_render_policy(&fit).is_ok());
     let sky = |radius, disc, glow| RenderPolicy {
         sky: Some(SkyPolicy { sun_disc_radius_milli_deg: radius, sun_disc_gain_bp: disc, sun_glow_gain_bp: glow, model: None }),

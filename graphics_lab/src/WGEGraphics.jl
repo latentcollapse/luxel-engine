@@ -341,7 +341,13 @@ MeshSurfacePolicy() = MeshSurfacePolicy(false)
 # selects the historical whole-world fit, a different code path.
 struct ShadowFitPolicy
     view_distance_m::Int32
+    # CONVERGE-4 L-1a: shadow map side; an absent key is the historical 512.
+    map_size_px::Int32
 end
+
+ShadowFitPolicy(view_distance_m::Integer) = ShadowFitPolicy(view_distance_m, 512)
+
+const SHADOW_MAP_SIZES_PX = (512, 1024, 2048, 4096)
 
 # View-direction sky. Absence selects the historical screen-space sky draw.
 # `model` is :gradient (CONVERGE-0, also what an absent `model` key means) or
@@ -806,8 +812,11 @@ function _parse_render_policy(body::JSON3.Object)::RenderPolicy
     end
     shadow_fit = if haskey(value, "shadow_fit")
         f = _object(value["shadow_fit"], "render_policy.shadow_fit")
-        _exact_keys(f, ("view_distance_m",), "render_policy.shadow_fit")
-        ShadowFitPolicy(_bounded_bp(f["view_distance_m"], "shadow_fit.view_distance_m", 8, 2000))
+        _exact_keys(f, ("view_distance_m",), ("map_size_px",), "render_policy.shadow_fit")
+        size = haskey(f, "map_size_px") ? _bounded_bp(f["map_size_px"], "shadow_fit.map_size_px", 512, 4096) : 512
+        size in SHADOW_MAP_SIZES_PX || throw(ProtocolError(
+            "malformed_packet", "render_policy.shadow_fit.map_size_px $(size) is not one of $(SHADOW_MAP_SIZES_PX)"))
+        ShadowFitPolicy(_bounded_bp(f["view_distance_m"], "shadow_fit.view_distance_m", 8, 2000), size)
     else
         nothing
     end

@@ -1983,7 +1983,7 @@ shadow. `min_visibility = 1 - darkness`.
 Taps are unrolled because Lava's shader JIT cannot lower a loop with a
 constant bound (see `_apply_bloom`).
 """
-@inline function _shadow_visibility(light_space::Vec4f, darkness::Float32, filter_texel::Float32)::Float32
+@inline function _shadow_visibility(light_space::Vec4f, darkness::Float32, filter_texel::Float32, map_size::Float32)::Float32
     inside =
         -1.0f0 <= light_space[1] <= 1.0f0 &&
             -1.0f0 <= light_space[2] <= 1.0f0 &&
@@ -1991,7 +1991,7 @@ constant bound (see `_apply_bloom`).
     inside || return 1.0f0
     uv_x = light_space[1] * 0.5f0 + 0.5f0
     uv_y = light_space[2] * 0.5f0 + 0.5f0
-    texel = filter_texel / 512.0f0
+    texel = filter_texel / map_size
     bias = 0.0035f0
     depth = light_space[3] - bias
     visible = 0.0f0
@@ -2005,7 +2005,7 @@ end
 
 """Lower the shadow policy into the flat wire form the scene shaders take.
 
-`(darkness, filter_texel, _, _)`. The defaults 7500/1000 reproduce the historical
+`(darkness, filter_texel, shadow map side, _)`. The defaults 7500/1000 reproduce the historical
 `0.25 + 0.75 * pcf` with a one-texel tap spread EXACTLY — `1.0f0 - 0.75f0` is
 0.25f0 in Float32 and `filter_texel = 1.0f0` gives `1.0f0/512.0f0` — so an
 absent policy is byte-identical, which is the whole premise of this channel.
@@ -2015,7 +2015,9 @@ absent policy is byte-identical, which is the whole premise of this channel.
     return Vec4f(
         _bp(shadow.darkness_bp),
         Float32(shadow.filter_radius_milli) / 1000.0f0,
-        0.0f0,
+        # The shadow map side (L-1a). 512 when the fit is absent or does not
+        # say, and `x / 512.0f0` is the historical arithmetic exactly.
+        Float32(_shadow_map_size(policy)),
         0.0f0,
     )
 end
@@ -2566,7 +2568,7 @@ end
         material[2],
         surface_parameters[1],
         surface_parameters[2],
-        _shadow_visibility(light_space, shadow[1], shadow[2]),
+        _shadow_visibility(light_space, shadow[1], shadow[2], shadow[3]),
         view_direction,
         roughness_sample,
         occlusion_sample,
@@ -2844,7 +2846,7 @@ end
         1.0f0,
         surface_parameters[1],
         surface_parameters[2],
-        _shadow_visibility(light_space, shadow[1], shadow[2]),
+        _shadow_visibility(light_space, shadow[1], shadow[2], shadow[3]),
         view_direction,
         roughness_sample,
         occlusion_sample,
@@ -2881,7 +2883,7 @@ end
                 1.0f0,
                 surface_parameters[1],
                 surface_parameters[2],
-                _shadow_visibility(light_space, shadow[1], shadow[2]),
+                _shadow_visibility(light_space, shadow[1], shadow[2], shadow[3]),
                 view_direction,
                 roughness_sample,
                 0.0f0,
@@ -5266,6 +5268,10 @@ end
 
 const SHADOW_MAP_SIZE = 512
 
+"""Shadow map side: the fit's `map_size_px` (CONVERGE-4 L-1a), else the historical 512."""
+_shadow_map_size(policy::WGEGraphics.RenderPolicy)::Int =
+    policy.shadow_fit === nothing ? SHADOW_MAP_SIZE : Int(policy.shadow_fit.map_size_px)
+
 function _render_shadow_map!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
@@ -5403,7 +5409,8 @@ function _shadow_resources!(
     current = state.shadow_resources
     current !== nothing && current.cache_key == packet.content_sha256 && return current
     light_frame = _shadow_frame(packet, lighting)
-    framebuffer = _framebuffer!(state, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE, true, :shadow)
+    size = _shadow_map_size(packet.render_policy)
+    framebuffer = _framebuffer!(state, size, size, true, :shadow)
     texture = _framebuffer_texture(framebuffer, state)
     # Linear depth filtering softens the bounded PCF taps without changing
     # the typed shadow contract. Nearest filtering made hero-scale shadows

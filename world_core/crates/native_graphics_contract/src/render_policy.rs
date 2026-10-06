@@ -284,7 +284,15 @@ impl Default for MeshSurfacePolicy {
 pub struct ShadowFitPolicy {
     /// Far edge of the shadowed frustum slice, whole metres. Range [8, 2000].
     pub view_distance_m: i32,
+    /// Shadow map side in texels (CONVERGE-4 L-1a). One of 512, 1024, 2048,
+    /// 4096. ABSENT is the historical 512, byte-identical: the field is not
+    /// serialised when absent, so existing packets keep their digests.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map_size_px: Option<i32>,
 }
+
+/// Shadow map sides the renderer allocates.
+pub const SHADOW_MAP_SIZES_PX: [i32; 4] = [512, 1024, 2048, 4096];
 
 /// View-direction sky.
 ///
@@ -610,6 +618,13 @@ pub fn validate_render_policy(policy: &RenderPolicy) -> Result<(), GraphicsContr
     }
     if let Some(fit) = &policy.shadow_fit {
         bounded_i32(fit.view_distance_m, 8, 2000, "shadow_fit.view_distance_m")?;
+        if let Some(size) = fit.map_size_px
+            && !SHADOW_MAP_SIZES_PX.contains(&size)
+        {
+            return Err(GraphicsContractError::malformed(format!(
+                "render_policy.shadow_fit.map_size_px {size} is not one of {SHADOW_MAP_SIZES_PX:?}"
+            )));
+        }
     }
     if let Some(sky) = &policy.sky {
         bounded_i32(

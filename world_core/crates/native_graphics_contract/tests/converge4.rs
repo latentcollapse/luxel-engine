@@ -14,7 +14,7 @@ use wge_native_graphics_contract::backdrop::{
 use wge_native_graphics_contract::{
     BackdropSet, BufferPayload, Campaign2Inputs, Campaign2View, GraphicsScenePacket, KitSet, ParityContent,
     ParityPolicyCandidate, canonical_json, load_backdrop_set, load_kit_set, lower_campaign2_packet_inputs,
-    sha256_prefixed, validate_scene_packet, CONVERGE4_ATMOSPHERE,
+    sha256_prefixed, validate_scene_packet, CONVERGE4_ATMOSPHERE, CONVERGE4_SHADOW_FIT,
 };
 
 #[path = "support/synthetic_layers.rs"]
@@ -73,7 +73,8 @@ fn converge4_is_converge3_policy_plus_backdrop_content() {
     let c4 = ParityPolicyCandidate::Converge4;
     let mut expected = c3.policy().expect("converge3 policy");
     expected.atmosphere = Some(CONVERGE4_ATMOSPHERE);
-    assert_eq!(c4.policy(), Some(expected), "converge4 = converge3 policy with the km-scale atmosphere");
+    expected.shadow_fit = Some(CONVERGE4_SHADOW_FIT);
+    assert_eq!(c4.policy(), Some(expected), "converge4 = converge3 policy + km-scale atmosphere + L-1a shadow fit");
     assert!(c4.uses_converge0_content() && c4.uses_kit() && c4.uses_converge3_content() && c4.uses_backdrop());
     assert!(c3.uses_converge3_content() && !c3.uses_backdrop());
     for earlier in [
@@ -228,10 +229,12 @@ fn converge4_requires_its_backdrop_and_adds_only_the_backdrop() {
         stripped.textures.retain(|t| !backdrop_textures.contains(&t.texture_id));
         assert_eq!(stripped.camera.far_plane_m, BACKDROP_FAR_PLANE_M);
         stripped.camera.far_plane_m = c3.body.camera.far_plane_m;
-        // The only policy difference is N-3's atmosphere.
+        // The only policy differences are N-3's atmosphere and L-1a's shadow fit.
         let mut c4_policy = stripped.render_policy.clone().expect("converge4 policy");
         assert_eq!(c4_policy.atmosphere, Some(CONVERGE4_ATMOSPHERE));
+        assert_eq!(c4_policy.shadow_fit, Some(CONVERGE4_SHADOW_FIT));
         c4_policy.atmosphere = c3.body.render_policy.as_ref().and_then(|p| p.atmosphere);
+        c4_policy.shadow_fit = c3.body.render_policy.as_ref().and_then(|p| p.shadow_fit);
         assert_eq!(Some(c4_policy), c3.body.render_policy);
         stripped.render_policy = c3.body.render_policy.clone();
         stripped.packet_id = c3.body.packet_id.clone();
@@ -241,5 +244,31 @@ fn converge4_requires_its_backdrop_and_adds_only_the_backdrop() {
             canonical_json(&c3.body).expect("json"),
             "{view:?}: converge4 minus its backdrop is converge3"
         );
+    }
+}
+
+#[test]
+fn l1a_shadow_map_size_is_optional_bounded_and_absent_by_default() {
+    use wge_native_graphics_contract::{RenderPolicy, ShadowFitPolicy, validate_render_policy};
+    // Absent: not serialised, so converge0..3 packets keep their bytes.
+    let legacy = ShadowFitPolicy { view_distance_m: 60, map_size_px: None };
+    assert_eq!(serde_json::to_string(&legacy).expect("json"), r#"{"view_distance_m":60}"#);
+    let parsed: ShadowFitPolicy = serde_json::from_str(r#"{"view_distance_m":60}"#).expect("parses");
+    assert_eq!(parsed, legacy);
+    for (size, ok) in [(512, true), (1024, true), (2048, true), (4096, true), (8192, false), (1000, false), (0, false)] {
+        let policy = RenderPolicy {
+            shadow_fit: Some(ShadowFitPolicy { view_distance_m: 250, map_size_px: Some(size) }),
+            ..RenderPolicy::default()
+        };
+        assert_eq!(validate_render_policy(&policy).is_ok(), ok, "map_size_px {size}");
+    }
+    for earlier in [
+        ParityPolicyCandidate::Converge0,
+        ParityPolicyCandidate::Converge1,
+        ParityPolicyCandidate::Converge2,
+        ParityPolicyCandidate::Converge3,
+    ] {
+        let fit = earlier.policy().and_then(|p| p.shadow_fit).expect("converge arms fit the shadow");
+        assert_eq!(fit.map_size_px, None, "{earlier:?} keeps the historical 512 map");
     }
 }

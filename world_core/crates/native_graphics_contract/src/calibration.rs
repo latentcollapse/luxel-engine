@@ -195,7 +195,7 @@ impl CalibrationRig {
         body.render_policy = Some(RenderPolicy {
             shadow: Some(ShadowPolicy { darkness_bp: 9600, filter_radius_milli: 2400 }),
             mesh_surface: Some(MeshSurfacePolicy { wrap_repeat: true }),
-            shadow_fit: Some(ShadowFitPolicy { view_distance_m: CALIBRATION_SHADOW_DISTANCE_M }),
+            shadow_fit: Some(ShadowFitPolicy { view_distance_m: CALIBRATION_SHADOW_DISTANCE_M, map_size_px: None }),
             sky: Some(sky),
             debug: (rig == Self::SunAlbedoGrey).then_some(DebugPolicy { albedo_override_bp: 5000 }),
             ibl: ibl.then_some(IblPolicy { enabled: true }),

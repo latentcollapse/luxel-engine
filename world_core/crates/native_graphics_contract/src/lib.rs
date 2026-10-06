@@ -4190,6 +4190,14 @@ pub const CONVERGE4_ATMOSPHERE: AtmospherePolicy = AtmospherePolicy {
     sun_scatter_gain_bp: 300,
 };
 
+/// CONVERGE-4 L-1a: one shadow map, 8x the texels, fitted 250 m out instead of
+/// 60 m. The 60 m slice left every tree beyond it unshadowed while nearer
+/// trees cast shadows, which read as shadows inconsistent with the sun
+/// (review 2026-10-06). 4096 texels over the ~490 m span of a 250 m slice is
+/// ~8.4 texels/m against ~4.4 before.
+pub const CONVERGE4_SHADOW_FIT: ShadowFitPolicy =
+    ShadowFitPolicy { view_distance_m: 250, map_size_px: Some(4096) };
+
 /// Shadow distance for the converge0 view-relative fit. 60 m covers every
 /// authored object in the wide view while keeping the 512² map at ~4 texels/m.
 pub const CONVERGE0_SHADOW_DISTANCE_M: i32 = 60;
@@ -4303,6 +4311,7 @@ impl ParityPolicyCandidate {
                     mesh_surface: Some(MeshSurfacePolicy { wrap_repeat: true }),
                     shadow_fit: Some(ShadowFitPolicy {
                         view_distance_m: CONVERGE0_SHADOW_DISTANCE_M,
+                        map_size_px: None,
                     }),
                     sky: Some(SkyPolicy {
                         sun_disc_radius_milli_deg: 650,
@@ -4330,10 +4339,15 @@ impl ParityPolicyCandidate {
                     ..converge1
                 })
             }
-            // N-3: converge3's policy with an atmosphere for a km-scale world.
+            // N-3: converge3's policy with an atmosphere for a km-scale world;
+            // L-1a: a larger, longer shadow fit.
             Self::Converge4 => {
                 let converge3 = Self::Converge3.policy().expect("Converge3 always carries a policy");
-                Some(RenderPolicy { atmosphere: Some(CONVERGE4_ATMOSPHERE), ..converge3 })
+                Some(RenderPolicy {
+                    atmosphere: Some(CONVERGE4_ATMOSPHERE),
+                    shadow_fit: Some(CONVERGE4_SHADOW_FIT),
+                    ..converge3
+                })
             }
             Self::HeroMaterials => Some(RenderPolicy::default()),
             Self::Terrain => Some(RenderPolicy {
