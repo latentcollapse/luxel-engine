@@ -172,6 +172,19 @@ needs it.
 > to be built if the review still sees soft near shadows. Shader cost: the
 > texel size moved from a literal 1/512 to the shadow uniform's third slot.
 >
+> **Bias fix (2026-10-06, `artifacts/parity/review-converge4-l1a2/`).** Review of
+> L-1a: "two shadows that are there for no reason" and "plenty of trees that
+> aren't casting shadows at all". Traced (ground point -> ray to the sun ->
+> first instance hit): the two blobs are the crown shadow of a 5 m tree at the
+> frame edge; its trunk shadow was missing. Cause: the depth bias was a fixed
+> 0.0035 of the light frustum's depth range, ~1 m at the 60 m fit but ~4.3 m
+> at 250 m, so anything within ~4 m of its receiver along the sun ray lost its
+> shadow (trunks, low crowns, rocks, ferns). L-1a now biases 0.3 m in world
+> units. The sun itself is consistent: sky disc, shading and shadow frame all
+> read the one packet light. Legacy arms keep the literal 0.0035 and 1/512 in
+> the shader: carried through the uniform they are interpolated varyings and
+> changed 6 grazing calibration frames (124/131); as literals, 131/131.
+>
 > Review (2026-10-06): "the shadows aren't all consistent
 > with the light source." To be verified numerically before changing anything.
 > `tools/shadow_measure.py` (crown-shadow darkening by camera distance) was

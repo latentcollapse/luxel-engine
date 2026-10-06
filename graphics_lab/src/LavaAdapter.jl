@@ -1983,7 +1983,7 @@ shadow. `min_visibility = 1 - darkness`.
 Taps are unrolled because Lava's shader JIT cannot lower a loop with a
 constant bound (see `_apply_bloom`).
 """
-@inline function _shadow_visibility(light_space::Vec4f, darkness::Float32, filter_texel::Float32, map_size::Float32)::Float32
+@inline function _shadow_visibility(light_space::Vec4f, darkness::Float32, filter_texel::Float32, map_size::Float32, bias::Float32)::Float32
     inside =
         -1.0f0 <= light_space[1] <= 1.0f0 &&
             -1.0f0 <= light_space[2] <= 1.0f0 &&
@@ -1991,9 +1991,12 @@ constant bound (see `_apply_bloom`).
     inside || return 1.0f0
     uv_x = light_space[1] * 0.5f0 + 0.5f0
     uv_y = light_space[2] * 0.5f0 + 0.5f0
-    texel = filter_texel / map_size
-    bias = 0.0035f0
-    depth = light_space[3] - bias
+    texel = filter_texel / (map_size > 0.0f0 ? map_size : 512.0f0)
+    # `bias` arrives as an interpolated varying, so a constant is only
+    # approximately constant per fragment. The legacy 0.0035 therefore stays a
+    # literal (slot 4 is exactly 0, which interpolates to exactly 0) and only
+    # an explicit L-1a fit supplies its metric bias through the uniform.
+    depth = light_space[3] - (bias > 0.0f0 ? bias : 0.0035f0)
     visible = 0.0f0
     visible += depth <= _shadow_depth(uv_x - texel, uv_y - texel) ? 1.0f0 : 0.0f0
     visible += depth <= _shadow_depth(uv_x + texel, uv_y - texel) ? 1.0f0 : 0.0f0
@@ -2005,20 +2008,21 @@ end
 
 """Lower the shadow policy into the flat wire form the scene shaders take.
 
-`(darkness, filter_texel, shadow map side, _)`. The defaults 7500/1000 reproduce the historical
+`(darkness, filter_texel, shadow map side, depth bias)`. The defaults 7500/1000 reproduce the historical
 `0.25 + 0.75 * pcf` with a one-texel tap spread EXACTLY — `1.0f0 - 0.75f0` is
 0.25f0 in Float32 and `filter_texel = 1.0f0` gives `1.0f0/512.0f0` — so an
 absent policy is byte-identical, which is the whole premise of this channel.
 """
-@inline function _shadow_uniform(policy::WGEGraphics.RenderPolicy)::Vec4f
+@inline function _shadow_uniform(policy::WGEGraphics.RenderPolicy, light_frame::CameraFrame)::Vec4f
     shadow = policy.shadow
     return Vec4f(
         _bp(shadow.darkness_bp),
         Float32(shadow.filter_radius_milli) / 1000.0f0,
-        # The shadow map side (L-1a). 512 when the fit is absent or does not
-        # say, and `x / 512.0f0` is the historical arithmetic exactly.
-        Float32(_shadow_map_size(policy)),
-        0.0f0,
+        # The shadow map side (L-1a), or 0 for the historical 512, which the
+        # shader keeps as a literal: a uniform-carried 512 is interpolated and
+        # only approximately 512 per fragment.
+        _shadow_map_size(policy) == SHADOW_MAP_SIZE ? 0.0f0 : Float32(_shadow_map_size(policy)),
+        _shadow_depth_bias(policy, light_frame),
     )
 end
 
@@ -2568,7 +2572,7 @@ end
         material[2],
         surface_parameters[1],
         surface_parameters[2],
-        _shadow_visibility(light_space, shadow[1], shadow[2], shadow[3]),
+        _shadow_visibility(light_space, shadow[1], shadow[2], shadow[3], shadow[4]),
         view_direction,
         roughness_sample,
         occlusion_sample,
@@ -2846,7 +2850,7 @@ end
         1.0f0,
         surface_parameters[1],
         surface_parameters[2],
-        _shadow_visibility(light_space, shadow[1], shadow[2], shadow[3]),
+        _shadow_visibility(light_space, shadow[1], shadow[2], shadow[3], shadow[4]),
         view_direction,
         roughness_sample,
         occlusion_sample,
@@ -2883,7 +2887,7 @@ end
                 1.0f0,
                 surface_parameters[1],
                 surface_parameters[2],
-                _shadow_visibility(light_space, shadow[1], shadow[2], shadow[3]),
+                _shadow_visibility(light_space, shadow[1], shadow[2], shadow[3], shadow[4]),
                 view_direction,
                 roughness_sample,
                 0.0f0,
@@ -5268,6 +5272,27 @@ end
 
 const SHADOW_MAP_SIZE = 512
 
+"""Depth bias in the shadow map's normalised depth.
+
+Historically a constant 0.0035 of the light frustum's depth range, which is
+~1 m for the 60 m view fit but ~4.3 m once L-1a fits 250 m (range ~1225 m):
+any caster closer than that to its receiver along the sun ray lost its shadow,
+so trunks vanished and crown shadows floated free of their trees (review
+2026-10-06). With an explicit `map_size_px` the bias is SHADOW_BIAS_M in
+world metres; without one this returns 0 and the shader keeps its historical
+literal, byte-identical (a uniform-carried 0.0035 is not: it is interpolated,
+and 6 grazing calibration frames changed when it was tried).
+Orthographic shadow depth is linear, `(d - near) / (far - near)`, so the
+conversion is exact."""
+const SHADOW_BIAS_M = 0.3f0
+
+function _shadow_depth_bias(policy::WGEGraphics.RenderPolicy, light_frame::CameraFrame)::Float32
+    fit = policy.shadow_fit
+    # 0 selects the shader's literal 0.0035 (see `_shadow_visibility`).
+    (fit === nothing || fit.map_size_px == SHADOW_MAP_SIZE) && return 0.0f0
+    return SHADOW_BIAS_M / (light_frame.projection[4] - light_frame.projection[3])
+end
+
 """Shadow map side: the fit's `map_size_px` (CONVERGE-4 L-1a), else the historical 512."""
 _shadow_map_size(policy::WGEGraphics.RenderPolicy)::Int =
     policy.shadow_fit === nothing ? SHADOW_MAP_SIZE : Int(policy.shadow_fit.map_size_px)
@@ -5691,7 +5716,7 @@ function _record_scene_passes!(
         _probe_gpu_capabilities(state.context);
         layered_terrain=packet.terrain.layers !== nothing,
     )
-    shadow_uniform = _shadow_uniform(packet.render_policy)
+    shadow_uniform = _shadow_uniform(packet.render_policy, shadow_resources.light_frame)
     sky_parameters = _sky_parameters(packet.render_policy, lighting, packet.environment)
     atmosphere_parameters = _atmosphere_parameters(packet.render_policy)
     surface_options = _surface_options(packet.render_policy)
