@@ -10,7 +10,7 @@ use general::{
     verify_general_receipt, verify_general_replay,
 };
 use sha2::Digest;
-use wge_gameplay_contract::general;
+use luxel_gameplay_contract::general;
 
 fn set(values: &[&str]) -> BTreeSet<GameplayTag> {
     values
@@ -812,7 +812,7 @@ fn malformed_unknown_fields_and_unsupported_versions_fail_closed() {
     assert!(serde_json::from_value::<GeneralTrace>(value).is_err());
 
     let mut trace = winning_trace();
-    trace.schema_version = "wge.gameplay-trace/v99".to_owned();
+    trace.schema_version = "luxel.gameplay-trace/v99".to_owned();
     let unsupported = run_general_replay(&test_spec(), &trace).unwrap_err();
     assert_eq!(unsupported.code, GeneralFailureCode::UnsupportedSchema);
 

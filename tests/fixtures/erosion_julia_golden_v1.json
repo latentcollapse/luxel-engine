@@ -536,5 +536,5 @@
       ]
     }
   },
-  "schema": "wge.erosion-golden/v1"
+  "schema": "luxel.erosion-golden/v1"
 }

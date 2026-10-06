@@ -4,7 +4,7 @@ use std::fs;
 use std::path::Path;
 use std::process::ExitCode;
 
-use wge_intake_repair_contract::{
+use luxel_intake_repair_contract::{
     IntakeDraft, RepairEvidenceDelta, RepairProposal, RepairProposalDraft, SemanticIntake,
     SourceBundle, SourceBundleDraft, apply_repair, normalize_intake, normalize_repair_proposal,
     parse_json, prepare_source_bundle, to_pretty_json, validate_delta_identity, validate_intake,
@@ -126,7 +126,7 @@ fn run(arguments: Vec<String>) -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage:\n  wge-intake-repair prepare-source-bundle DRAFT.json OUTPUT.json source_ref=PATH...\n  wge-intake-repair validate-source-bundle BUNDLE.json source_id=PATH...\n  wge-intake-repair normalize-intake DRAFT.json SOURCE_BUNDLE.json PROVIDER_RESPONSE OUTPUT.json source_id=PATH...\n  wge-intake-repair validate-intake INTAKE.json PROVIDER_RESPONSE source_id=PATH...\n  wge-intake-repair normalize-repair-proposal DRAFT.json OUTPUT.json\n  wge-intake-repair validate-repair-proposal PROPOSAL.json\n  wge-intake-repair apply-repair BEFORE_LAYOUT.json PROPOSAL.json PROPOSED_LAYOUT.json --output APPLIED_LAYOUT.json --receipt APPLICATION.json\n  wge-intake-repair validate-delta-identity DELTA.json\n\nFull repair evidence verification is exposed through the Rust API and requires the integrating Rust native-validator registry."
+    "usage:\n  luxel-intake-repair prepare-source-bundle DRAFT.json OUTPUT.json source_ref=PATH...\n  luxel-intake-repair validate-source-bundle BUNDLE.json source_id=PATH...\n  luxel-intake-repair normalize-intake DRAFT.json SOURCE_BUNDLE.json PROVIDER_RESPONSE OUTPUT.json source_id=PATH...\n  luxel-intake-repair validate-intake INTAKE.json PROVIDER_RESPONSE source_id=PATH...\n  luxel-intake-repair normalize-repair-proposal DRAFT.json OUTPUT.json\n  luxel-intake-repair validate-repair-proposal PROPOSAL.json\n  luxel-intake-repair apply-repair BEFORE_LAYOUT.json PROPOSAL.json PROPOSED_LAYOUT.json --output APPLIED_LAYOUT.json --receipt APPLICATION.json\n  luxel-intake-repair validate-delta-identity DELTA.json\n\nFull repair evidence verification is exposed through the Rust API and requires the integrating Rust native-validator registry."
         .into()
 }
 

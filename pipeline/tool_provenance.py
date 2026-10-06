@@ -1,6 +1,6 @@
 """Content-hash provenance for tools, not just data.
 
-WGE tooling item 1 (see WGE/docs/platform/tooling-upgrades.md): a full day of Bevy
+Luxel tooling item 1 (see Luxel/docs/platform/tooling-upgrades.md): a full day of Bevy
 captures once ran a stale pre-change binary and reported "passed", because
 capture_bevy.py's staleness check compared file *mtimes* -- fragile against
 git checkouts, rsync, and backup restores that reset mtimes without changing

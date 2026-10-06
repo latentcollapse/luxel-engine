@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use wge_intake_repair_contract::{
+use luxel_intake_repair_contract::{
     ContractError, EvidenceReference, FailedLayer, GateId, IntakeDraft, MetricId,
     MetricObservation, NativeFinding, NativeValidatorRegistry, ProviderInterpretation,
     ProviderProvenance, ReceiptOutcome, RepairAssessment, RepairEditClass,
@@ -76,19 +76,19 @@ fn intake_rejects_old_status_reports_forged_claims_and_unknown_fields() {
     assert!(parse_json::<IntakeDraft>(&fixture("intake/unknown-field.json")).is_err());
 
     let (mut generated_report, _, _) = good_intake();
-    generated_report.schema_version = "wge.semantic-intake/v1".into();
+    generated_report.schema_version = "luxel.semantic-intake/v1".into();
     let old_generated_report = serde_json::to_vec(&generated_report).unwrap();
     assert!(parse_json::<IntakeDraft>(&old_generated_report).is_err());
 
     let bad_response = fixture("intake/bad-observation.json");
     let interpretation: ProviderInterpretation = parse_json(&bad_response).unwrap();
     let draft = IntakeDraft {
-        schema_version: "wge.semantic-intake-draft/v1".into(),
+        schema_version: "luxel.semantic-intake-draft/v1".into(),
         source_bundle_id: bundle.source_bundle_id.clone(),
         provider: ProviderProvenance {
             provider_id: "fixture.multimodal".into(),
             provider_version: "1.0".into(),
-            protocol: "wge.provider-interpretation/v1".into(),
+            protocol: "luxel.provider-interpretation/v1".into(),
             request_source_bundle_id: bundle.source_bundle_id.clone(),
             response_sha256: sha256_prefixed(&bad_response),
         },
@@ -114,12 +114,12 @@ fn provider_observation_without_a_source_region_is_rejected() {
     let response = fixture("intake/bad-observation.json");
     let interpretation: ProviderInterpretation = parse_json(&response).unwrap();
     let draft = IntakeDraft {
-        schema_version: "wge.semantic-intake-draft/v1".into(),
+        schema_version: "luxel.semantic-intake-draft/v1".into(),
         source_bundle_id: bundle.source_bundle_id.clone(),
         provider: ProviderProvenance {
             provider_id: "fixture.multimodal".into(),
             provider_version: "1.0".into(),
-            protocol: "wge.provider-interpretation/v1".into(),
+            protocol: "luxel.provider-interpretation/v1".into(),
             request_source_bundle_id: bundle.source_bundle_id.clone(),
             response_sha256: sha256_prefixed(&response),
         },
@@ -271,11 +271,11 @@ fn evidence_ref(candidate: &[u8], receipt: &[u8]) -> EvidenceReference {
     }
 }
 
-fn proposal(before_receipt: &[u8]) -> wge_intake_repair_contract::RepairProposal {
+fn proposal(before_receipt: &[u8]) -> luxel_intake_repair_contract::RepairProposal {
     let before = candidate_before();
     let target = nav_before();
     normalize_repair_proposal(RepairProposalDraft {
-        schema_version: "wge.repair-proposal-draft/v1".into(),
+        schema_version: "luxel.repair-proposal-draft/v1".into(),
         candidate_before_sha256: sha256_prefixed(&before),
         failed_layer: FailedLayer::Navigation,
         failure_evidence: evidence_ref(&before, before_receipt),
@@ -292,19 +292,19 @@ fn proposal(before_receipt: &[u8]) -> wge_intake_repair_contract::RepairProposal
 }
 
 fn delta_draft(
-    proposal: &wge_intake_repair_contract::RepairProposal,
+    proposal: &luxel_intake_repair_contract::RepairProposal,
     before_receipt: &[u8],
     after_receipt: &[u8],
     changed_artifact_id: &str,
 ) -> RepairEvidenceDeltaDraft {
     RepairEvidenceDeltaDraft {
-        schema_version: "wge.repair-evidence-delta-draft/v1".into(),
+        schema_version: "luxel.repair-evidence-delta-draft/v1".into(),
         proposal_id: proposal.proposal_id.clone(),
         candidate_before_sha256: sha256_prefixed(&candidate_before()),
         candidate_after_sha256: sha256_prefixed(&candidate_after()),
         before_evidence: evidence_ref(&candidate_before(), before_receipt),
         after_evidence: evidence_ref(&candidate_after(), after_receipt),
-        changed_artifacts: vec![wge_intake_repair_contract::ArtifactChange {
+        changed_artifacts: vec![luxel_intake_repair_contract::ArtifactChange {
             artifact_id: changed_artifact_id.into(),
             before_sha256: sha256_prefixed(&nav_before()),
             after_sha256: sha256_prefixed(&nav_after()),
@@ -497,7 +497,7 @@ fn repair_rejects_unauthorized_edits_unknown_or_forged_receipts_and_status_only(
         3.0,
     );
     let mut unauthorized = RepairProposalDraft {
-        schema_version: "wge.repair-proposal-draft/v1".into(),
+        schema_version: "luxel.repair-proposal-draft/v1".into(),
         candidate_before_sha256: sha256_prefixed(&before_candidate),
         failed_layer: FailedLayer::Navigation,
         failure_evidence: evidence_ref(&before_candidate, &before_receipt),
@@ -535,7 +535,7 @@ fn repair_rejects_unauthorized_edits_unknown_or_forged_receipts_and_status_only(
     // The proposal is re-sealed structurally, but the registered receipt parser
     // still rejects the candidate binding against the supplied candidate bytes.
     let resealed = normalize_repair_proposal(RepairProposalDraft {
-        schema_version: "wge.repair-proposal-draft/v1".into(),
+        schema_version: "luxel.repair-proposal-draft/v1".into(),
         candidate_before_sha256: forged_draft.candidate_before_sha256,
         failed_layer: forged_draft.failed_layer,
         failure_evidence: forged_draft.failure_evidence,
@@ -563,7 +563,7 @@ fn repair_rejects_unauthorized_edits_unknown_or_forged_receipts_and_status_only(
         sha256_prefixed(&before_artifact),
     );
     let status_only_draft = RepairProposalDraft {
-        schema_version: "wge.repair-proposal-draft/v1".into(),
+        schema_version: "luxel.repair-proposal-draft/v1".into(),
         candidate_before_sha256: sha256_prefixed(&before_candidate),
         failed_layer: FailedLayer::Navigation,
         failure_evidence: evidence_ref(&before_candidate, bound_status_only.as_bytes()),

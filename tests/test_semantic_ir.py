@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from wge_semantic_ir import LowerError, canonical_dumps, lower_file, lower_source, normalize_document  # noqa: E402
+from luxel_semantic_ir import LowerError, canonical_dumps, lower_file, lower_source, normalize_document  # noqa: E402
 
 GOLDEN = ROOT / "tests" / "fixtures" / "semantic_ir" / "v0_golden.json"
 REGISTRY = ROOT / "world_core" / "crates" / "semantic_kernel" / "registry_v0.json"
@@ -24,7 +24,7 @@ class SemanticIrGoldenTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         subprocess.run(
-            ["cargo", "build", "--quiet", "-p", "wge-semantic-kernel"],
+            ["cargo", "build", "--quiet", "-p", "luxel-semantic-kernel"],
             cwd=ROOT / "world_core",
             check=True,
         )
@@ -72,8 +72,8 @@ class SemanticIrGoldenTests(unittest.TestCase):
 
     def test_legacy_geometry_acceptance_is_preserved_until_execution_validation(self) -> None:
         source = (
-            "from wge.world import lane, place\n"
-            "from wge.geometry import rect\n\n"
+            "from luxel.world import lane, place\n"
+            "from luxel.geometry import rect\n\n"
             "flat_lane = lane(id=\"flat\", footprint=rect(x0=0, y0=0, x1=0, y1=5))\n"
             "safe_place = place(id=\"safe\", footprint=rect(x0=1, y0=1, x1=2, y1=2))\n"
         )

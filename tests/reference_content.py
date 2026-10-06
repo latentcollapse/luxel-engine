@@ -1,18 +1,18 @@
 """Where the test suite finds the reference world it measures against.
 
-**This exists because WGE's tests are not yet standalone (D23).** Much of the
+**This exists because Luxel's tests are not yet standalone (D23).** Much of the
 suite asserts against a real compiled batch -- the alpine arena and caledonia --
 and against real generated kits. That is deliberately good testing: it is what
 caught the sealed keeps and the bridges over nothing, and synthetic fixtures
-would not have. But those batches and kits are *Codeweald's content*, and WGE
+would not have. But those batches and kits are *Codeweald's content*, and Luxel
 was separated from Codeweald so it could be pointed at any game (D8).
 
 So the coupling that used to be implicit -- `parents[1]` happened to be both the
 engine and the art -- is named here instead of being spread across ten files.
 One place to look, one environment variable to redirect, and a single honest
-statement of what WGE still borrows.
+statement of what Luxel still borrows.
 
-Set `WGE_REFERENCE_CONTENT` to test against a different game's content.
+Set `LUXEL_REFERENCE_CONTENT` to test against a different game's content.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ _DEFAULT_CONTENT = (
 )
 
 CONTENT_ROOT = Path(
-    os.environ.get("WGE_REFERENCE_CONTENT", str(_DEFAULT_CONTENT))
+    os.environ.get("LUXEL_REFERENCE_CONTENT", str(_DEFAULT_CONTENT))
 ).resolve()
 
 

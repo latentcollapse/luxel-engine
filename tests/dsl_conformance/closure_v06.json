@@ -1,5 +1,5 @@
 {
-  "schema": "wge.conformance.closure/0.6",
+  "schema": "luxel.conformance.closure/0.6",
   "spec_draft": "0.6",
   "fixtures": [
     {
@@ -111,20 +111,20 @@
       "cases": [
         {
           "change": "source_path_only",
-          "left": {"source_path": "world/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
-          "right": {"source_path": "moved/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "left": {"source_path": "world/main.luxel", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "right": {"source_path": "moved/main.luxel", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
           "semantic_identity_changes": false
         },
         {
           "change": "module_id",
-          "left": {"source_path": "world/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
-          "right": {"source_path": "world/main.wge", "module_id": "demo.world.renamed", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "left": {"source_path": "world/main.luxel", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "right": {"source_path": "world/main.luxel", "module_id": "demo.world.renamed", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
           "semantic_identity_changes": true
         },
         {
           "change": "explicit_module_seed",
-          "left": {"source_path": "world/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
-          "right": {"source_path": "world/main.wge", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000002"},
+          "left": {"source_path": "world/main.luxel", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000001"},
+          "right": {"source_path": "world/main.luxel", "module_id": "demo.world", "module_seed": "seed256:0000000000000000000000000000000000000000000000000000000000000002"},
           "semantic_identity_changes": true
         },
         {
@@ -209,14 +209,14 @@
       "kind": "compiler_identity",
       "cases": [
         {
-          "left": {"compiler_version": "1.0.1", "compatibility_id": "wge.frontend/core-1"},
-          "right": {"compiler_version": "1.0.2", "compatibility_id": "wge.frontend/core-1"},
+          "left": {"compiler_version": "1.0.1", "compatibility_id": "luxel.frontend/core-1"},
+          "right": {"compiler_version": "1.0.2", "compatibility_id": "luxel.frontend/core-1"},
           "semantic_identity_equal": true,
           "document_identity_equal": false
         },
         {
-          "left": {"compiler_version": "1.0.2", "compatibility_id": "wge.frontend/core-1"},
-          "right": {"compiler_version": "1.1.0", "compatibility_id": "wge.frontend/core-2"},
+          "left": {"compiler_version": "1.0.2", "compatibility_id": "luxel.frontend/core-1"},
+          "right": {"compiler_version": "1.1.0", "compatibility_id": "luxel.frontend/core-2"},
           "semantic_identity_equal": false,
           "document_identity_equal": false
         }
@@ -257,10 +257,10 @@
       "id": "fixture.extensions.empty_set_digest",
       "kind": "digest_vector",
       "algorithm": "sha256",
-      "domain_tag": "wge.ir.extensions/1",
+      "domain_tag": "luxel.ir.extensions/1",
       "projection_jcs": "[]",
-      "preimage_hex": "7767652e69722e657874656e73696f6e732f31005b5d",
-      "expected": "sha256:36a981833b0c0782839ca946dccbde5d2768e014d4e74eab70d00c05f7b6679f"
+      "preimage_hex": "6c7578656c2e69722e657874656e73696f6e732f31005b5d",
+      "expected": "sha256:7fd00110665a4cced7429003ee7af97a67a28800c9529c6eb7f426d295b16e0b"
     },
     {
       "id": "fixture.cache.reuse_event_location",

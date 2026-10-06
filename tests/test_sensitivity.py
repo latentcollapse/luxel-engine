@@ -19,7 +19,7 @@ from sensitivity import (  # noqa: E402
     metric_owners,
     metrics_from_report,
 )
-from wge_critic import Finding, apply_sensitivity_matrix  # noqa: E402
+from luxel_critic import Finding, apply_sensitivity_matrix  # noqa: E402
 
 
 def _spec_with(compositions: list[dict]) -> dict:
@@ -260,7 +260,7 @@ class PatchKeyTranslationTests(unittest.TestCase):
     def test_every_measured_knob_resolves_to_an_authoring_name(self) -> None:
         # A knob whose authoring name is wrong measures as powerless rather
         # than failing, so this has to be checked rather than assumed.
-        from wge_critic import scaffold_intent
+        from luxel_critic import scaffold_intent
 
         spec = {
             "zone": {"id": "z"},
@@ -315,26 +315,26 @@ class ApplyToScaffoldDropTests(unittest.TestCase):
         }
 
     def test_an_unmatched_patch_key_raises(self) -> None:
-        from wge_critic import apply_to_scaffold
+        from luxel_critic import apply_to_scaffold
 
         with self.assertRaises(ValueError) as caught:
             apply_to_scaffold(self._spec(), {"lf": {"spine_count": 8}})
         self.assertIn("spine_count", str(caught.exception))
 
     def test_an_unknown_feature_id_raises(self) -> None:
-        from wge_critic import apply_to_scaffold
+        from luxel_critic import apply_to_scaffold
 
         with self.assertRaises(ValueError):
             apply_to_scaffold(self._spec(), {"nonexistent": {"spines": 8}})
 
     def test_a_matching_patch_applies_and_does_not_raise(self) -> None:
-        from wge_critic import apply_to_scaffold
+        from luxel_critic import apply_to_scaffold
 
         emitted = apply_to_scaffold(self._spec(), {"lf": {"spines": 8}})
         self.assertIn("spines=8,", emitted)
 
     def test_spine_values_are_rendered_as_integers(self) -> None:
-        from wge_critic import apply_to_scaffold
+        from luxel_critic import apply_to_scaffold
 
         emitted = apply_to_scaffold(self._spec(), {"lf": {"spines": 8.0}})
         self.assertIn("spines=8,", emitted)

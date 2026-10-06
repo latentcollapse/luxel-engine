@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.source-bundle/v1",
+  "schema_version": "luxel.source-bundle/v1",
   "request_id": "fixture-run-2026-09-27-01",
   "source_bundle_id": "source-bundle:sha256:46a2eef8867d52498570c3de55044c336d589c28e0c8b9be29f37e2502a8f39d",
   "sources": [

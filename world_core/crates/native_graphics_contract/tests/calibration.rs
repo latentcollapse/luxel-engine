@@ -11,12 +11,12 @@
 
 use std::path::PathBuf;
 
-use wge_asset_contract::{PreparationStatus, RenderPreparationStatus, condition_render_asset, prepare_asset};
-use wge_native_graphics_contract::calibration::{
+use luxel_asset_contract::{PreparationStatus, RenderPreparationStatus, condition_render_asset, prepare_asset};
+use luxel_native_graphics_contract::calibration::{
     CALIBRATION_COLUMNS, GREY_CARD_TARGET_SRGB8, grey_card_local_center, project_local_point, render_request,
     runtime_request,
 };
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     CalibrationPlacement, CalibrationRig, CalibrationView, GraphicsScenePacket, LightKind, validate_render_policy,
 };
 
@@ -87,7 +87,7 @@ fn rigs_are_valid_distinct_policies() {
             CalibrationRig::Overcast => assert_eq!(body.lights[0].intensity, 0.0, "overcast has no sun"),
             other => panic!("lighting() returned an IBL rig {other:?}"),
         }
-        let ibl_textures = body.textures.iter().filter(|t| t.texture_id.starts_with("wge-ibl-")).count();
+        let ibl_textures = body.textures.iter().filter(|t| t.texture_id.starts_with("luxel-ibl-")).count();
         assert_eq!(ibl_textures, if rig.ibl() { 2 } else { 0 }, "{rig:?}");
         assert_eq!(policy.ibl.is_some_and(|i| i.enabled), rig.ibl(), "{rig:?}");
     }
@@ -96,7 +96,7 @@ fn rigs_are_valid_distinct_policies() {
         let mut with = lit(rig);
         let without = lit(rig.lighting());
         with.render_policy.as_mut().unwrap().ibl = None;
-        with.textures.retain(|t| !t.texture_id.starts_with("wge-ibl-"));
+        with.textures.retain(|t| !t.texture_id.starts_with("luxel-ibl-"));
         with.environment.exposure = without.environment.exposure;
         with.lights[0].light_id = without.lights[0].light_id.clone();
         assert_eq!(with, without, "{rig:?}");
@@ -147,7 +147,7 @@ fn calibration_glb_prepares_with_zero_findings_and_frames_every_view() {
 
 #[test]
 fn coverage_rigs_are_their_base_rig_plus_the_policy_and_stay_out_of_all() {
-    use wge_native_graphics_contract::CalibrationRig;
+    use luxel_native_graphics_contract::CalibrationRig;
     for (rig, base, ibl) in [
         (CalibrationRig::SunCoverage, CalibrationRig::Sun, false),
         (CalibrationRig::OvercastCoverage, CalibrationRig::Overcast, false),

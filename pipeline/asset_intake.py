@@ -28,7 +28,7 @@ import numpy as np
 from PIL import Image
 
 
-SCHEMA_VERSION = "wge.asset-intake/v1"
+SCHEMA_VERSION = "luxel.asset-intake/v1"
 
 _COMPONENT_TYPES: dict[int, tuple[str, np.dtype[Any], int]] = {
     5120: ("BYTE", np.dtype("<i1"), 1),

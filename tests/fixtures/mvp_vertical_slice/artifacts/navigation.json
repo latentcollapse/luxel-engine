@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.navigation-plan/v1",
+  "schema_version": "luxel.navigation-plan/v1",
   "world_id": "gate-run",
   "agent_radius_m": 0.45,
   "max_climb_m": 0.35,

@@ -189,5 +189,5 @@ build a fix that could not achieve its stated purpose.
 D26 (transition as a field) → item 2 (D25, now largely prophylactic) →
 item 4 (second gentler world, which settles D28 and item 4's own question).
 
-Item 9 (drive Gaea from WGE, emitting `.terrain` and building headlessly via
+Item 9 (drive Gaea from Luxel, emitting `.terrain` and building headlessly via
 `Gaea.Swarm.exe`) is agreed in principle and scoped nowhere.

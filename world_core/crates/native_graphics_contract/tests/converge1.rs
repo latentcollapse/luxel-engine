@@ -7,7 +7,7 @@
 
 use std::path::PathBuf;
 
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     AtmospherePolicy, Campaign2View, GraphicsScenePacket, ParityContent, ParityPolicyCandidate, RenderPolicy,
     SkyModel, SkyPolicy, TerrainLayerSet, lower_campaign2_packet_with, validate_render_policy, CONVERGE1_ATMOSPHERE,
     CONVERGE1_SKY,

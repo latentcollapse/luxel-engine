@@ -43,8 +43,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-RECEIPT_SCHEMA = "wge.gaea-build-receipt/v1"
-COMPARE_SCHEMA = "wge.gaea-build-compare/v1"
+RECEIPT_SCHEMA = "luxel.gaea-build-receipt/v1"
+COMPARE_SCHEMA = "luxel.gaea-build-compare/v1"
 
 # Swarm arguments cross three quoting layers (`script` -> `proton` ->
 # `cmd.exe`). Rather than quote through all three, anything that reaches the
@@ -78,18 +78,18 @@ class GaeaEnvironment:
     @classmethod
     def from_env(cls) -> "GaeaEnvironment":
         home = Path.home()
-        steam = Path(os.environ.get("WGE_STEAM_ROOT", home / ".local/share/Steam"))
+        steam = Path(os.environ.get("LUXEL_STEAM_ROOT", home / ".local/share/Steam"))
         return cls(
-            gaea_dir=Path(os.environ.get("WGE_GAEA_DIR", home / ".local/share/gaea2")),
+            gaea_dir=Path(os.environ.get("LUXEL_GAEA_DIR", home / ".local/share/gaea2")),
             proton=Path(
                 os.environ.get(
-                    "WGE_PROTON", steam / "steamapps/common/Proton - Experimental/proton"
+                    "LUXEL_PROTON", steam / "steamapps/common/Proton - Experimental/proton"
                 )
             ),
             steam_root=steam,
             compat_data=Path(
                 os.environ.get(
-                    "WGE_GAEA_COMPAT_DATA", steam / "steamapps/compatdata/gaea-swarm"
+                    "LUXEL_GAEA_COMPAT_DATA", steam / "steamapps/compatdata/gaea-swarm"
                 )
             ),
         )
@@ -100,7 +100,7 @@ class GaeaEnvironment:
 
     @property
     def staging(self) -> Path:
-        return self.gaea_dir / "wge_builds"
+        return self.gaea_dir / "luxel_builds"
 
     def check(self) -> list[str]:
         """Every missing prerequisite, as human-readable lines. Empty means ready."""

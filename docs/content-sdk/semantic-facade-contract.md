@@ -1,13 +1,13 @@
-# WGE Semantic Facade Contract
+# Luxel Semantic Facade Contract
 
 Status: **read-only discovery slice implemented; execution remains staged**, 2026-09-30  
-Scope: give an autonomous model a small, semantic vocabulary for WGE without pretending that planned machinery is already callable.
+Scope: give an autonomous model a small, semantic vocabulary for Luxel without pretending that planned machinery is already callable.
 
 ## Why this exists
 
 The low-level transaction surface is necessary authority machinery, but it is
 not a useful model-native mental model by itself. A fresh agent should be able
-to ask WGE:
+to ask Luxel:
 
 ```text
 What can you do?
@@ -38,11 +38,11 @@ current Rust capability registry.
 ## Current discovery commands
 
 ```bash
-cargo run --manifest-path world_core/Cargo.toml --offline -p wge-control-plane -- \
+cargo run --manifest-path world_core/Cargo.toml --offline -p luxel-control-plane -- \
   facade
-cargo run --manifest-path world_core/Cargo.toml --offline -p wge-control-plane -- \
+cargo run --manifest-path world_core/Cargo.toml --offline -p luxel-control-plane -- \
   facade --status partial
-cargo run --manifest-path world_core/Cargo.toml --offline -p wge-control-plane -- \
+cargo run --manifest-path world_core/Cargo.toml --offline -p luxel-control-plane -- \
   facade-explain project.plan/v1
 ```
 
@@ -90,6 +90,6 @@ requiring repository archaeology:
 - named failure modes;
 - source contract for deeper reading.
 
-The catalog is therefore part of WGE's ergonomics and part of its correctness
+The catalog is therefore part of Luxel's ergonomics and part of its correctness
 boundary. A misleading “available” entry is a contract defect, not merely bad
 documentation.

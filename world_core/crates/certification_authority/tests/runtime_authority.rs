@@ -6,12 +6,12 @@ use std::sync::OnceLock;
 
 use serde::Serialize;
 use serde_json::{Value, json};
-use wge_certification_authority::schema::{
+use luxel_certification_authority::schema::{
     AssetReceiptPayload, AssetUse, DeferredReceiptPayload, GameplayReceiptPayload,
     NativeVisualQualityReceiptPayload, RepairReceiptPayload, VisualReceiptPayload,
     WorldReceiptPayload,
 };
-use wge_certification_authority::{
+use luxel_certification_authority::{
     ArtifactBytes, CandidateContext, DEFERRED_GATES, EvidenceBinding, GateDisposition,
     NATIVE_GRAPHICS_FRAME_RECEIPT_KIND, NATIVE_GRAPHICS_PACKET_KIND,
     NATIVE_GRAPHICS_RENDERER_ATTESTATION_KIND, NATIVE_RGBA8_CAPTURE_KIND,
@@ -21,9 +21,9 @@ use wge_certification_authority::{
     native_mvp_gate_profile, native_repair_evidence_reference, native_repair_receipt_bytes,
     repair_validator_registry, sha256_prefixed, validate_receipt, validate_request,
 };
-use wge_intake_repair_contract as intake;
-use wge_native_graphics_contract as graphics;
-use wge_reference_runtime::{GameplayWorldBinding, WorldBuild, build_from_layout_path};
+use luxel_intake_repair_contract as intake;
+use luxel_native_graphics_contract as graphics;
+use luxel_reference_runtime::{GameplayWorldBinding, WorldBuild, build_from_layout_path};
 
 const WORLD_ID: &str = "runtime-world";
 const TRAVERSAL_ID: &str = "runtime-traversal";
@@ -45,7 +45,7 @@ fn project_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)
-        .expect("certification authority is nested under the WGE project")
+        .expect("certification authority is nested under the Luxel project")
         .to_path_buf()
 }
 
@@ -54,7 +54,7 @@ fn runtime_build() -> &'static WorldBuild {
         let root = project_root();
         let layout =
             root.join("world_core/crates/reference_runtime/examples/riverwatch.layout.json");
-        let julia = std::env::var_os("WGE_JULIA")
+        let julia = std::env::var_os("LUXEL_JULIA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("julia"));
         build_from_layout_path(&layout, &julia, &root.join("terrain_lab"))
@@ -79,7 +79,7 @@ fn put(candidate: &mut CandidateContext, id: &str, kind: &str, bytes: Vec<u8>) {
 fn runtime_candidate(snapshot_id: &str) -> CandidateContext {
     let build = runtime_build();
     let mut candidate = CandidateContext {
-        project_id: "wge-runtime-authority-tests".into(),
+        project_id: "luxel-runtime-authority-tests".into(),
         snapshot_id: snapshot_id.into(),
         candidate_sha256: String::new(),
         artifacts: BTreeMap::new(),
@@ -131,7 +131,7 @@ fn runtime_candidate(snapshot_id: &str) -> CandidateContext {
         &mut candidate,
         MANIFEST_ID,
         "project_manifest",
-        b"wge runtime authority integration test candidate v1\n".to_vec(),
+        b"luxel runtime authority integration test candidate v1\n".to_vec(),
     );
     refresh_candidate_identity(&mut candidate);
     candidate
@@ -360,7 +360,7 @@ fn gate_fields(registry: &ValidatorRegistry, gate_id: &str) -> (String, String) 
     let requirement = engine_neutral_gate_profile()
         .into_iter()
         .find(|gate| gate.gate_id == gate_id)
-        .unwrap_or_else(|| panic!("gate {gate_id} is part of the registered WGE profile"));
+        .unwrap_or_else(|| panic!("gate {gate_id} is part of the registered Luxel profile"));
     assert!(registry.descriptor(&requirement.validator_id).is_some());
     (requirement.validator_id, requirement.receipt_schema)
 }
@@ -391,7 +391,7 @@ fn receipt(
 ) -> ReceiptEnvelope {
     let (validator_id, receipt_schema) = gate_fields(registry, gate_id);
     let mut envelope = ReceiptEnvelope {
-        schema_version: wge_certification_authority::ENVELOPE_SCHEMA.into(),
+        schema_version: luxel_certification_authority::ENVELOPE_SCHEMA.into(),
         receipt_id: String::new(),
         project_id: candidate.project_id.clone(),
         snapshot_id: candidate.snapshot_id.clone(),
@@ -656,7 +656,7 @@ fn semantic_receipt(
             LAYOUT_ID,
         ],
         serde_json::to_value(
-            wge_certification_authority::schema::SemanticReceiptPayload {
+            luxel_certification_authority::schema::SemanticReceiptPayload {
                 intake_artifact_id: "semantic-intake".into(),
                 provider_response_artifact_id: "provider-response".into(),
                 source_bundle_artifact_id: "source-bundle".into(),
@@ -664,11 +664,11 @@ fn semantic_receipt(
                 project_spec_artifact_id: None,
                 project_template_artifact_id: None,
                 source_artifacts: vec![
-                    wge_certification_authority::schema::SourceArtifactBinding {
+                    luxel_certification_authority::schema::SourceArtifactBinding {
                         source_id: brief_source.source_id.clone(),
                         artifact_id: "source-brief".into(),
                     },
-                    wge_certification_authority::schema::SourceArtifactBinding {
+                    luxel_certification_authority::schema::SourceArtifactBinding {
                         source_id: layout_source.source_id.clone(),
                         artifact_id: "source-layout".into(),
                     },
@@ -697,7 +697,7 @@ fn replace_gameplay_binding(candidate: &mut CandidateContext, binding: &Gameplay
 fn authority_revalidates_the_exact_reference_runtime_p6_capture_against_its_world() {
     let build = runtime_build();
     assert!(build.capture_bytes.starts_with(b"P6\n"));
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = runtime_candidate("visual-exact-p6");
     let receipt = visual_receipt(&candidate, &registry);
 
@@ -730,10 +730,10 @@ fn authority_revalidates_the_exact_reference_runtime_p6_capture_against_its_worl
 
 #[test]
 fn a_rehashed_world_body_cannot_forge_stale_julia_fields() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let mut candidate = runtime_candidate("rehashed-world-field");
     let world_bytes = &mut candidate.artifacts.get_mut(WORLD_ID).unwrap().bytes;
-    let mut world: wge_reference_runtime::WorldArtifact =
+    let mut world: luxel_reference_runtime::WorldArtifact =
         serde_json::from_slice(world_bytes).unwrap();
     world.body.fields.heights_m[0] += 0.25;
     let body = serde_json::to_vec(&world.body).unwrap();
@@ -756,7 +756,7 @@ fn a_rehashed_world_body_cannot_forge_stale_julia_fields() {
 
 #[test]
 fn gameplay_receipt_rejects_rehashed_binding_to_another_world_or_traversal() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let build = runtime_build();
 
     for bind_to_other_world in [true, false] {
@@ -787,7 +787,7 @@ fn gameplay_receipt_rejects_rehashed_binding_to_another_world_or_traversal() {
 
 #[test]
 fn candidate_identity_rejects_changed_artifact_bytes_before_receipt_validation() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = runtime_candidate("candidate-digest-mismatch");
     let receipt = world_receipt(&candidate, &registry);
     let mut changed = candidate.clone();
@@ -834,7 +834,7 @@ fn repair_metadata_is_excluded_from_candidate_identity_but_content_is_not() {
 
 #[test]
 fn status_only_receipt_stays_rejected_after_outer_identity_is_resealed() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = runtime_candidate("status-only-receipt");
     let mut status_only = world_receipt(&candidate, &registry);
     status_only.evidence.clear();
@@ -848,7 +848,7 @@ fn status_only_receipt_stays_rejected_after_outer_identity_is_resealed() {
 
 #[test]
 fn registered_validator_id_requires_its_exact_receipt_schema() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = runtime_candidate("registered-id-schema-binding");
     let valid = world_receipt(&candidate, &registry);
     assert_eq!(
@@ -859,13 +859,13 @@ fn registered_validator_id_requires_its_exact_receipt_schema() {
     );
 
     let mut unknown_id = valid.clone();
-    unknown_id.validator_id = "wge.validator.world-traversal/v999".into();
+    unknown_id.validator_id = "luxel.validator.world-traversal/v999".into();
     unknown_id.seal().unwrap();
     let error = validate_receipt(&unknown_id, &candidate, &registry).unwrap_err();
     assert!(error.detail.contains("not registered"), "{error}");
 
     let mut wrong_schema = valid;
-    wrong_schema.receipt_schema = "wge.world-receipt/v999".into();
+    wrong_schema.receipt_schema = "luxel.world-receipt/v999".into();
     wrong_schema.seal().unwrap();
     let error = validate_receipt(&wrong_schema, &candidate, &registry).unwrap_err();
     assert!(error.detail.contains("another gate or schema"), "{error}");
@@ -873,12 +873,12 @@ fn registered_validator_id_requires_its_exact_receipt_schema() {
 
 #[test]
 fn pass_shaped_payload_cannot_replace_typed_world_evidence() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = runtime_candidate("pass-shaped-payload");
     let mut forged = world_receipt(&candidate, &registry);
     forged.payload = serde_json::json!({
         "status": "pass",
-        "producer": "wge-certification-authority",
+        "producer": "luxel-certification-authority",
     });
     forged.seal().unwrap();
 
@@ -888,7 +888,7 @@ fn pass_shaped_payload_cannot_replace_typed_world_evidence() {
 
 #[test]
 fn unknown_omitted_extra_and_duplicate_evidence_bindings_are_rejected() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = runtime_candidate("evidence-set-adversarial-controls");
     let valid = world_receipt(&candidate, &registry);
     assert_eq!(
@@ -952,7 +952,7 @@ fn unknown_omitted_extra_and_duplicate_evidence_bindings_are_rejected() {
 
 #[test]
 fn engine_neutral_rigging_cannot_be_promoted() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = runtime_candidate("deferred-gates-stay-deferred");
     for gate in DEFERRED_GATES {
         let payload = DeferredReceiptPayload {
@@ -1014,7 +1014,7 @@ fn engine_neutral_rigging_cannot_be_promoted() {
 
 #[test]
 fn semantic_gate_revalidates_provider_response_sources_and_typed_layout_provenance() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let mut candidate = runtime_candidate("typed-intake-layout-binding");
     let good = semantic_receipt(&mut candidate, &registry);
     assert_eq!(
@@ -1055,17 +1055,17 @@ fn semantic_gate_revalidates_provider_response_sources_and_typed_layout_provenan
 
 #[test]
 fn native_seal_cli_computes_receipt_identity_and_writes_canonical_json() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = runtime_candidate("native-seal-cli");
     let mut draft = world_receipt(&candidate, &registry);
     draft.receipt_id.clear();
     draft.observed_input_sha256.clear();
-    let directory = std::env::temp_dir().join(format!("wge-cert-seal-{}", std::process::id()));
+    let directory = std::env::temp_dir().join(format!("luxel-cert-seal-{}", std::process::id()));
     fs::create_dir_all(&directory).unwrap();
     let input = directory.join("draft.json");
     let output = directory.join("sealed.json");
     fs::write(&input, serde_json::to_vec(&draft).unwrap()).unwrap();
-    let result = Command::new(env!("CARGO_BIN_EXE_wge-certification-authority"))
+    let result = Command::new(env!("CARGO_BIN_EXE_luxel-certification-authority"))
         .arg("seal")
         .arg(&input)
         .arg(&output)
@@ -1083,14 +1083,14 @@ fn native_seal_cli_computes_receipt_identity_and_writes_canonical_json() {
     let value: Value = serde_json::from_slice(&sealed_bytes).unwrap();
     assert_eq!(
         sealed_bytes,
-        format!("{}\n", wge_certification_authority::canonical_json(&value)).as_bytes()
+        format!("{}\n", luxel_certification_authority::canonical_json(&value)).as_bytes()
     );
     fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
 fn rehashed_receipt_with_stale_artifact_binding_is_rejected() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let mut candidate = runtime_candidate("stale-receipt");
     let mut receipt = visual_receipt(&candidate, &registry);
 
@@ -1112,7 +1112,7 @@ fn rehashed_receipt_with_stale_artifact_binding_is_rejected() {
 
 #[test]
 fn a_resealed_rigging_deferral_cannot_be_changed_to_pass() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = runtime_candidate("deferred-pass-control");
     let payload = DeferredReceiptPayload {
         reason_code: "deferred_by_scope".into(),
@@ -1142,7 +1142,7 @@ fn a_resealed_rigging_deferral_cannot_be_changed_to_pass() {
 
 #[test]
 fn supplied_bad_glb_bytes_remain_a_permanent_asset_rejection_control() {
-    let supplied_path = std::env::var_os("WGE_NEGATIVE_CONTROL_GLB")
+    let supplied_path = std::env::var_os("LUXEL_NEGATIVE_CONTROL_GLB")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(
@@ -1157,9 +1157,9 @@ fn supplied_bad_glb_bytes_remain_a_permanent_asset_rejection_control() {
     });
     assert_eq!(sha256_prefixed(&bytes), SUPPLIED_BAD_GLB_SHA256);
 
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let mut candidate = CandidateContext {
-        project_id: "wge-runtime-authority-tests".into(),
+        project_id: "luxel-runtime-authority-tests".into(),
         snapshot_id: "negative-glb-control".into(),
         candidate_sha256: String::new(),
         artifacts: BTreeMap::new(),
@@ -1204,7 +1204,7 @@ fn supplied_bad_glb_bytes_remain_a_permanent_asset_rejection_control() {
 
 #[test]
 fn typed_repair_gate_revalidates_raw_before_after_receipts_and_exact_artifact_delta() {
-    let supplied_path = std::env::var_os("WGE_NEGATIVE_CONTROL_GLB")
+    let supplied_path = std::env::var_os("LUXEL_NEGATIVE_CONTROL_GLB")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             PathBuf::from(
@@ -1215,7 +1215,7 @@ fn typed_repair_gate_revalidates_raw_before_after_receipts_and_exact_artifact_de
         fs::read(supplied_path).expect("supplied bad GLB negative control must be present");
     assert_eq!(sha256_prefixed(&bad_glb), SUPPLIED_BAD_GLB_SHA256);
 
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let mut before = runtime_candidate("repair-before");
     add_native_quality_artifacts(&mut before);
     refresh_candidate_identity(&mut before);
@@ -1242,8 +1242,8 @@ fn typed_repair_gate_revalidates_raw_before_after_receipts_and_exact_artifact_de
         ReceiptStatus::Fail
     );
 
-    let source = wge_certification_authority::schema::StaticMeshSource {
-        schema_version: "wge.static-mesh-source/v1".into(),
+    let source = luxel_certification_authority::schema::StaticMeshSource {
+        schema_version: "luxel.static-mesh-source/v1".into(),
         asset_id: "replacement-stone".into(),
         positions_m: vec![
             [0.0, 0.0, 0.0],
@@ -1255,8 +1255,8 @@ fn typed_repair_gate_revalidates_raw_before_after_receipts_and_exact_artifact_de
         material_slots: vec!["stone".into()],
     };
     let after_source_bytes = json_bytes(&source);
-    let after_package = wge_certification_authority::schema::StaticAssetPackage {
-        schema_version: "wge.asset-package/v1".into(),
+    let after_package = luxel_certification_authority::schema::StaticAssetPackage {
+        schema_version: "luxel.asset-package/v1".into(),
         asset_id: source.asset_id.clone(),
         source_sha256: sha256_prefixed(&after_source_bytes),
         asset_use: AssetUse::StaticEnvironment,
@@ -1446,7 +1446,7 @@ fn typed_repair_gate_revalidates_raw_before_after_receipts_and_exact_artifact_de
         ));
     }
     let report = validate_request(
-        &wge_certification_authority::ValidationRequest {
+        &luxel_certification_authority::ValidationRequest {
             current_snapshot_id: after.snapshot_id.clone(),
             candidates: vec![before, after],
             gates: engine_neutral_gate_profile(),
@@ -1457,6 +1457,6 @@ fn typed_repair_gate_revalidates_raw_before_after_receipts_and_exact_artifact_de
     .unwrap();
     assert_eq!(
         report.status,
-        wge_certification_authority::CertificationStatus::EngineNeutralCertified
+        luxel_certification_authority::CertificationStatus::EngineNeutralCertified
     );
 }

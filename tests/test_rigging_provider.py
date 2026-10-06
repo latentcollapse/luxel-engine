@@ -17,16 +17,16 @@ sys.path.insert(0, str(ROOT / "pipeline"))
 from rigging_provider import generate_rigged_character_control  # noqa: E402
 
 
-BLENDER = os.environ.get("WGE_BLENDER_BIN") or shutil.which("blender")
+BLENDER = os.environ.get("LUXEL_BLENDER_BIN") or shutil.which("blender")
 ASSET_CONTRACT = Path(
     os.environ.get(
-        "WGE_ASSET_CONTRACT_BIN",
-        ROOT / "world_core" / "target" / "debug" / "wge-asset-contract",
+        "LUXEL_ASSET_CONTRACT_BIN",
+        ROOT / "world_core" / "target" / "debug" / "luxel-asset-contract",
     )
 )
 BAD_CONTROL = Path(
     os.environ.get(
-        "WGE_RIGGING_BAD_GLB",
+        "LUXEL_RIGGING_BAD_GLB",
         "/home/mattc/Pictures/Generated 2D Images/sample_2026-09-26T091412.074.glb",
     )
 )
@@ -35,7 +35,7 @@ REQUEST_TEMPLATE = ROOT / "tests" / "fixtures" / "rigging" / "blender_control_re
 
 
 @unittest.skipUnless(BLENDER, "Blender is required for the rigging-provider smoke test")
-@unittest.skipUnless(ASSET_CONTRACT.is_file(), "build wge-asset-contract before running provider tests")
+@unittest.skipUnless(ASSET_CONTRACT.is_file(), "build luxel-asset-contract before running provider tests")
 class RiggingProviderIntegrationTest(unittest.TestCase):
     def _rust_inspect(self, glb: Path) -> dict:
         result = subprocess.run(
@@ -63,7 +63,7 @@ class RiggingProviderIntegrationTest(unittest.TestCase):
         )
 
     def test_blender_control_is_deterministic_and_rust_promotes_measured_package(self):
-        with tempfile.TemporaryDirectory(prefix="wge-rigging-test-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="luxel-rigging-test-") as temporary:
             directory = Path(temporary)
             first_glb = directory / "control-a.glb"
             second_glb = directory / "control-b.glb"
@@ -81,7 +81,7 @@ class RiggingProviderIntegrationTest(unittest.TestCase):
             self.assertEqual(first.returncode, 0, first.stderr + first.stdout)
             self.assertEqual(first.stdout, second.stdout)
             receipt = json.loads(first.stdout)
-            self.assertEqual(receipt["schema_version"], "wge.asset-runtime-receipt/v1")
+            self.assertEqual(receipt["schema_version"], "luxel.asset-runtime-receipt/v1")
             self.assertEqual(receipt["status"], "ready")
             self.assertEqual(receipt["findings"], [])
             source_digest = receipt["source_identity"]["source_sha256"]
@@ -103,7 +103,7 @@ class RiggingProviderIntegrationTest(unittest.TestCase):
     def test_supplied_bad_glb_stays_a_hard_rust_rejection_control(self):
         if not BAD_CONTROL.is_file():
             self.skipTest(f"permanent external negative control is unavailable: {BAD_CONTROL}")
-        with tempfile.TemporaryDirectory(prefix="wge-rigging-negative-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="luxel-rigging-negative-") as temporary:
             directory = Path(temporary)
             inspection = self._rust_inspect(BAD_CONTROL)
             self.assertEqual(inspection["inspection"]["identity"]["source_sha256"], BAD_CONTROL_SHA256)

@@ -4,12 +4,12 @@
 //! not own a window, swapchain, or presentation loop. Tier B records therefore
 //! attest to promoted capture telemetry, not real-time presentation behavior.
 
-use wge_live_evidence_contract::{
+use luxel_live_evidence_contract::{
     ContractDiagnostic, DiagnosticCode, LIVE_FRAME_SCHEMA, LiveEvidenceSession,
     LiveFrameAttestation, LiveFrameTelemetry, PacketIdentity, SamplingPolicy, SemanticEvent,
     SemanticEventKind, SessionState, TierAResult, TierASnapshotRequest,
 };
-use wge_reference_runtime::WorldArtifact;
+use luxel_reference_runtime::WorldArtifact;
 
 use crate::{
     CaptureFormat, FrameStatus, GraphicsContractError, GraphicsReady, GraphicsScenePacket,
@@ -297,7 +297,7 @@ impl LiveGraphicsSession {
                 "promoted frame is stale or detached from the active packet".into(),
             ));
         }
-        if promoted.frame.schema != "wge.lava-frame/v1"
+        if promoted.frame.schema != "luxel.lava-frame/v1"
             || promoted.frame.capture_id != packet.body.capture.capture_id
             || promoted.frame.width_px != packet.body.capture.width_px
             || promoted.frame.height_px != packet.body.capture.height_px
@@ -393,7 +393,7 @@ mod tests {
         GraphicsReady {
             schema_version: READY_SCHEMA.into(),
             backend_id: "lava-vulkan".into(),
-            adapter_revision: "wge.lava-adapter/v7".into(),
+            adapter_revision: "luxel.lava-adapter/v7".into(),
             lava_revision: "test-revision".into(),
             julia_version: "1.11.0".into(),
             vulkan_api_version: "1.3".into(),

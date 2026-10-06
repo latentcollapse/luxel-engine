@@ -18,7 +18,7 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde::Deserialize;
-use wge_asset_contract::{RenderPreparationStatus, condition_render_asset};
+use luxel_asset_contract::{RenderPreparationStatus, condition_render_asset};
 
 use crate::asset_projection::{
     GraphicsAssetProjection, project_render_asset, validate_graphics_asset_projection,
@@ -30,7 +30,7 @@ use crate::{
     sha256_prefixed,
 };
 
-pub const KIT_LOCK_SCHEMA: &str = "wge.kit-lock/v1";
+pub const KIT_LOCK_SCHEMA: &str = "luxel.kit-lock/v1";
 /// The assets a kit must provide, by name.
 pub const KIT_ASSETS: [&str; 5] = ["ruin", "rock_a", "rock_b", "tree", "fern"];
 

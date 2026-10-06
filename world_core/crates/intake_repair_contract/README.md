@@ -1,4 +1,4 @@
-# WGE intake and repair contract
+# Luxel intake and repair contract
 
 This crate defines provider-neutral, closed JSON contracts for source intake
 and evidence-bound repair. Rust computes identities, checks source bytes and
@@ -51,19 +51,19 @@ cannot be upgraded to a pass by this contract.
 Build from the `world_core` workspace with:
 
 ```text
-cargo build --offline -p wge-intake-repair-contract --bin wge-intake-repair
+cargo build --offline -p luxel-intake-repair-contract --bin luxel-intake-repair
 ```
 
 Commands:
 
 ```text
-wge-intake-repair prepare-source-bundle DRAFT.json OUTPUT.json source_ref=PATH...
-wge-intake-repair validate-source-bundle BUNDLE.json source_id=PATH...
-wge-intake-repair normalize-intake DRAFT.json SOURCE_BUNDLE.json PROVIDER_RESPONSE OUTPUT.json source_id=PATH...
-wge-intake-repair validate-intake INTAKE.json PROVIDER_RESPONSE source_id=PATH...
-wge-intake-repair normalize-repair-proposal DRAFT.json OUTPUT.json
-wge-intake-repair validate-repair-proposal PROPOSAL.json
-wge-intake-repair validate-delta-identity DELTA.json
+luxel-intake-repair prepare-source-bundle DRAFT.json OUTPUT.json source_ref=PATH...
+luxel-intake-repair validate-source-bundle BUNDLE.json source_id=PATH...
+luxel-intake-repair normalize-intake DRAFT.json SOURCE_BUNDLE.json PROVIDER_RESPONSE OUTPUT.json source_id=PATH...
+luxel-intake-repair validate-intake INTAKE.json PROVIDER_RESPONSE source_id=PATH...
+luxel-intake-repair normalize-repair-proposal DRAFT.json OUTPUT.json
+luxel-intake-repair validate-repair-proposal PROPOSAL.json
+luxel-intake-repair validate-delta-identity DELTA.json
 ```
 
 The CLI offers transport-friendly intake and structural identity operations.

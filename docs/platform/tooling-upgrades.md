@@ -1,9 +1,9 @@
-# WGE tooling upgrade plan
+# Luxel tooling upgrade plan
 
 Written 2026-07-31, from defects actually hit rather than from speculation. Every
 item below cites the incident that motivated it.
 
-The organising observation: WGE's failures are almost never missing features.
+The organising observation: Luxel's failures are almost never missing features.
 They are **disconnections** — a component built correctly and left one wire
 short — and **evidence that lies**. A human team catches these immediately
 because someone drags the slider and looks. Nobody drags anything here. Tooling
@@ -59,7 +59,7 @@ the artifact it was taken from.
 **Landed 2026-07-31.** `pipeline/reachability.py`. Every advertised composition
 scalar declares the artifact it controls and the stage that owns it
 (`DECLARATIONS`); the sweep perturbs each one to the far end of its own bounds,
-re-rasterises, and asserts the heightfield digest moves. `wge_critic
+re-rasterises, and asserts the heightfield digest moves. `luxel_critic
 --reachability` reports failures as non-actionable `parameter_unreachable`
 findings (a dead wire is fixed in the owning stage, never by editing the DSL
 value failing to reach it). Also implements the extension: `module_reachability`
@@ -102,7 +102,7 @@ and digests — that is the same work, one artifact over.
   the shader only on steep faces at 30% strength.
 - `comfy_generate_texture.py` had zero callers anywhere in the repo.
 
-**What exists.** `wge_critic.detect_no_ops` compares two `terrain_manifest.json`
+**What exists.** `luxel_critic.detect_no_ops` compares two `terrain_manifest.json`
 files and reports composition scalars that changed while `heightfield_sha256` did
 not. It only watches the heightfield.
 
@@ -123,7 +123,7 @@ can reach is the same defect one level up.
 end of its authored bounds across every landform at once, rebuilt, recaptured,
 and every tracked metric compared to baseline. Cost is dominated by rendering
 and one render yields all metrics, so it is one build+capture per knob — four
-runs, not thirty-two. `wge_critic` reads the published matrix via
+runs, not thirty-two. `luxel_critic` reads the published matrix via
 `apply_sensitivity_matrix` and **demotes only**: a metric the matrix says nobody
 owns becomes non-actionable and loses its patches; a finding whose every
 proposed knob was measured powerless is flagged misattributed. It never
@@ -308,10 +308,10 @@ so that column pair is the fair comparison. Aliasing beats correct filtering
 drops 20× on shuffled pixels and is indifferent to filtering.
 
 **Labelled in its own output**, as the item required: `bevy_visual_acceptance`
-emits `metric_kinds`, and `wge_critic.Finding` carries `metric_kind` and prints
+emits `metric_kinds`, and `luxel_critic.Finding` carries `metric_kind` and prints
 a warning when a finding is driven by a coverage gate.
 
-**The live consequence, logged as [D16](debt-ledger.md):** `wge_critic` drives
+**The live consequence, logged as [D16](debt-ledger.md):** `luxel_critic` drives
 repairs toward `detail_density ≥ 0.65 × source`. That target is satisfiable by
 aliasing the render harder — a standing incentive to degrade the instrument in
 order to pass the gate.

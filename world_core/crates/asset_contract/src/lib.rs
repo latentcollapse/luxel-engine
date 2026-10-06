@@ -16,9 +16,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 
-pub const ASSET_CONTRACT_SCHEMA: &str = "wge.asset-contract/v1";
-pub const ASSET_RUNTIME_REQUEST_SCHEMA: &str = "wge.asset-runtime-request/v1";
-pub const ASSET_RUNTIME_RECEIPT_SCHEMA: &str = "wge.asset-runtime-receipt/v1";
+pub const ASSET_CONTRACT_SCHEMA: &str = "luxel.asset-contract/v1";
+pub const ASSET_RUNTIME_REQUEST_SCHEMA: &str = "luxel.asset-runtime-request/v1";
+pub const ASSET_RUNTIME_RECEIPT_SCHEMA: &str = "luxel.asset-runtime-receipt/v1";
 pub mod render;
 pub mod runtime;
 pub use render::*;

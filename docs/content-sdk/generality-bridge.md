@@ -1,4 +1,4 @@
-# WGE Generality Bridge
+# Luxel Generality Bridge
 
 Status: strategic R&D plan; the full-generality successor to the Game Dev harness roadmap
 Date: 2026-09-29
@@ -34,13 +34,13 @@ That is the destination. It is farther away than the current checkpoint, and the
 measurable, which is why it is crossable. Every system between here and there lands as the same
 shape the engine already uses everywhere: a typed contract, an independent validator, adversarial
 controls, and a receipt that cannot be faked. Nothing in this plan requires inventing a new way
-to build WGE. It requires extending the one it has until the answer to "can WGE make *that*?" is
+to build Luxel. It requires extending the one it has until the answer to "can Luxel make *that*?" is
 "give me the brief."
 
 Two consequences are worth saying out loud, because they set the tone for everything below:
 
 1. **The hard part is not the plumbing.** The plumbing — contracts, supervisors, receipts,
-   gates — is the part WGE is already good at. The genuinely hard parts are model taste (does
+   gates — is the part Luxel is already good at. The genuinely hard parts are model taste (does
    generated content meet a professional bar), deformation research (auto-rigging is a real
    research problem, not an integration task), and scale (a real game scene is three orders of
    magnitude denser than Riverwatch). This plan allocates effort accordingly.
@@ -60,7 +60,7 @@ Green and load-bearing as of the 2026-09-29 convergence checkpoint:
   cooldowns, effects, stacking, events, objectives, NPC policies, deterministic replay — two
   mechanically different scenarios through the same contracts. This is the GAS-equivalent the
   roadmap called for, already native.
-- **The native renderer is real and supervised.** Rust lowers `wge.graphics-scene-packet/v6` →
+- **The native renderer is real and supervised.** Rust lowers `luxel.graphics-scene-packet/v6` →
   persistent Julia worker → pinned Lava/Vulkan → offscreen capture → Rust independently
   revalidates and promotes. PBR-lite materials with role maps and clearcoat, one directional
   shadow map, analytic environment lighting, HDR resolve, semantic instancing and culling,
@@ -73,7 +73,7 @@ Green and load-bearing as of the 2026-09-29 convergence checkpoint:
   capture is not silently promoted as production quality. The bounded offscreen live-session
   supervisor and incremental gameplay session now bind exact packet/capability digests and
   produce Tier B attestations; a live window/present loop is still deliberately open.
-- **The transaction spine is enforced.** `wge_control_plane::ProjectStore` owns staging,
+- **The transaction spine is enforced.** `luxel_control_plane::ProjectStore` owns staging,
   evidence, repair, promotion, rollback; receipts re-run registered validators; corruption fails
   closed. The MCP surface exposes 16 semantic tools with zero semantic authority.
 - **The character path has a live skeleton.** `pipeline/rigging_provider.py` deterministically
@@ -91,13 +91,13 @@ no full dynamics physics substrate (a deterministic grounded-kinematic contact s
 skeletal/skinning/animation contracts in the graphics path, no prefiltered IBL / cascades / TAA /
 alpha foliage / particles / water / post, no LOD-meshlet-streaming-occlusion, one geometric
 representation (heightfield — no caves, overhangs, or interiors; MISSING_INVENTORY M4), expensive
-cold start (28–116 s, ~1.7 GB RSS), and the root README still preaches "WGE deliberately does not
+cold start (28–116 s, ~1.7 GB RSS), and the root README still preaches "Luxel deliberately does not
 implement rasterization," which the native convergence superseded. Fixing that README is
 housekeeping, but it matters: stale doctrine gets re-absorbed.
 
 ## The doctrine that generalizes (and what it forbids)
 
-Every capability WGE has ever gained landed the same way, and the universality of that shape is
+Every capability Luxel has ever gained landed the same way, and the universality of that shape is
 the actual argument for generality:
 
     intent (model) → typed spec → deterministic lowering → certified artifact → evidence → delivery
@@ -128,7 +128,7 @@ star closer?"* If it does, the slice is probably shaped right.
 **Star 1 — the morphing avatar.** A custom VTuber avatar requested through the forked
 Open-LLM-VTuber surface wrapping Cyan: concept art and a description in; a rigged, skinned,
 expression-capable character out, morphable into any character you can think of — because every
-rig conforms to a WGE skeleton profile and every face to a named blendshape profile, so "become a
+rig conforms to a Luxel skeleton profile and every face to a named blendshape profile, so "become a
 different character" is a certified rebinding operation rather than new art. This star forces the
 character pipeline (K2), the live render path (K1), and the skill-floor discipline (K5) — and it
 needs *no game at all*. It is the character campaign wearing a delivery runtime.
@@ -171,7 +171,7 @@ Campaign 1 contract slice now includes bounded Tier A/Tier B live-session
   gameplay/traversal session with sealed snapshots and restore verification. It is not yet wired
   to a live window/present loop; physics and richer incremental ability/NPC state remain open.
 
-**The gap.** A game is a loop, not a snapshot. The evidence architecture that makes WGE
+**The gap.** A game is a loop, not a snapshot. The evidence architecture that makes Luxel
 trustworthy is per-frame unaffordable at 60 Hz — and the fix must not weaken it.
 
 **Slices.**
@@ -195,7 +195,7 @@ trustworthy is per-frame unaffordable at 60 Hz — and the fix must not weaken i
    serialization (replay depends on it); Rust residency in the authority plane (collision and
    contacts are semantics, so they cannot live in Julia-the-renderer or Python-the-glue);
    character-controller-friendly queries. The first seam now selects a custom minimal grounded
-   kinematic substrate; Rapier behind a typed WGE simulation contract and avian remain candidates
+   kinematic substrate; Rapier behind a typed Luxel simulation contract and avian remain candidates
    for full dynamics only. Exit condition: a decision record with a deterministic replay test (same
    inputs → identical world state digest after 10,000 steps) and adversarial controls (spawned
    interpenetration, tunneling, stale-state rejection) — mirroring how every other substrate was
@@ -277,7 +277,7 @@ retarget, and play — with acceptance gates that catch unusable deformation, no
    promotable. Uncertain, unprofitable, and failed remain explicit outcomes. Exit condition: a
    research note with reconstruction citations, CPU reference, measured deformation error on a
    benchmark mesh set, and a materialization policy — or an honest record of why not yet.
-8. **Facial layer (avatar star).** Named blendshape profile (ARKit-52-shaped, owned by WGE) +
+8. **Facial layer (avatar star).** Named blendshape profile (ARKit-52-shaped, owned by Luxel) +
    viseme mapping + expression intent in the authoring surface. Exit condition: a conforming
    face driving visemes from the dialogue substrate with Rust-measured mouth-region variation
    per viseme (the visual-gate pattern, applied to faces).
@@ -374,10 +374,10 @@ boundary explicit.
 ### K5 — Vocabularies and the Luna floor
 
 **Current state.** The authoring kernel is frozen (spec draft 0.6 core), world vocabulary is
-real, gameplay vocabulary exists in the substrate but not yet as `wge.game` authoring surface,
+real, gameplay vocabulary exists in the substrate but not yet as `luxel.game` authoring surface,
 and the master-prompt front door is typed intake with provider-neutral interpretation.
 
-**The gap.** "Concept art and a master prompt → any game" needs: the `wge.game` vocabulary
+**The gap.** "Concept art and a master prompt → any game" needs: the `luxel.game` vocabulary
 (share the kernel, never fork a dialect), a character vocabulary, an effects/audio vocabulary,
 and every one of them drivable by Luna alone — because capability-first is the rule, but Luna is
 the only model being tested with, which makes the skill floor an engineering specification, not
@@ -385,10 +385,10 @@ a nice-to-have.
 
 **Slices.**
 
-1. **`wge.game` vocabulary.** Abilities, entities, objectives, encounters, progression, rules —
+1. **`luxel.game` vocabulary.** Abilities, entities, objectives, encounters, progression, rules —
    all as declarative data over the existing gameplay substrate. Recognition-first: scaffold
    from any existing world; every error names the fix. Exit condition: a second mechanically
-   different game authored in `wge.game` on a second world, per roadmap Phase 5's generality
+   different game authored in `luxel.game` on a second world, per roadmap Phase 5's generality
    test.
 2. **Character and effects vocabularies** as versioned domains per language spec §3: character
    (skeleton profile choice, proportions intent, material palette, expression set), effects
@@ -414,7 +414,7 @@ a nice-to-have.
 **R&D risk.** Low technical, high discipline: the temptation is to grow vocabularies into
 general-purpose languages. The spec already forbids it (§3: no arbitrary gameplay scripting, no
 all-genre DSL); unique mechanics stay sandboxed code modules with typed interfaces. Also
-housekeeping with doctrinal weight: reconcile the root README's stale "WGE does not implement
+housekeeping with doctrinal weight: reconcile the root README's stale "Luxel does not implement
 rasterization" framing with the native convergence, so no future session re-absorbs the old
 backend-swap doctrine.
 
@@ -434,7 +434,7 @@ live operation is declared-grade.**
   telemetry.
 
 A frame that cannot be certified never certifies; a live session whose samples fail gets demoted
-and reported. This is how AAA techniques arrive without sacrificing the property that makes WGE
+and reported. This is how AAA techniques arrive without sacrificing the property that makes Luxel
 different from every engine that ships a screenshot and calls it QA.
 
 ## Campaign sequencing
@@ -451,7 +451,7 @@ committed; nothing starts on vibes.
 | 4 | Renderer breadth I: IBL, cascades, alpha foliage/LOD | K3.2–K3.4 | Register's core visual gaps closed |
 | 5 | Retargeting + asset ingestion at scale | K2.5, K2.6 | Content variety; profile-swap morphing |
 | 6 | Second representation decision + cave/overhang slice | K4 | Worlds beyond the heightfield |
-| 7 | `wge.game` + character/effects vocabularies + front door | K5.1–K5.3 | One-shot generality; roadmap Phase 5 |
+| 7 | `luxel.game` + character/effects vocabularies + front door | K5.1–K5.3 | One-shot generality; roadmap Phase 5 |
 | 8 | Auto-rigging R&D + facial layer | K2.7, K2.8 | Model-authored characters; avatar star complete |
 | 9 | Scene scale machinery + effects breadth + cold start | K3.5–K3.7, K1.4, K1.5 | Production-density scenes; wallpaper star viable |
 | 10 | Luna-floor harness across all domains; Star 1 and Star 2 shipped as proofs | K5.4 | The mission, demonstrated twice |

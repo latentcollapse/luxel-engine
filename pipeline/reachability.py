@@ -1,13 +1,13 @@
 """Reachability manifest: does every advertised parameter reach its artifact?
 
-WGE tooling item 2 (see WGE/docs/platform/tooling-upgrades.md). Three no-op defects
+Luxel tooling item 2 (see Luxel/docs/platform/tooling-upgrades.md). Three no-op defects
 landed in a single day -- composition scalars the rasterizer never read,
 material textures the shader admitted only on steep faces, a generator with
 zero callers -- and every other signal stayed green through all of them: the
 DSL validated, the spec serialised, the build succeeded, the world was
 playable. The only evidence was an artifact that did not move.
 
-``wge_critic.detect_no_ops`` catches this after the fact, by diffing two
+``luxel_critic.detect_no_ops`` catches this after the fact, by diffing two
 consecutive ``terrain_manifest.json`` builds, and only for scalars the
 manifest happens to record. This module makes the check active and total:
 every parameter *declares* which artifact digest it claims to control, then

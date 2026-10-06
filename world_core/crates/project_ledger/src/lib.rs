@@ -1,4 +1,4 @@
-//! Rust-owned project ledger for the WGE MVP vertical slice.
+//! Rust-owned project ledger for the Luxel MVP vertical slice.
 //!
 //! The ledger is deliberately small. It is not a universal game DSL and it
 //! does not execute authoring text. It records a typed project specification,
@@ -21,12 +21,12 @@ pub use intake_compiler::{PROJECT_TEMPLATE_SCHEMA, ProjectTemplate, compile_proj
 pub use scene::*;
 pub use world::validate_world_bundle;
 
-pub const PROJECT_SPEC_SCHEMA: &str = "wge.project-spec/v1";
-pub const EVIDENCE_SCHEMA: &str = "wge.evidence/v1";
-pub const SNAPSHOT_SCHEMA: &str = "wge.project-snapshot/v1";
-pub const UNITY_IMPORT_SCHEMA: &str = "wge.unity-mvp-import/v1";
-pub const WORK_ORDER_SCHEMA: &str = "wge.work-order/v1";
-pub const REFERENCE_RUNTIME_PROFILE: &str = "wge.reference-runtime/v1";
+pub const PROJECT_SPEC_SCHEMA: &str = "luxel.project-spec/v1";
+pub const EVIDENCE_SCHEMA: &str = "luxel.evidence/v1";
+pub const SNAPSHOT_SCHEMA: &str = "luxel.project-snapshot/v1";
+pub const UNITY_IMPORT_SCHEMA: &str = "luxel.unity-mvp-import/v1";
+pub const WORK_ORDER_SCHEMA: &str = "luxel.work-order/v1";
+pub const REFERENCE_RUNTIME_PROFILE: &str = "luxel.reference-runtime/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LedgerError {
@@ -116,7 +116,7 @@ pub struct IntakeProviderProvenance {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct SourceProvenance {
-    pub origin: wge_intake_repair_contract::ProvenanceOrigin,
+    pub origin: luxel_intake_repair_contract::ProvenanceOrigin,
     pub origin_ref: String,
     pub provider_id: Option<String>,
     pub provider_version: Option<String>,
@@ -149,7 +149,7 @@ pub struct SemanticClaim {
     pub statement: String,
     pub confidence: f64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub domain: Option<wge_intake_repair_contract::ClaimDomain>,
+    pub domain: Option<luxel_intake_repair_contract::ClaimDomain>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<ClaimEvidence>,
 }
@@ -158,7 +158,7 @@ pub struct SemanticClaim {
 #[serde(deny_unknown_fields)]
 pub struct ClaimEvidence {
     pub source_id: String,
-    pub region: Option<wge_intake_repair_contract::SourceRegion>,
+    pub region: Option<luxel_intake_repair_contract::SourceRegion>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1329,7 +1329,7 @@ pub(crate) mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use wge_reference_runtime::{
+    use luxel_reference_runtime::{
         AuthoredLayout, TraversalEvidence, WorldArtifact, build_from_layout_path,
     };
 
@@ -1369,7 +1369,7 @@ pub(crate) mod tests {
         ];
         ProjectSpec {
             schema_version: PROJECT_SPEC_SCHEMA.into(),
-            project_id: "wge-mvp-fixture".into(),
+            project_id: "luxel-mvp-fixture".into(),
             title: "Fixture Gate Run".into(),
             brief: BriefSpec {
                 text: "Traverse the gate, activate the ability, and claim the objective.".into(),
@@ -1499,7 +1499,7 @@ pub(crate) mod tests {
 
     fn native_candidate(label: &str) -> (PathBuf, ProjectSpec, WorldArtifact, TraversalEvidence) {
         let root = std::env::temp_dir().join(format!(
-            "wge-project-ledger-{label}-{}-{}",
+            "luxel-project-ledger-{label}-{}-{}",
             std::process::id(),
             TEMP_ID.fetch_add(1, Ordering::Relaxed)
         ));
@@ -1512,7 +1512,7 @@ pub(crate) mod tests {
             workspace.join("world_core/crates/reference_runtime/examples/riverwatch.layout.json");
         let layout: AuthoredLayout = load_json(&layout_path).unwrap();
         let terrain_lab = workspace.join("terrain_lab");
-        let julia = std::env::var_os("WGE_JULIA")
+        let julia = std::env::var_os("LUXEL_JULIA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("julia"));
         let build = build_from_layout_path(&layout_path, &julia, &terrain_lab).unwrap();
@@ -1532,8 +1532,8 @@ pub(crate) mod tests {
             .map(|spawn| SpawnPoint {
                 spawn_id: spawn.spawn_id.clone(),
                 team: match spawn.role {
-                    wge_reference_runtime::SpawnRole::PlayerStart => "player",
-                    wge_reference_runtime::SpawnRole::Opponent => "opponent",
+                    luxel_reference_runtime::SpawnRole::PlayerStart => "player",
+                    luxel_reference_runtime::SpawnRole::Opponent => "opponent",
                 }
                 .into(),
                 position_xz_m: spawn.position_xz_m,
@@ -1547,10 +1547,10 @@ pub(crate) mod tests {
         let world_ref = ArtifactRef {
             artifact_id: build.world.artifact_id.clone(),
             kind: "reference_world".into(),
-            schema_version: wge_reference_runtime::WORLD_SCHEMA.into(),
+            schema_version: luxel_reference_runtime::WORLD_SCHEMA.into(),
             path: "world_artifact.json".into(),
             sha256: sha256_prefixed(&world_bytes),
-            producer: "wge-reference-runtime".into(),
+            producer: "luxel-reference-runtime".into(),
         };
         let traversal_ref = ArtifactRef {
             artifact_id: format!(
@@ -1561,10 +1561,10 @@ pub(crate) mod tests {
                     .trim_start_matches("sha256:")
             ),
             kind: "traversal_evidence".into(),
-            schema_version: wge_reference_runtime::TRAVERSAL_EVIDENCE_SCHEMA.into(),
+            schema_version: luxel_reference_runtime::TRAVERSAL_EVIDENCE_SCHEMA.into(),
             path: "traversal_evidence.json".into(),
             sha256: sha256_prefixed(&traversal_bytes),
-            producer: "wge-reference-runtime".into(),
+            producer: "luxel-reference-runtime".into(),
         };
         candidate.world.reference_runtime = Some(ReferenceRuntimeWorldBundle {
             world_artifact: world_ref.clone(),

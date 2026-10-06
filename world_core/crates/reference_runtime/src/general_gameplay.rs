@@ -9,7 +9,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use wge_gameplay_contract::general::{
+use luxel_gameplay_contract::general::{
     AbilityId, CostPayer, EffectOperation, EffectRecipient, EffectSpec, EntityControl, EntityId,
     GENERAL_SNAPSHOT_SCHEMA, GENERAL_TRACE_SCHEMA, GameplayTag, GeneralAbilitySpec,
     GeneralGameSpec, GeneralGameplayReceipt, GeneralInputEvent, GeneralObjectiveSpec, GeneralTrace,
@@ -21,7 +21,7 @@ use wge_gameplay_contract::general::{
 use crate::fields::prefixed_sha256;
 use crate::{ReferenceRuntimeError, WorldArtifact};
 
-pub const GENERAL_GAMEPLAY_EVIDENCE_SCHEMA: &str = "wge.reference-general-gameplay/v1";
+pub const GENERAL_GAMEPLAY_EVIDENCE_SCHEMA: &str = "luxel.reference-general-gameplay/v1";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -51,7 +51,7 @@ pub fn build_general_gameplay_evidence(
     let (spec, trace) = scenario(world)?;
     validate_general_snapshot(&spec).map_err(general_error)?;
     let receipt = run_general_replay(&spec, &trace).map_err(general_error)?;
-    if receipt.body.outcome != wge_gameplay_contract::general::GeneralOutcome::Won {
+    if receipt.body.outcome != luxel_gameplay_contract::general::GeneralOutcome::Won {
         return Err(ReferenceRuntimeError::contract(
             "general world-bound gameplay scenario did not win".into(),
         ));
@@ -169,7 +169,7 @@ fn scenario(
     let mut entities = BTreeMap::new();
     entities.insert(
         player.clone(),
-        wge_gameplay_contract::general::GeneralEntitySpec {
+        luxel_gameplay_contract::general::GeneralEntitySpec {
             control: EntityControl::Player,
             location: start.clone(),
             resources: BTreeMap::from([
@@ -194,7 +194,7 @@ fn scenario(
     );
     entities.insert(
         EntityId::from("general_support"),
-        wge_gameplay_contract::general::GeneralEntitySpec {
+        luxel_gameplay_contract::general::GeneralEntitySpec {
             control: EntityControl::Player,
             location: start.clone(),
             resources: BTreeMap::from([
@@ -221,7 +221,7 @@ fn scenario(
         let id = EntityId::new(format!("npc_{}", spawn.spawn_id));
         entities.insert(
             id,
-            wge_gameplay_contract::general::GeneralEntitySpec {
+            luxel_gameplay_contract::general::GeneralEntitySpec {
                 control: EntityControl::Npc {
                     policy: NpcPolicy::Passive,
                 },

@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use wge_project_ledger::{
+use luxel_project_ledger::{
     SceneArtifact, SceneImportance, SceneObjectProjection, SceneTransform,
     project_scene_for_graphics, validate_scene_artifact,
 };
@@ -320,7 +320,7 @@ fn append_scene_instance(
     Ok(())
 }
 
-fn project_importance(importance: wge_project_ledger::SceneImportance) -> InstanceImportance {
+fn project_importance(importance: luxel_project_ledger::SceneImportance) -> InstanceImportance {
     match importance {
         SceneImportance::Background => InstanceImportance::Background,
         SceneImportance::Landmark => InstanceImportance::Landmark,

@@ -5,7 +5,7 @@ semantics remain an explicit integration decision.
 
 ## Decision
 
-The first WGE physics seam is a deterministic, grounded kinematic disc over the
+The first Luxel physics seam is a deterministic, grounded kinematic disc over the
 already certified `WorldArtifact`. It reuses the authored traversal radius and
 grade limit, Julia's height/grade/region fields, and Rust-owned obstacle,
 world-bound, and navigation semantics. It does not own terrain generation,
@@ -57,7 +57,7 @@ keeping with the existing strict overlap comparison in navigation.
   Acceleration, inertia, jumping, gravity, stepping, friction, sliding, and
   dynamic bodies require an explicit gameplay/runtime contract and evidence
   semantics; they are not implied by this kinematic query layer.
-- Engine adapters need a separately validated mapping from the canonical WGE
+- Engine adapters need a separately validated mapping from the canonical Luxel
   body radius, terrain field, obstacle IDs, and contact receipts to engine
   collider handles. No engine-native solver result is certified by this
   reference seam.

@@ -8,10 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
-use wge_native_graphics_contract::backdrop::{
+use luxel_native_graphics_contract::backdrop::{
     BACKDROP_FAR_PLANE_M, BACKDROP_INSTANCE_PREFIX, BACKDROP_SEAT_DROP_M, apply_backdrop, backdrop_set_from_glb,
 };
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     BackdropSet, BufferPayload, Campaign2Inputs, Campaign2View, GraphicsScenePacket, KitSet, ParityContent,
     ParityPolicyCandidate, canonical_json, load_backdrop_set, load_kit_set, lower_campaign2_packet_inputs,
     sha256_prefixed, validate_scene_packet, CONVERGE4_ATMOSPHERE, CONVERGE4_SHADOW_FIT,
@@ -136,7 +136,7 @@ fn apply_backdrop_seats_every_tile_and_opens_the_far_plane() {
 fn write_lock(dir: &Path, glb: &[u8], overrides: serde_json::Value) -> PathBuf {
     std::fs::write(dir.join("backdrop.glb"), glb).expect("write glb");
     let mut lock = serde_json::json!({
-        "schema_version": "wge.backdrop-lock/v1",
+        "schema_version": "luxel.backdrop-lock/v1",
         "set_id": "synthetic",
         "spec_sha256": "sha256:spec",
         "gaea_pixels": {"Height_Out.png": "0".repeat(64)},
@@ -158,7 +158,7 @@ fn write_lock(dir: &Path, glb: &[u8], overrides: serde_json::Value) -> PathBuf {
 
 #[test]
 fn the_lock_pins_the_glb_and_its_gaea_source() {
-    let dir = std::env::temp_dir().join(format!("wge-backdrop-lock-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("luxel-backdrop-lock-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     let glb = backdrop_glb(2, 5, 4000.0, 900.0);
 
@@ -171,7 +171,7 @@ fn the_lock_pins_the_glb_and_its_gaea_source() {
     let refusals = [
         (serde_json::json!({"sha256": sha256_prefixed(b"other")}), "the lock pins"),
         (serde_json::json!({"bytes": glb.len() + 1}), "the lock pins"),
-        (serde_json::json!({"schema_version": "wge.backdrop-lock/v0"}), "unsupported"),
+        (serde_json::json!({"schema_version": "luxel.backdrop-lock/v0"}), "unsupported"),
         (serde_json::json!({"gaea_pixels": {}}), "pixel digest"),
         (serde_json::json!({"extra": 1}), "malformed"),
         (serde_json::json!({"glb": "missing.glb"}), "build it with"),
@@ -249,7 +249,7 @@ fn converge4_requires_its_backdrop_and_adds_only_the_backdrop() {
 
 #[test]
 fn l1a_shadow_map_size_is_optional_bounded_and_absent_by_default() {
-    use wge_native_graphics_contract::{RenderPolicy, ShadowFitPolicy, validate_render_policy};
+    use luxel_native_graphics_contract::{RenderPolicy, ShadowFitPolicy, validate_render_policy};
     // Absent: not serialised, so converge0..3 packets keep their bytes.
     let legacy = ShadowFitPolicy { view_distance_m: 60, map_size_px: None };
     assert_eq!(serde_json::to_string(&legacy).expect("json"), r#"{"view_distance_m":60}"#);
@@ -280,7 +280,7 @@ fn the_real_backdrop_stays_under_the_world_terrain() {
     // backdrop surfacing through the world (a constant 40 m sink against a
     // valley floor that rose 50 m). The builder now caps the field; this
     // checks the lowered packet, where it matters.
-    use wge_native_graphics_contract::still_water::TerrainSurface;
+    use luxel_native_graphics_contract::still_water::TerrainSurface;
     let kit = kit2();
     let backdrop = load_backdrop_set(&repo_root().join("tools/backdrop/backdrop1.lock.json"), &repo_root())
         .expect("built backdrop1 loads (run tools/build_backdrop.py --set backdrop1)");

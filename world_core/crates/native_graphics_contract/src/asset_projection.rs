@@ -10,7 +10,7 @@ use std::collections::BTreeSet;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
-use wge_asset_contract::{
+use luxel_asset_contract::{
     RenderAlphaMode, RenderAssetPackage, RenderTextureColorSpace, validate_render_asset_package,
 };
 
@@ -19,7 +19,7 @@ use crate::{
     TextureMipLevel, TexturePayload, TextureReference, sha256_prefixed,
 };
 
-pub const GRAPHICS_ASSET_PROJECTION_SCHEMA: &str = "wge.graphics-asset-projection/v1";
+pub const GRAPHICS_ASSET_PROJECTION_SCHEMA: &str = "luxel.graphics-asset-projection/v1";
 
 /// A conditioned mesh in the current graphics vocabulary. Tangents are part of
 /// the packet now, so scene composition cannot silently discard the Rust-owned
@@ -143,7 +143,7 @@ pub fn project_render_asset(
     Ok(projection)
 }
 
-fn project_texture_payload(texture: &wge_asset_contract::RenderTexture) -> TexturePayload {
+fn project_texture_payload(texture: &luxel_asset_contract::RenderTexture) -> TexturePayload {
     if texture.mip_chain.is_empty() {
         return TexturePayload::Rgba8(STANDARD.encode(&texture.rgba8));
     }
@@ -161,7 +161,7 @@ fn project_texture_payload(texture: &wge_asset_contract::RenderTexture) -> Textu
     TexturePayload::Rgba8MipChain { levels }
 }
 
-fn texture_payload_sha256(texture: &wge_asset_contract::RenderTexture) -> String {
+fn texture_payload_sha256(texture: &luxel_asset_contract::RenderTexture) -> String {
     let mut bytes = Vec::with_capacity(
         texture.rgba8.len()
             + texture

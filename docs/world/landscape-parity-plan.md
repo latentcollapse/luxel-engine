@@ -11,7 +11,7 @@ Close frames that read as Witcher 3-class landscape: dense detailed ground, grou
 ## Decision: Gaea is the landform engine
 
 - **Verified.** There is no official Gaea MCP or agent plugin. Community `gaea-mcp` servers exist; they are unofficial and treat the `.terrain` format as unstable. Not adopted.
-- **Verified.** `pipeline/gaea_terrain.py` (439 lines) reads and edits `.terrain` JSON and inserts nodes. Gaea builds the result headlessly under Proton (`docs/integrations/gaea-programme.md` §3.3). Gaea is a dependency WGE drives.
+- **Verified.** `pipeline/gaea_terrain.py` (439 lines) reads and edits `.terrain` JSON and inserts nodes. Gaea builds the result headlessly under Proton (`docs/integrations/gaea-programme.md` §3.3). Gaea is a dependency Luxel drives.
 - **Verified.** Our own generator (`terrain_lab`, ~1,160 lines of Julia) is an erosion kernel (hydraulic, thermal, flux field, valley cross-section), not a graph engine. Procedural mountain generation failed twice and was retired 2026-08-04 (commit `9fa9faa`). Not rebuilt.
 - **Decision.** Gaea produces landform. `terrain_lab` stays as fallback and for play-space fields Gaea cannot know about (lanes). Blender handles asset and mesh work through the existing `blenderMCP`.
 
@@ -23,7 +23,7 @@ Terrain is generated **without reference to the play space**, then the play spac
 
 ### P1. Gaea driver as a local MCP tool — **DONE 2026-10-05**
 - `pipeline/gaea_build.py`: the headless build driver (GAEA_PROGRAMME §8 step 5). It stages the graph to a space-free name on NVMe, runs Swarm under a `script` pty with `--silent`, passes `--seed`, `--resolution` and `-v` variables (restricted to command-line-safe characters), decides success by files written, never by exit code, cleans staging on success and failure, and writes `gaea-build-receipt.json`. `compare` pixel-diffs two builds.
-- `pipeline/gaea_mcp_server.py`: stdio MCP server `wgeGaea` (registered in `.mcp.json`) with `gaea_status`, `gaea_list_examples`, `gaea_inspect_graph`, `gaea_mark_export`, `gaea_insert_node`, `gaea_build`, `gaea_compare_builds`. Edits never write in place or into Gaea's `Examples/`.
+- `pipeline/gaea_mcp_server.py`: stdio MCP server `luxelGaea` (registered in `.mcp.json`) with `gaea_status`, `gaea_list_examples`, `gaea_inspect_graph`, `gaea_mark_export`, `gaea_insert_node`, `gaea_build`, `gaea_compare_builds`. Edits never write in place or into Gaea's `Examples/`.
 - Swarm also builds nothing, silently, for a graph whose `BuildDefinition` has no `Type` (29 of 59 examples). `add_save_definition` fills it in as `Standard`; `gaea_build.preflight` refuses a graph with no export or no build Type before Swarm is launched.
 - `gaea_terrain.load_graph` accepts the trailing commas Gaea's Newtonsoft writer allows (1 of 59 examples, `Glacier - Complex Setup`, failed to load before).
 - **Verified live:** `Snowy Ridge` built at 512 in 21–25 s (five builds); `Detailed Snow Peak` built through the MCP server over stdio in 30.5 s, producing height, snow, hardness and depth maps. A graph with no `SaveDefinition` raised `GaeaBuildError` as required. Tests: `tests/test_gaea_build.py` (24 cases; 5 of 5 driver mutations caught).
@@ -35,7 +35,7 @@ Terrain is generated **without reference to the play space**, then the play spac
 - Accept (with P4): N-1 ridge contrast, far-ridge contrast against the sky ≤ 0.40 of the foreground's (currently 0.65, not met since CONVERGE-1 because the 480 m world is too small).
 
 ### P3. Digest pinning
-OPEN_DECISIONS item 9 was in fact resolved on 2026-08-03 (WGE drives Gaea; digest-pinned imports stay Grade A as declared inputs). This plan's first draft called it undecided; that was wrong.
+OPEN_DECISIONS item 9 was in fact resolved on 2026-08-03 (Luxel drives Gaea; digest-pinned imports stay Grade A as declared inputs). This plan's first draft called it undecided; that was wrong.
 
 **Measured 2026-10-05, which changes what "pinned" has to mean:**
 - **File digests are useless.** Gaea writes `date:create` / `date:modify` into every PNG, so two builds with identical pixels have different file SHA-256s.

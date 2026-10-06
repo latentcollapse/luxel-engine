@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use wge_gameplay_contract::gcs::{
+use luxel_gameplay_contract::gcs::{
     CapabilityFeatureId, CapabilityId, CapabilityRegistry, CapabilitySpec, DiagnosticSeverity,
     GCS_MANIFEST_SCHEMA, KitId, KitManifest, KitProfileSpec, NetworkRequirement,
     PersistenceRequirement, PersistenceScope, ProfileId, ResolutionCode, RuntimeCostClass,
@@ -56,7 +56,7 @@ fn registry(
     CapabilityRegistry::new(capabilities, profiles).expect("test registry is well-formed")
 }
 
-fn codes(report: &wge_gameplay_contract::gcs::ResolutionReport) -> BTreeSet<ResolutionCode> {
+fn codes(report: &luxel_gameplay_contract::gcs::ResolutionReport) -> BTreeSet<ResolutionCode> {
     report
         .diagnostics
         .iter()
@@ -309,7 +309,7 @@ fn resolved_kit_json_round_trips_without_changing_its_digest() {
         .resolved
         .expect("survival profile resolves");
     let bytes = resolved.canonical_bytes().unwrap();
-    let decoded: wge_gameplay_contract::gcs::ResolvedKit =
+    let decoded: luxel_gameplay_contract::gcs::ResolvedKit =
         serde_json::from_slice(&bytes).expect("resolved kit is typed JSON");
 
     assert_eq!(decoded.canonical_bytes().unwrap(), bytes);

@@ -5,7 +5,7 @@ using GeometryBasics: Vec2f, Vec4f
 using Lava
 using SHA
 using Vulkan
-import WGEGraphics
+import LuxelGraphics
 
 export AdapterError,
     LavaBackend,
@@ -17,7 +17,7 @@ export AdapterError,
     render_texture_probe,
     render_scene
 
-const ADAPTER_REVISION = "wge.lava-adapter/v7"
+const ADAPTER_REVISION = "luxel.lava-adapter/v7"
 const LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 const VULKAN_REVISION = "03b4ca2351477ccbb8ee378f512da50f7eec7bac"
 const VULKAN_CORE_REVISION = "1d02829e8fa92da430d879db4dd7bf564a872035"
@@ -121,7 +121,7 @@ single place that asymmetry is decided, so it can be tested rather than
 discovered in a screenshot.
 """
 function _surface_sampler_spec(
-    policy::WGEGraphics.RenderPolicy,
+    policy::LuxelGraphics.RenderPolicy,
     surface::Symbol,
 )::SamplerSpec
     if surface === :mesh
@@ -457,9 +457,9 @@ sky along it is meaningless, and the honest response is a typed refusal.
 """
 function _sky_view_arguments(
     camera_frame::CameraFrame,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     lighting::DirectionalLighting,
-    sky::WGEGraphics.SkyPolicy,
+    sky::LuxelGraphics.SkyPolicy,
 )
     camera_frame.mode > 0.5f0 || throw(AdapterError(
         "unsupported_render_policy",
@@ -510,9 +510,9 @@ The Preetham fit is undefined for a sun at or below the horizon, so that is a
 typed refusal rather than a clamped sky.
 """
 function _sky_parameters(
-    policy::WGEGraphics.RenderPolicy,
+    policy::LuxelGraphics.RenderPolicy,
     lighting::DirectionalLighting,
-    environment::WGEGraphics.EnvironmentPacket,
+    environment::LuxelGraphics.EnvironmentPacket,
 )::Vec4f
     sky = policy.sky
     (sky === nothing || sky.model !== :analytic) && return Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
@@ -531,7 +531,7 @@ end
 """Per-surface options in vertex-output slot 20: `(albedo override enabled,
 override albedo, IBL enabled, 0)` from `render_policy.debug` and
 `render_policy.ibl`. Absent axes are zeros: the historical paths."""
-function _surface_options(policy::WGEGraphics.RenderPolicy)::Vec4f
+function _surface_options(policy::LuxelGraphics.RenderPolicy)::Vec4f
     debug = policy.debug
     return Vec4f(
         debug === nothing ? 0.0f0 : 1.0f0,
@@ -541,11 +541,11 @@ function _surface_options(policy::WGEGraphics.RenderPolicy)::Vec4f
     )
 end
 
-_ibl_enabled(policy::WGEGraphics.RenderPolicy) = policy.ibl !== nothing && policy.ibl.enabled
+_ibl_enabled(policy::LuxelGraphics.RenderPolicy) = policy.ibl !== nothing && policy.ibl.enabled
 
 """Lower `render_policy.atmosphere` into `(enabled, k [1/m], σ₀ [1/m], sun gain)`.
 Absent is all zeros, which the shaders read as the historical linear fog."""
-function _atmosphere_parameters(policy::WGEGraphics.RenderPolicy)::Vec4f
+function _atmosphere_parameters(policy::LuxelGraphics.RenderPolicy)::Vec4f
     atmosphere = policy.atmosphere
     atmosphere === nothing && return Vec4f(0.0f0, 0.0f0, 0.0f0, 0.0f0)
     return Vec4f(
@@ -1234,7 +1234,7 @@ function _project_world(
     perspective_distance = max(forward_distance, camera_projection[3])
     scale = 1.0f0 - camera_mode + camera_mode * perspective_distance
     ndc_x = horizontal / (camera_projection[1] * scale)
-    # WGE camera up is a semantic world-space basis. Vulkan's positive-height
+    # Luxel camera up is a semantic world-space basis. Vulkan's positive-height
     # viewport maps positive NDC Y toward the framebuffer's lower rows, so
     # negate the vertical component at this single lowering boundary. Keeping
     # the flip here makes raster geometry, overlays, measurements, and shadow
@@ -2013,7 +2013,7 @@ end
 0.25f0 in Float32 and `filter_texel = 1.0f0` gives `1.0f0/512.0f0` — so an
 absent policy is byte-identical, which is the whole premise of this channel.
 """
-@inline function _shadow_uniform(policy::WGEGraphics.RenderPolicy, light_frame::CameraFrame)::Vec4f
+@inline function _shadow_uniform(policy::LuxelGraphics.RenderPolicy, light_frame::CameraFrame)::Vec4f
     shadow = policy.shadow
     return Vec4f(
         _bp(shadow.darkness_bp),
@@ -2116,7 +2116,7 @@ function _anisotropy_refusal_detail(requested::Int32, capabilities::GpuCapabilit
     requested_text = "render_policy.sampler.anisotropy=$requested is refused. "
     if !capabilities.probe_complete
         return requested_text *
-            "The device capability probe did not complete, so WGE cannot tell " *
+            "The device capability probe did not complete, so Luxel cannot tell " *
             "whether this GPU supports anisotropy. Request anisotropy 1, or fix " *
             "the probe before requesting more."
     end
@@ -2138,7 +2138,7 @@ function _anisotropy_refusal_detail(requested::Int32, capabilities::GpuCapabilit
 end
 
 function _assert_render_policy_supported(
-    policy::WGEGraphics.RenderPolicy,
+    policy::LuxelGraphics.RenderPolicy,
     capabilities::GpuCapabilityProfile;
     layered_terrain::Bool=false,
 )
@@ -2173,8 +2173,8 @@ end
 
 # Resolve-pass policy uniforms. The packed vectors carry the render policy in
 # the exact fields the shader needs; `_resolve_policy` is the ONE lowering point
-# from `WGEGraphics.RenderPolicy` to GPU state, so "what does absent mean" is
-# decided in WGEGraphics (auditable, cross-language tested) and nowhere else.
+# from `LuxelGraphics.RenderPolicy` to GPU state, so "what does absent mean" is
+# decided in LuxelGraphics (auditable, cross-language tested) and nowhere else.
 struct ResolvePolicy
     grade_lift_rgb::Vec4f        # lift r,g,b, unused
     grade_gain_rgb::Vec4f        # gain r,g,b, unused
@@ -2184,7 +2184,7 @@ struct ResolvePolicy
     dither::Vec4f                # amplitude_milli_lsb, unused, unused, unused
 end
 
-@inline _bp(value::Int32)::Float32 = Float32(value) / Float32(WGEGraphics.POLICY_SCALE)
+@inline _bp(value::Int32)::Float32 = Float32(value) / Float32(LuxelGraphics.POLICY_SCALE)
 
 """Lower a validated RenderPolicy into resolve-pass uniforms.
 
@@ -2193,7 +2193,7 @@ strength 0, gamma/saturation/gain identity, dither 0. A packet with no
 `render_policy` section therefore produces byte-identical pixels, which is
 asserted end to end by the frozen-baseline comparison.
 """
-function _resolve_policy(policy::WGEGraphics.RenderPolicy)::ResolvePolicy
+function _resolve_policy(policy::LuxelGraphics.RenderPolicy)::ResolvePolicy
     grade = policy.grade
     bloom = policy.bloom
     vignette = policy.vignette
@@ -3211,7 +3211,7 @@ end
 """MSAA samples of the scene target: the foliage-coverage policy's, else 1.
 A device without alpha-to-one cannot honour it (alpha-to-coverage would leave
 foliage edges translucent in the capture), so the policy is refused there."""
-function _scene_samples(packet::WGEGraphics.GraphicsScenePacket)::Int
+function _scene_samples(packet::LuxelGraphics.GraphicsScenePacket)::Int
     coverage = packet.render_policy.foliage_coverage
     coverage === nothing && return 1
     Lava.alpha_to_one_supported() || throw(AdapterError(
@@ -3322,7 +3322,7 @@ end
 function backend_probe(state::LavaBackend=backend())
     properties = _physical_properties(state.context)
     return (
-        schema="wge.lava-backend-probe/v1",
+        schema="luxel.lava-backend-probe/v1",
         adapter_revision=ADAPTER_REVISION,
         lava_revision=LAVA_REVISION,
         vulkan_revision=VULKAN_REVISION,
@@ -3345,7 +3345,7 @@ end
 function backend_ready(state::LavaBackend=backend())
     properties = _physical_properties(state.context)
     return (
-        schema_version="wge.graphics-ready/v1",
+        schema_version="luxel.graphics-ready/v1",
         backend_id="lava-vulkan",
         adapter_revision=ADAPTER_REVISION,
         lava_revision=LAVA_REVISION,
@@ -3387,7 +3387,7 @@ function render_probe(
     center = pixels[cld(size(pixels, 1), 2), cld(size(pixels, 2), 2)]
     green_pixels = count(pixel -> pixel[2] > 0.9f0 && pixel[1] < 0.1f0, pixels)
     return (
-        schema="wge.lava-render-probe/v1",
+        schema="luxel.lava-render-probe/v1",
         backend_id="lava-vulkan",
         adapter_revision=ADAPTER_REVISION,
         lava_revision=LAVA_REVISION,
@@ -3437,7 +3437,7 @@ function render_depth_probe(state::LavaBackend=backend())
     pixels = readback_framebuffer(framebuffer)
     center = pixels[cld(size(pixels, 1), 2), cld(size(pixels, 2), 2)]
     return (
-        schema="wge.lava-depth-probe/v1",
+        schema="luxel.lava-depth-probe/v1",
         width_px=width,
         height_px=height,
         center_rgba=collect(center),
@@ -3698,7 +3698,7 @@ Rust contract's independent expectation exactly: distinct source texture ids
 referenced by any material in the packet, summed mip level counts and decoded
 payload bytes, and the widest sampler LOD span. Adapter-owned default textures
 are excluded. Nothing is reported when no source textures are referenced."""
-function _packet_residency_summary(packet::WGEGraphics.GraphicsScenePacket)
+function _packet_residency_summary(packet::LuxelGraphics.GraphicsScenePacket)
     referenced = Set{String}()
     for material in packet.materials
         union!(referenced, material.texture_ids)
@@ -3781,7 +3781,7 @@ function _texture_matrix(
 end
 
 function _material_texture_id(
-    material::WGEGraphics.MaterialPacket,
+    material::LuxelGraphics.MaterialPacket,
     ::Val{:albedo},
 )::Union{Nothing,String}
     length(material.texture_ids) <= 1 ||
@@ -3789,10 +3789,10 @@ function _material_texture_id(
     return isempty(material.texture_ids) ? nothing : only(material.texture_ids)
 end
 
-_material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:normal}) = material.normal_texture_id
-_material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:roughness}) = material.roughness_texture_id
-_material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:occlusion}) = material.occlusion_texture_id
-_material_texture_id(material::WGEGraphics.MaterialPacket, ::Val{:emissive}) = material.emissive_texture_id
+_material_texture_id(material::LuxelGraphics.MaterialPacket, ::Val{:normal}) = material.normal_texture_id
+_material_texture_id(material::LuxelGraphics.MaterialPacket, ::Val{:roughness}) = material.roughness_texture_id
+_material_texture_id(material::LuxelGraphics.MaterialPacket, ::Val{:occlusion}) = material.occlusion_texture_id
+_material_texture_id(material::LuxelGraphics.MaterialPacket, ::Val{:emissive}) = material.emissive_texture_id
 
 function _default_texture_payload(::Val{:albedo})
     return (bytes=UInt8[255, 255, 255, 255], width=UInt32(1), height=UInt32(1), color_space=:linear)
@@ -3815,7 +3815,7 @@ function _default_texture_payload(::Val{:emissive})
 end
 
 function _texture_payload(
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     ::Nothing,
     role::Val,
 )
@@ -3829,7 +3829,7 @@ _texture_color_spaces(::Val{:occlusion}) = (:data, :linear)
 _texture_color_spaces(::Val{:emissive}) = (:srgb, :linear)
 
 function _texture_payload(
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     texture_id::String,
     role::Val,
 )
@@ -3864,8 +3864,8 @@ validated on the Rust side.
 """
 function _material_textures!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
-    material::WGEGraphics.MaterialPacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
+    material::LuxelGraphics.MaterialPacket,
 )::MaterialTextures
     key = (packet.content_sha256, material.material_id)
     existing = get(state.material_textures, key, nothing)
@@ -3924,10 +3924,10 @@ function _surface_sampler!(
     return created
 end
 
-const IBL_ENVIRONMENT_TEXTURE_ID = "wge-ibl-environment"
-const IBL_BRDF_LUT_TEXTURE_ID = "wge-ibl-brdf-lut"
+const IBL_ENVIRONMENT_TEXTURE_ID = "luxel-ibl-environment"
+const IBL_BRDF_LUT_TEXTURE_ID = "luxel-ibl-brdf-lut"
 
-function _ibl_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)::IblResources
+function _ibl_resources!(state::LavaBackend, packet::LuxelGraphics.GraphicsScenePacket)::IblResources
     current = state.ibl_resources
     current !== nothing && current.cache_key == packet.content_sha256 && return current
     enabled = _ibl_enabled(packet.render_policy)
@@ -3947,9 +3947,9 @@ end
 
 function _material_texture_resources!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     shadow::ShadowResources,
-    material::WGEGraphics.MaterialPacket,
+    material::LuxelGraphics.MaterialPacket,
     spec::SamplerSpec,
 )
     cache = state.material_texture_resources
@@ -3998,19 +3998,19 @@ becomes a ramp that is 1 everywhere; a padding layer (two-layer sets fill the
 third slot) gets the slope ramp (2, 3), which is 0 for every real slope.
 Then `macro = (cycles per metre, amplitude, 0, 0)` from the render policy.
 """
-function _terrain_layer_uniforms(packet::WGEGraphics.GraphicsScenePacket)::NTuple{7,Vec4f}
+function _terrain_layer_uniforms(packet::LuxelGraphics.GraphicsScenePacket)::NTuple{7,Vec4f}
     layers = packet.terrain.layers.layers
     normal_scales = Float32[_material(packet, layer.material_id).normal_scale for layer in layers]
     return _terrain_layer_uniforms(layers, normal_scales, packet.render_policy.terrain_surface)
 end
 
 function _terrain_layer_uniforms(
-    layers::Vector{WGEGraphics.TerrainLayerPacket},
+    layers::Vector{LuxelGraphics.TerrainLayerPacket},
     normal_scales::Vector{Float32},
-    terrain::WGEGraphics.TerrainSurfacePolicy,
+    terrain::LuxelGraphics.TerrainSurfacePolicy,
 )::NTuple{7,Vec4f}
     vectors = Vec4f[]
-    for index in 1:WGEGraphics.MAX_TERRAIN_LAYERS
+    for index in 1:LuxelGraphics.MAX_TERRAIN_LAYERS
         padding = index > length(layers)
         layer = layers[min(index, length(layers))]
         inverse_repeat = 1000.0f0 / Float32(layer.metres_per_repeat_milli)
@@ -4035,7 +4035,7 @@ end
 `b = (falloff m, albedo scale, roughness scale, normal scale)`,
 `c = (water albedo rgb, water roughness)`, roughness -1 meaning no standing water,
 `d = (edge wobble, wobble cycles per m, water surface y, 1 in the reflection pass)`."""
-function _wet_zone_uniforms(zone::WGEGraphics.TerrainWetZone; reflection_pass::Bool=false)::NTuple{4,Vec4f}
+function _wet_zone_uniforms(zone::LuxelGraphics.TerrainWetZone; reflection_pass::Bool=false)::NTuple{4,Vec4f}
     water = zone.standing_water
     return (
         Vec4f(zone.center_xz_m[1], zone.center_xz_m[2], zone.radii_xz_m[1], zone.radii_xz_m[2]),
@@ -4049,7 +4049,7 @@ end
 """Layer bindings plus slot 16: the water's reflection image, or the IBL
 stand-in when there is none (the reflection pass cannot sample its own
 target). Cached per packet and image."""
-function _wet_terrain_bindings!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket,
+function _wet_terrain_bindings!(state::LavaBackend, packet::LuxelGraphics.GraphicsScenePacket,
                                 layers::TerrainLayerResources, reflection_texture)
     key = (packet.content_sha256, reflection_texture === nothing ? UInt(0) : objectid(reflection_texture.view))
     return get!(state.wet_terrain_bindings, key) do
@@ -4079,11 +4079,11 @@ standing water this is exactly `_record_scene_passes!`. Both render paths
 call this, so they cannot drift."""
 function _record_scene_with_reflection!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     camera_frame::CameraFrame,
     lighting::DirectionalLighting,
     environment_lighting::EnvironmentLighting,
-    material::WGEGraphics.MaterialPacket,
+    material::LuxelGraphics.MaterialPacket,
     texture_enabled::Float32,
     scene_framebuffer::Lava.LavaFramebuffer,
     scene_target::Lava.OffscreenTarget,
@@ -4105,7 +4105,7 @@ end
 
 function _terrain_layer_resources!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     shadow::ShadowResources,
 )::TerrainLayerResources
     current = state.terrain_layer_resources
@@ -4114,7 +4114,7 @@ function _terrain_layer_resources!(
     count = length(layers.layers)
     sets = [
         _material_textures!(state, packet, _material(packet, layers.layers[min(index, count)].material_id))
-        for index in 1:WGEGraphics.MAX_TERRAIN_LAYERS
+        for index in 1:LuxelGraphics.MAX_TERRAIN_LAYERS
     ]
     macro_levels = _texture_levels(_texture_payload(packet, layers.macro_texture_id, Val{:roughness}()))
     macro_texture = _lava_texture2d!(state, macro_levels)
@@ -4149,7 +4149,7 @@ function _terrain_layer_resources!(
     return created
 end
 
-function _material_texture_enabled(material::WGEGraphics.MaterialPacket)::Float32
+function _material_texture_enabled(material::LuxelGraphics.MaterialPacket)::Float32
     length(material.texture_ids) <= 1 ||
         throw(AdapterError("unsupported_material", "native path supports one texture per material"))
     return isempty(material.texture_ids) ? 0.0f0 : 1.0f0
@@ -4178,7 +4178,7 @@ function render_texture_probe(state::LavaBackend=backend())
     center = pixels[cld(size(pixels, 1), 2), cld(size(pixels, 2), 2)]
     expected = (0.2f0, 0.7f0, 0.9f0, 1.0f0)
     return (
-        schema="wge.lava-texture-probe/v1",
+        schema="luxel.lava-texture-probe/v1",
         width_px=width,
         height_px=height,
         center_rgba=collect(center),
@@ -4223,7 +4223,7 @@ function _shadow_up_hint(direction::Vec4f)::Vec4f
 end
 
 function _camera_projection(
-    projection::WGEGraphics.OrthographicProjection,
+    projection::LuxelGraphics.OrthographicProjection,
     aspect::Float32,
     near_plane::Float32,
     far_plane::Float32,
@@ -4242,7 +4242,7 @@ function _camera_projection(
 end
 
 function _camera_projection(
-    projection::WGEGraphics.PerspectiveProjection,
+    projection::LuxelGraphics.PerspectiveProjection,
     aspect::Float32,
     near_plane::Float32,
     far_plane::Float32,
@@ -4256,7 +4256,7 @@ function _camera_projection(
     )
 end
 
-function _camera_frame(camera::WGEGraphics.CameraPacket)::CameraFrame
+function _camera_frame(camera::LuxelGraphics.CameraPacket)::CameraFrame
     position = Vec4f(camera.position_xyz_m..., 0.0f0)
     forward, right, up = _basis_vectors(
         Vec4f(camera.forward_xyz..., 0.0f0),
@@ -4294,7 +4294,7 @@ Casters up to two radii toward the light stay inside the near plane, so a tree
 outside the slice can still shadow ground inside it.
 """
 function _view_fitted_shadow_frame(
-    view_camera::WGEGraphics.CameraPacket,
+    view_camera::LuxelGraphics.CameraPacket,
     light_direction::Vec4f,
     right::Vec4f,
     up::Vec4f,
@@ -4353,7 +4353,7 @@ function _view_fitted_shadow_frame(
 end
 
 function _shadow_frame(
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     lighting::DirectionalLighting,
 )::CameraFrame
     raw_light_direction = lighting.direction
@@ -4428,12 +4428,12 @@ function _transition_color_to_sampled!(state::LavaBackend, framebuffer::Lava.Lav
     return nothing
 end
 
-const GPU_FRAME_TIMING_LABEL = "wge.graphics.frame"
+const GPU_FRAME_TIMING_LABEL = "luxel.graphics.frame"
 const GPU_PASS_TIMING_LABELS = (
-    prepare="wge.graphics.pass.prepare",
-    scene_raster="wge.graphics.pass.scene-raster",
-    resolve="wge.graphics.pass.resolve",
-    overlay="wge.graphics.pass.overlay",
+    prepare="luxel.graphics.pass.prepare",
+    scene_raster="luxel.graphics.pass.scene-raster",
+    resolve="luxel.graphics.pass.resolve",
+    overlay="luxel.graphics.pass.overlay",
 )
 
 function _begin_gpu_frame_timing(state::LavaBackend)::Union{Nothing,Int}
@@ -4601,12 +4601,12 @@ function _project_point(frame::CameraFrame, point::NTuple{3,<:Real})::Vec4f
     )
 end
 
-function _terrain_material(packet::WGEGraphics.GraphicsScenePacket)::WGEGraphics.MaterialPacket
+function _terrain_material(packet::LuxelGraphics.GraphicsScenePacket)::LuxelGraphics.MaterialPacket
     return _material(packet, packet.terrain.material_id)
 end
 
 function _directional_lighting(
-    kind::WGEGraphics.DirectionalLightPacket,
+    kind::LuxelGraphics.DirectionalLightPacket,
     color_rgb::NTuple{3,Float32},
     intensity::Float32,
 )::DirectionalLighting
@@ -4618,21 +4618,21 @@ function _directional_lighting(
 end
 
 function _directional_lighting(
-    ::WGEGraphics.PointLightPacket,
+    ::LuxelGraphics.PointLightPacket,
     ::NTuple{3,Float32},
     ::Float32,
 )::DirectionalLighting
     throw(AdapterError("unsupported_light", "native material path currently requires a directional light"))
 end
 
-function _lighting(packet::WGEGraphics.GraphicsScenePacket)::DirectionalLighting
+function _lighting(packet::LuxelGraphics.GraphicsScenePacket)::DirectionalLighting
     length(packet.lights) == 1 ||
         throw(AdapterError("unsupported_lighting", "native material path requires exactly one light intent"))
     light = only(packet.lights)
     return _directional_lighting(light.kind, light.color_rgb, light.intensity)
 end
 
-function _environment_lighting(environment::WGEGraphics.EnvironmentPacket)::EnvironmentLighting
+function _environment_lighting(environment::LuxelGraphics.EnvironmentPacket)::EnvironmentLighting
     return EnvironmentLighting(
         Vec4f(environment.sky_top_rgb..., 1.0f0),
         Vec4f(environment.sky_horizon_rgb..., 1.0f0),
@@ -4640,7 +4640,7 @@ function _environment_lighting(environment::WGEGraphics.EnvironmentPacket)::Envi
     )
 end
 
-function _validate_material(material::WGEGraphics.MaterialPacket)::Nothing
+function _validate_material(material::LuxelGraphics.MaterialPacket)::Nothing
     material.alpha_mode == :blend && throw(
         AdapterError(
             "unsupported_material",
@@ -4652,10 +4652,10 @@ end
 
 """True when a material needs the cutout pipelines (mask or double-sided).
 Opaque single-sided materials keep the historical pipelines, byte-identical."""
-_material_cutout(material::WGEGraphics.MaterialPacket)::Bool =
+_material_cutout(material::LuxelGraphics.MaterialPacket)::Bool =
     material.alpha_mode == :mask || material.double_sided
 
-function _material(packet::WGEGraphics.GraphicsScenePacket, material_id::String)::WGEGraphics.MaterialPacket
+function _material(packet::LuxelGraphics.GraphicsScenePacket, material_id::String)::LuxelGraphics.MaterialPacket
     for material in packet.materials
         if material.material_id == material_id
             _validate_material(material)
@@ -4701,7 +4701,7 @@ function _transform_tangent(
     return Vec4f(tangent[1], tangent[2], tangent[3], local_tangent[4])
 end
 
-function _terrain_resources!(state::LavaBackend, packet::WGEGraphics.GraphicsScenePacket)
+function _terrain_resources!(state::LavaBackend, packet::LuxelGraphics.GraphicsScenePacket)
     current = state.terrain_resources
     current !== nothing && current.cache_key == packet.content_sha256 && return current
     heights = Lava.LavaArray{Float32,1}(packet.terrain.heights_m; bq=state.queue)
@@ -4857,14 +4857,14 @@ function _append_overlay_disc!(
     return nothing
 end
 
-function _overlay_color(overlay::WGEGraphics.OverlayPacket)::Vec4f
+function _overlay_color(overlay::LuxelGraphics.OverlayPacket)::Vec4f
     return Vec4f(overlay.color_rgba...)
 end
 
 function _append_overlay!(
     positions::Vector{Vec4f},
     colors::Vector{Vec4f},
-    overlay::WGEGraphics.PointOverlay,
+    overlay::LuxelGraphics.PointOverlay,
     frame::CameraFrame,
 )
     center = overlay.position_xyz_m
@@ -4898,7 +4898,7 @@ end
 function _append_overlay!(
     positions::Vector{Vec4f},
     colors::Vector{Vec4f},
-    overlay::WGEGraphics.CircleOverlay,
+    overlay::LuxelGraphics.CircleOverlay,
     frame::CameraFrame,
 )
     center = overlay.center_xyz_m
@@ -4933,7 +4933,7 @@ end
 function _append_overlay!(
     positions::Vector{Vec4f},
     colors::Vector{Vec4f},
-    overlay::WGEGraphics.PolylineOverlay,
+    overlay::LuxelGraphics.PolylineOverlay,
     frame::CameraFrame,
 )
     color = _overlay_color(overlay)
@@ -4951,7 +4951,7 @@ function _append_overlay!(
     return nothing
 end
 
-function _mesh_bound_sphere(mesh::WGEGraphics.MeshPacket)
+function _mesh_bound_sphere(mesh::LuxelGraphics.MeshPacket)
     minimums = ntuple(index -> minimum(position[index] for position in mesh.positions_m), 3)
     maximums = ntuple(index -> maximum(position[index] for position in mesh.positions_m), 3)
     center = ntuple(index -> 0.5f0 * (minimums[index] + maximums[index]), 3)
@@ -4963,8 +4963,8 @@ function _mesh_bound_sphere(mesh::WGEGraphics.MeshPacket)
 end
 
 function _instance_world_bound(
-    packet::WGEGraphics.GraphicsScenePacket,
-    instance::WGEGraphics.InstancePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
+    instance::LuxelGraphics.InstancePacket,
 )
     mesh_index = findfirst(mesh -> mesh.mesh_id == instance.mesh_id, packet.meshes)
     mesh_index === nothing &&
@@ -5017,22 +5017,22 @@ end
 
 function _instance_visible(
     frame::CameraFrame,
-    packet::WGEGraphics.GraphicsScenePacket,
-    instance::WGEGraphics.InstancePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
+    instance::LuxelGraphics.InstancePacket,
 )
     world_center, mesh_radius = _instance_world_bound(packet, instance)
     radius = mesh_radius + _importance_margin(instance.importance)
     return _sphere_visible(frame, world_center, radius)
 end
 
-_importance_margin(::WGEGraphics.BackgroundImportance)::Float32 = 0.0f0
+_importance_margin(::LuxelGraphics.BackgroundImportance)::Float32 = 0.0f0
 
-_importance_margin(::WGEGraphics.LandmarkImportance)::Float32 = 0.75f0
+_importance_margin(::LuxelGraphics.LandmarkImportance)::Float32 = 0.75f0
 
-_importance_margin(::WGEGraphics.GameplayCriticalImportance)::Float32 = 1.5f0
+_importance_margin(::LuxelGraphics.GameplayCriticalImportance)::Float32 = 1.5f0
 
 function _mesh_visibility(
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     frame::CameraFrame,
 )::MeshVisibility
     instance_count = length(packet.instances)
@@ -5046,11 +5046,11 @@ function _mesh_visibility(
     for instance in packet.instances
         visible = _instance_visible(frame, packet, instance)
         visible && (visible_instance_count += 1)
-        if instance.importance isa WGEGraphics.BackgroundImportance
+        if instance.importance isa LuxelGraphics.BackgroundImportance
             visible ? (background_visible_count += 1) : (background_culled_count += 1)
-        elseif instance.importance isa WGEGraphics.LandmarkImportance
+        elseif instance.importance isa LuxelGraphics.LandmarkImportance
             visible ? (landmark_visible_count += 1) : (landmark_culled_count += 1)
-        elseif instance.importance isa WGEGraphics.GameplayCriticalImportance
+        elseif instance.importance isa LuxelGraphics.GameplayCriticalImportance
             visible ? (gameplay_critical_visible_count += 1) : (gameplay_critical_culled_count += 1)
         else
             throw(AdapterError("unsupported_importance", "instance importance is unsupported"))
@@ -5070,7 +5070,7 @@ function _mesh_visibility(
 end
 
 function _mesh_triangle_tangent(
-    mesh::WGEGraphics.MeshPacket,
+    mesh::LuxelGraphics.MeshPacket,
     first_index::Int,
     second_index::Int,
     third_index::Int,
@@ -5121,7 +5121,7 @@ const BACKDROP_INSTANCE_PREFIX = "backdrop-"
 
 function _mesh_resources!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     frame::CameraFrame,
     visibility::MeshVisibility=_mesh_visibility(packet, frame),
     ;
@@ -5131,7 +5131,7 @@ function _mesh_resources!(
     current = cache === :shadow ? state.shadow_mesh_resources :
               cache === :reflection ? state.reflection_mesh_resources : state.mesh_resources
     current !== nothing && current.cache_key == packet.content_sha256 && return current
-    groups = Dict{Tuple{String,String},Vector{WGEGraphics.InstancePacket}}()
+    groups = Dict{Tuple{String,String},Vector{LuxelGraphics.InstancePacket}}()
     for instance in packet.instances
         _instance_visible(frame, packet, instance) || continue
         # The mirrored pass clips terrain at the water plane but not meshes.
@@ -5141,7 +5141,7 @@ function _mesh_resources!(
         cache === :reflection && startswith(instance.instance_id, BACKDROP_INSTANCE_PREFIX) && continue
         key = (instance.mesh_id, instance.material_id)
         instances = get!(groups, key) do
-            WGEGraphics.InstancePacket[]
+            LuxelGraphics.InstancePacket[]
         end
         push!(instances, instance)
     end
@@ -5286,7 +5286,7 @@ Orthographic shadow depth is linear, `(d - near) / (far - near)`, so the
 conversion is exact."""
 const SHADOW_BIAS_M = 0.3f0
 
-function _shadow_depth_bias(policy::WGEGraphics.RenderPolicy, light_frame::CameraFrame)::Float32
+function _shadow_depth_bias(policy::LuxelGraphics.RenderPolicy, light_frame::CameraFrame)::Float32
     fit = policy.shadow_fit
     # 0 selects the shader's literal 0.0035 (see `_shadow_visibility`).
     (fit === nothing || fit.map_size_px == SHADOW_MAP_SIZE) && return 0.0f0
@@ -5294,12 +5294,12 @@ function _shadow_depth_bias(policy::WGEGraphics.RenderPolicy, light_frame::Camer
 end
 
 """Shadow map side: the fit's `map_size_px` (CONVERGE-4 L-1a), else the historical 512."""
-_shadow_map_size(policy::WGEGraphics.RenderPolicy)::Int =
+_shadow_map_size(policy::LuxelGraphics.RenderPolicy)::Int =
     policy.shadow_fit === nothing ? SHADOW_MAP_SIZE : Int(policy.shadow_fit.map_size_px)
 
 function _render_shadow_map!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     shadow::ShadowResources,
     terrain::TerrainResources,
     mesh_resources::Union{Nothing,MeshResources},
@@ -5372,8 +5372,8 @@ end
 
 function _cutout_shadow_bindings!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
-    material::WGEGraphics.MaterialPacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
+    material::LuxelGraphics.MaterialPacket,
 )::Lava.TextureBindings
     cache = state.cutout_shadow_bindings
     any(key -> first(key) != packet.content_sha256, keys(cache)) && empty!(cache)
@@ -5386,11 +5386,11 @@ end
 
 function _draw_cutout_shadow!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     target,
     frame::CameraFrame,
     batch::MeshBatchResources,
-    material::WGEGraphics.MaterialPacket,
+    material::LuxelGraphics.MaterialPacket,
 )
     bindings = _cutout_shadow_bindings!(state, packet, material)
     draw!(
@@ -5428,7 +5428,7 @@ end
 
 function _shadow_resources!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     lighting::DirectionalLighting,
 )::ShadowResources
     current = state.shadow_resources
@@ -5452,7 +5452,7 @@ end
 
 function _overlay_resources!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     frame::CameraFrame,
 )
     current = state.overlay_resources
@@ -5495,7 +5495,7 @@ end
 
 function _measurement_screen_projection(
     frame::CameraFrame,
-    camera::WGEGraphics.CameraPacket,
+    camera::LuxelGraphics.CameraPacket,
     position::NTuple{3,Float32},
 )::Union{Nothing,NTuple{3,Float32}}
     projected = _project_overlay_point(frame, position)
@@ -5518,9 +5518,9 @@ function _measurement_screen_projection(
 end
 
 function _measurement_overlay_samples(
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     frame::CameraFrame,
-    overlay::WGEGraphics.PointOverlay,
+    overlay::LuxelGraphics.PointOverlay,
 )
     camera = packet.camera
     radius = Float32(overlay.radius_m)
@@ -5535,9 +5535,9 @@ function _measurement_overlay_samples(
 end
 
 function _measurement_overlay_samples(
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     frame::CameraFrame,
-    overlay::WGEGraphics.CircleOverlay,
+    overlay::LuxelGraphics.CircleOverlay,
 )
     camera = packet.camera
     samples = NTuple{3,Float32}[]
@@ -5561,9 +5561,9 @@ function _measurement_overlay_samples(
 end
 
 function _measurement_overlay_samples(
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     frame::CameraFrame,
-    overlay::WGEGraphics.PolylineOverlay,
+    overlay::LuxelGraphics.PolylineOverlay,
 )
     camera = packet.camera
     samples = NTuple{3,Float32}[]
@@ -5596,7 +5596,7 @@ end
 
 function _scene_measurements(
     pixels::AbstractVector{<:NTuple{4,<:Real}},
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
 )
     bytes = Vector{UInt8}(undef, 4 * length(pixels))
     offset = 1
@@ -5612,7 +5612,7 @@ end
 
 function _scene_measurements(
     capture_bytes::Vector{UInt8},
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     frame::CameraFrame=_camera_frame(packet.camera),
 )
     length(capture_bytes) % 4 == 0 ||
@@ -5676,7 +5676,7 @@ function _measurement_role_index(role::Symbol)::Int
 end
 
 function render_scene(
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     state::LavaBackend=backend(),
 )
     gpu_timing_slot = _begin_gpu_frame_timing(state)
@@ -5694,11 +5694,11 @@ presented window path so the two paths cannot drift.
 """
 function _record_scene_passes!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     camera_frame::CameraFrame,
     lighting::DirectionalLighting,
     environment_lighting::EnvironmentLighting,
-    material::WGEGraphics.MaterialPacket,
+    material::LuxelGraphics.MaterialPacket,
     texture_enabled::Float32,
     scene_framebuffer::Lava.LavaFramebuffer,
     scene_target::Lava.OffscreenTarget;
@@ -5973,7 +5973,7 @@ of it.
 """
 function _composite_capture!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     scene_framebuffer::Lava.LavaFramebuffer,
     overlay_resources::Union{Nothing,OverlayResources},
     width::Int,
@@ -6044,7 +6044,7 @@ function _composite_capture!(
 end
 
 function _render_scene(
-    packet::WGEGraphics.GraphicsScenePacket,
+    packet::LuxelGraphics.GraphicsScenePacket,
     state::LavaBackend,
     gpu_timing_slot::Union{Nothing,Int},
 )
@@ -6124,7 +6124,7 @@ function _render_scene(
     )
     state.readback_bytes += length(capture_bytes)
     return (
-        schema="wge.lava-frame/v1",
+        schema="luxel.lava-frame/v1",
         backend_id="lava-vulkan",
         adapter_revision=ADAPTER_REVISION,
         lava_revision=LAVA_REVISION,
@@ -6229,7 +6229,7 @@ function _sample_window_input(window::Lava.RenderWindow)
         stick_buttons === nothing || append!(buttons_vec, Bool.(collect(stick_buttons)))
     end
     return (
-        schema_version="wge.input-sample/v1",
+        schema_version="luxel.input-sample/v1",
         timestamp_ms=Float64(time_ns() / 1e6),
         held_keys=keys,
         cursor=cursor,
@@ -6251,7 +6251,7 @@ function open_window_session(
     window = Lava.RenderWindow(
         width,
         height;
-        title="WGE native session",
+        title="Luxel native session",
         vsync=vsync,
         ctx=state.context,
     )
@@ -6362,8 +6362,8 @@ from the offscreen path over the same packet, so the presented loop never
 carries un-promoted evidence and never reads back mid-batch."""
 function render_window_frames!(
     state::LavaBackend,
-    packet::WGEGraphics.GraphicsScenePacket,
-    camera_override::Union{Nothing,WGEGraphics.CameraPacket},
+    packet::LuxelGraphics.GraphicsScenePacket,
+    camera_override::Union{Nothing,LuxelGraphics.CameraPacket},
     frame_count::Integer,
     report_input::Bool=false,
 )
@@ -6457,7 +6457,7 @@ function render_window_probe_frame(state::LavaBackend; vsync::Bool=false)
     window = Lava.RenderWindow(
         96,
         64;
-        title="WGE window probe",
+        title="Luxel window probe",
         vsync=vsync,
         ctx=state.context,
     )

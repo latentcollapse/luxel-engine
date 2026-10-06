@@ -84,7 +84,7 @@ function canonical_measurement(measured)
         intersects=measured.intersects,
         overlap=(x0=measured.x0, x1=measured.x1, y0=measured.y0, y1=measured.y1),
         overlap_area=measured.area,
-        schema="wge.lane-overlap/v0",
+        schema="luxel.lane-overlap/v0",
     ))
 end
 
@@ -108,7 +108,7 @@ function measure(::Manhattan, path)
 end
 
 function canonical_length(len::Int)
-    return JSON3.write((length=len, schema="wge.path-length/v0"))
+    return JSON3.write((length=len, schema="luxel.path-length/v0"))
 end
 
 function handle(payload::AbstractString)

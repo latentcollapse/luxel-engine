@@ -54,7 +54,7 @@ const REPLACED_INSTANCES: [&str; 3] = [
 ];
 const REPLACED_MESHES: [&str; 2] = ["campaign2-wet-pool", "campaign2-wet-ripple"];
 const REPLACED_MATERIAL: &str = "campaign2-wet";
-const REPLACED_TEXTURE: &str = "wge-campaign2-wet-albedo";
+const REPLACED_TEXTURE: &str = "luxel-campaign2-wet-albedo";
 
 /// The terrain surface exactly as the renderer rasterises it: each grid cell
 /// is split along the (col, row) -> (col + 1, row + 1) diagonal

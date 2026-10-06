@@ -1,4 +1,4 @@
-# WGE — GRAPHICAL PARITY SPRINT REPORT
+# Luxel — GRAPHICAL PARITY SPRINT REPORT
 
 **Codename:** EXIT THE 90s
 **Authority:** `docs/world/graphical-parity-audit.md` (gap register GP-01…GP-21)
@@ -507,7 +507,7 @@ Targeted suites:
 
 | suite | result |
 |---|---|
-| `cargo test -p wge-native-graphics-contract --test render_policy` | **10 passed, 0 failed** |
+| `cargo test -p luxel-native-graphics-contract --test render_policy` | **10 passed, 0 failed** |
 | `graphics_lab/test/render_policy.jl` | **all testsets green** (121 assertions) |
 | `graphics_lab/test/lava_adapter.jl` | **all testsets green** (103 assertions, incl. 26 GPU adapter, 35 projection, 12 terrain albedo) |
 
@@ -515,9 +515,9 @@ Targeted suites:
 
 | check | result |
 |---|---|
-| `cargo test -p wge-native-graphics-contract --test render_policy` | **13 passed, 0 failed** (was 10; +3 new) |
+| `cargo test -p luxel-native-graphics-contract --test render_policy` | **13 passed, 0 failed** (was 10; +3 new) |
 | `cargo test --workspace` (3rd run) | **345 passed, 0 failed**, 64 binaries (was 342) |
-| strict Julia parse gate, `LavaAdapter.jl` + `WGEGraphics.jl` | **PARSE OK** |
+| strict Julia parse gate, `LavaAdapter.jl` + `LuxelGraphics.jl` | **PARSE OK** |
 | `ab-null5` vs frozen baseline, 3/3 captures | **BYTE-IDENTICAL** |
 | `ab-null5` comparator, `--mode control` | **PASS**, sky band delta `+0.00` on all views |
 

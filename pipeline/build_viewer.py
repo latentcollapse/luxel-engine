@@ -20,7 +20,7 @@ from pathlib import Path
 from tool_provenance import source_tree_digest
 
 # One level up, not two: the reference renderer ships with the engine. Two
-# pointed above the engine entirely once WGE moved out of Codeweald (D8) --
+# pointed above the engine entirely once Luxel moved out of Codeweald (D8) --
 # the fourth and last instance of that assumption.
 WORLD_CORE = Path(__file__).resolve().parents[1] / "world_core"
 VIEWER_SOURCE_DIRECTORIES = ("apps", "crates")

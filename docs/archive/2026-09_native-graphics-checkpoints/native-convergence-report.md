@@ -1,4 +1,4 @@
-# WGE Native Convergence Report
+# Luxel Native Convergence Report
 
 Status: **green for the native authority/backend convergence checkpoint and
 Campaign 2’s registered authored-frame slice; broader production visual quality
@@ -14,7 +14,7 @@ not the authority for a native current snapshot.
 
 Source of truth: [docs/archive/2026-09_roadmaps-and-audits/game-dev-harness-roadmap.md](../2026-09_roadmaps-and-audits/game-dev-harness-roadmap.md),
 [docs/archive/2026-09_roadmaps-and-audits/authority-reclamation-001.md](../2026-09_roadmaps-and-audits/authority-reclamation-001.md),
-[docs/archive/2026-09_native-graphics-checkpoints/peak-shape-handoff.md](peak-shape-handoff.md), the WGE
+[docs/archive/2026-09_native-graphics-checkpoints/peak-shape-handoff.md](peak-shape-handoff.md), the Luxel
 language specification, and the Rust semantic-kernel contracts.
 
 ## Scope and explicit deferrals
@@ -38,7 +38,7 @@ The supplied bad GLB remains a permanent negative/rejection control:
 | Concern | Authority | Boundary |
 | --- | --- | --- |
 | ProjectSpec, typed intake/template lowering, semantic identity | Rust `project_ledger` | `compile_project_spec` and `semantic_spec_digest`; target/backend metadata is excluded from semantic identity. |
-| Durable project transaction, candidate staging, current pointer, history, rollback | Rust `wge_control_plane` | `ProjectStore` is the only promotion path for this checkpoint. Open revalidates all stored identities and certification reports. |
+| Durable project transaction, candidate staging, current pointer, history, rollback | Rust `luxel_control_plane` | `ProjectStore` is the only promotion path for this checkpoint. Open revalidates all stored identities and certification reports. |
 | Receipt registry, gate profile, receipt identity, byte-bound evidence, promotion | Rust `certification_authority` | Registered validators recompute results. Producer strings, status fields, and pass-shaped evidence have no authority. |
 | Terrain height/slope/region fields | Julia `terrain_lab` | Closed request/response contract; Rust verifies worker/source digests and derives the world artifact. |
 | World artifact, collision, navigation, spawns, encounters, traversal, reference gameplay, reference capture | Rust `reference_runtime` | Authored layouts and Julia fields are compiled into a content-addressed native world and independently replayed. |
@@ -48,7 +48,7 @@ The supplied bad GLB remains a permanent negative/rejection control:
 
 ## Native transaction and receipt authority
 
-`wge_control_plane::ProjectStore` provides the canonical lifecycle:
+`luxel_control_plane::ProjectStore` provides the canonical lifecycle:
 
 `create/open → inspect → stage candidate → attach typed evidence → native
 validate → inspect failures → propose bounded repair → execute authorized work
@@ -90,7 +90,7 @@ escape, forged registry digest, stale artifacts, or mismatched reports.
 
 The certified reference runtime now emits `gameplay_kit.json` as a typed,
 content-addressed `ResolvedKit`. The gameplay receipt binds that artifact and
-Rust re-resolves the registered `wge.reference.vertical-slice` kit before
+Rust re-resolves the registered `luxel.reference.vertical-slice` kit before
 promotion; the design document is therefore connected to the runtime path for
 the current slice rather than remaining an unconsumed architecture sketch.
 
@@ -98,7 +98,7 @@ the current slice rather than remaining an unconsumed architecture sketch.
 
 The authoring story is now explicit and provider-neutral:
 
-1. `pipeline/wge_authoring.py` parses declarative JSON only. It rejects
+1. `pipeline/luxel_authoring.py` parses declarative JSON only. It rejects
    executable syntax, duplicate/unknown fields, malformed source bindings, and
    invalid spans. It preserves observations, inferences, assumptions,
    conflicts, confidence, evidence regions, declaration spans, provenance,
@@ -107,7 +107,7 @@ The authoring story is now explicit and provider-neutral:
    material; the Rust intake CLI assigns source identities and independently
    normalizes the provider response. Binding never rewrites caller bytes or
    invents claims.
-3. `wge-project-ledger compile-spec INTAKE.json TEMPLATE.json --output
+3. `luxel-project-ledger compile-spec INTAKE.json TEMPLATE.json --output
    SPEC.json` lowers canonical intake plus an explicit typed template into
    `ProjectSpec`. Missing or contradictory design decisions fail rather than
    being silently invented.
@@ -117,7 +117,7 @@ The authoring story is now explicit and provider-neutral:
 Scaffold generation is recognition-first input preparation, not a semantic
 shortcut: its placeholder claim must be replaced by an explicit provider
 interpretation before native intake and promotion. The old 3B-class success
-criterion has been removed; WGE instead minimizes the model capability needed
+criterion has been removed; Luxel instead minimizes the model capability needed
 for professional game-development work without sacrificing output quality.
 
 ## Native world, traversal, and gameplay proof
@@ -184,15 +184,15 @@ receipts are rejected.
 
 ## Agent and MCP surface
 
-`pipeline/wge_agent_surface.py` is a thin bounded adapter over the Rust CLI;
-`pipeline/wge_neura_mcp.py` is its stable launcher. The MCP surface exposes
+`pipeline/luxel_agent_surface.py` is a thin bounded adapter over the Rust CLI;
+`pipeline/luxel_neura_mcp.py` is its stable launcher. The MCP surface exposes
 16 semantic tools with typed required fields, bounded resource roots, request/
 response limits, timeouts, argument-vector subprocess calls, capability
 discovery, and readable tool-level errors. It contains no candidate hashing,
 receipt interpretation, gate policy, repair policy, or pointer mutation.
 
 A real stdio smoke against the built native binary passed `initialize`,
-`tools/list` (16 tools), `wge_inspect_project`, and the initialized
+`tools/list` (16 tools), `luxel_inspect_project`, and the initialized
 notification path.
 
 ## Adversarial controls
@@ -218,8 +218,8 @@ cargo clippy --offline --manifest-path world_core/Cargo.toml --workspace --all-t
 cargo test --offline --manifest-path world_core/Cargo.toml --workspace --quiet PASS
 julia --project=terrain_lab terrain_lab/test/runtests.jl           PASS (8/8)
 python3 -m unittest discover -s tests -q                           PASS (706 tests, 604.191s)
-python3 -m unittest tests.test_wge_authoring tests.test_wge_agent_surface tests.test_wge_native_transaction tests.test_wge_control_plane -v PASS (23 tests)
-python3 -m py_compile pipeline/wge_authoring.py pipeline/wge_agent_surface.py pipeline/wge_native_transaction.py pipeline/wge_neura_mcp.py PASS
+python3 -m unittest tests.test_luxel_authoring tests.test_luxel_agent_surface tests.test_luxel_native_transaction tests.test_luxel_control_plane -v PASS (23 tests)
+python3 -m py_compile pipeline/luxel_authoring.py pipeline/luxel_agent_surface.py pipeline/luxel_native_transaction.py pipeline/luxel_neura_mcp.py PASS
 ```
 
 The full Python suite's expected legacy-MVP diagnostic output still identifies
@@ -250,22 +250,22 @@ remained a separate rejection control.
 
 ## Reproducibility commands
 
-From the WGE repository root, after building the native binaries:
+From the Luxel repository root, after building the native binaries:
 
 ```sh
 cargo build --offline --manifest-path world_core/Cargo.toml --workspace
 
-python3 -m pipeline.wge_authoring lower --input authoring-source.json --output authoring-request.json
-python3 -m pipeline.wge_authoring bind --input authoring-request.json --prepared-bundle source-bundle.json --output native-intake-request.json
+python3 -m pipeline.luxel_authoring lower --input authoring-source.json --output authoring-request.json
+python3 -m pipeline.luxel_authoring bind --input authoring-request.json --prepared-bundle source-bundle.json --output native-intake-request.json
 
 # Native intake preparation/normalization assigns source identities and
 # validates the provider response; then compile the typed ProjectSpec.
-world_core/target/debug/wge-intake-repair prepare-source-bundle ...
-world_core/target/debug/wge-intake-repair normalize-intake ...
-world_core/target/debug/wge-project-ledger compile-spec semantic-intake.json project-template.json --output project-spec.json
+world_core/target/debug/luxel-intake-repair prepare-source-bundle ...
+world_core/target/debug/luxel-intake-repair normalize-intake ...
+world_core/target/debug/luxel-project-ledger compile-spec semantic-intake.json project-template.json --output project-spec.json
 
-world_core/target/debug/wge-control-plane create PROJECT_ROOT --spec project-spec.json --profile engine-neutral
-python3 -m pipeline.wge_neura_mcp --project-root PROJECT_ROOT --control-plane world_core/target/debug/wge-control-plane
+world_core/target/debug/luxel-control-plane create PROJECT_ROOT --spec project-spec.json --profile engine-neutral
+python3 -m pipeline.luxel_neura_mcp --project-root PROJECT_ROOT --control-plane world_core/target/debug/luxel-control-plane
 ```
 
 The MCP adapter is intentionally a transport surface; native CLI/API calls
@@ -277,7 +277,7 @@ Campaign 2 is now integrated into the converged native path. Rust derives and
 seals three fixed inspection packets from the certified Riverwatch world;
 Julia/Lava renders them behind the existing coarse packet boundary; Rust
 independently remeasures, validates, and promotes every receipt and vector
-evidence artifact. No backend representation is promoted as WGE semantic state.
+evidence artifact. No backend representation is promoted as Luxel semantic state.
 
 The final clean replay proved byte identity for the world artifact, all three
 scene packets, deterministic frame receipts, renderer attestations, raw RGBA
@@ -320,5 +320,5 @@ This checkpoint satisfies the engine-neutral convergence definition:
 15. architecture, ownership, legacy boundaries, adversarial evidence, and
     reproducibility are recorded here.
 
-Stop at this converged WGE plus agent-surface checkpoint. Do not begin
+Stop at this converged Luxel plus agent-surface checkpoint. Do not begin
 production rigging, multiplayer, or post-checkpoint breadth in this goal.

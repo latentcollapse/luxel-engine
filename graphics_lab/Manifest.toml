@@ -786,7 +786,7 @@ git-tree-sha1 = "a2bfa46393bce7f450ee949273f2ba310d889693"
 uuid = "8d446b21-f3ad-5576-a034-752265b9b6f9"
 version = "1.4.321+0"
 
-[[deps.WGEGraphics]]
+[[deps.LuxelGraphics]]
 deps = ["Base64", "ConstructionBase", "GeometryBasics", "JSON3", "Lava", "Raycore", "SHA", "Vulkan", "VulkanCore"]
 path = "."
 uuid = "8d7c4a7e-7f0f-4d31-9b80-2d63df2a5b31"

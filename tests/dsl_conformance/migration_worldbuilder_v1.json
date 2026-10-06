@@ -1,5 +1,5 @@
 {
-  "schema": "wge.migration-fixtures/1",
+  "schema": "luxel.migration-fixtures/1",
   "source_test_file": "tests/test_worldbuilder_dsl.py",
   "fixtures": [
     {"test": "test_python_shaped_intent_compiles_without_execution", "disposition": "preserve"},

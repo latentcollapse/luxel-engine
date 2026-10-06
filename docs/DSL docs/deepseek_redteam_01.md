@@ -1,16 +1,16 @@
-# WGE Language Specification Red Team Review - 03
+# Luxel Language Specification Red Team Review - 03
 
 **Reviewer:** Independent adversarial review  
 **Date:** 2026-08-03  
-**Target:** WGE Language Specification v0.3  
+**Target:** Luxel Language Specification v0.3  
 **Status:** Design review, not implementation audit
 
-## Resolution in WGE language draft 0.4
+## Resolution in Luxel language draft 0.4
 
 This review was triaged against draft 0.3 and resolved into
-`WGE_LANGUAGE_SPEC.md` draft 0.4. Its counterexamples were treated as tests of
+`LUXEL_LANGUAGE_SPEC.md` draft 0.4. Its counterexamples were treated as tests of
 the contract, while proposed corrections were accepted only when they
-preserved WGE's authority and isolation boundaries.
+preserved Luxel's authority and isolation boundaries.
 
 | Finding | Resolution | Draft 0.4 disposition |
 |---|---|---|
@@ -418,7 +418,7 @@ Section 13.3 says: "Changing only an ignorable extension preserves `semantic_dig
 
 But what is the actual status of a domain-specific extension? Consider:
 - A Blender-specific material parameter that affects rendering
-- A WGE-specific world policy that affects gameplay
+- A Luxel-specific world policy that affects gameplay
 - A solver-specific optimization parameter that affects performance but not semantics
 
 If these are ignorable, then semantic compilation can proceed without them, but artifacts would differ. If they're critical, any change invalidates caches, but that might be too conservative.
@@ -494,7 +494,7 @@ Section 13.1 says: "canonical IR [MUST be] source-mapped."
 
 Section 13.2 includes a `"source_map": {}` field with no schema.
 
-Section 25 requires "current WGE landform scaffolds migrate without drift."
+Section 25 requires "current Luxel landform scaffolds migrate without drift."
 
 **The Missing Parts:**
 

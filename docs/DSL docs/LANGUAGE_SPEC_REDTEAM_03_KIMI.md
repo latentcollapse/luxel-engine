@@ -1,6 +1,6 @@
-# Red team 03 — WGE model-native language specification (Kimi/Cursor)
+# Red team 03 — Luxel model-native language specification (Kimi/Cursor)
 
-**Reviewing:** `docs/DSL docs/WGE_LANGUAGE_SPEC.md` draft 0.4, 2026-08-03  
+**Reviewing:** `docs/DSL docs/LUXEL_LANGUAGE_SPEC.md` draft 0.4, 2026-08-03  
 **Reviewer:** Cursor / Kimi (`cursor`), 2026-08-03  
 **Requested by:** Matt  
 **Scope:** Specification audit only. No edits to the canonical spec or code.  
@@ -113,7 +113,7 @@ kill.
 **Counterexample.**
 
 ```python
-from wge.geometry import scatter
+from luxel.geometry import scatter
 grove = scatter(domain=plot, mask=ridge, count=40, key="grove", seed=7)
 # Add a pure, non-stochastic annotation sibling under the same owner:
 grove_meta = annotate(grove, note="north ridge")
@@ -168,7 +168,7 @@ evidence under identical source and either:
 **Counterexample.**
 
 ```python
-# same .wge source
+# same .luxel source
 world = World(features=reviewed("ridge_01"), ...)
 ```
 
@@ -265,7 +265,7 @@ Name or as invalid syntax. The spec never equates them.
 
 ```python
 seed = None
-fallback = null   # NameError in Python; unclear in WGE
+fallback = null   # NameError in Python; unclear in Luxel
 ```
 
 **Normative repair.**
@@ -401,9 +401,9 @@ allowed but have no seed algebra.
 
 ```text
 build: module_seed=0xABC for package
-module land.wge declares module_seed=0xABC
-module props.wge declares nothing
-module props.wge declares module_seed=0xDEF  # conflict?
+module land.luxel declares module_seed=0xABC
+module props.luxel declares nothing
+module props.luxel declares module_seed=0xDEF  # conflict?
 ```
 
 **Normative repair.**
@@ -411,7 +411,7 @@ module props.wge declares module_seed=0xDEF  # conflict?
 > Each module has exactly one `module_seed` recorded in IR. It is taken from,
 > in order: (1) an explicit `module_seed = ...` declaration of type `Seed` if
 > present; else (2) the build-request seed for that module ID; else (3) a
-> registry-defined derivation `H("wge.module_seed"|nul|package_seed|module_id)`.
+> registry-defined derivation `H("luxel.module_seed"|nul|package_seed|module_id)`.
 > A build-request seed that disagrees with an explicit declaration is an error.
 > Package-level seeds never silently alias across modules.
 
@@ -463,8 +463,8 @@ fixture.feasibility.evidence_reject_preserves_source_valid
 namespace/version/criticality/media type/payload/digest but no dependency
 edges onto other extensions, registry versions, or language versions.
 
-**Counterexample.** Critical extension `wge.x.materials@2` requires
-`wge.x.uv@1`. Reader understands materials, ignores missing UV dependency,
+**Counterexample.** Critical extension `luxel.x.materials@2` requires
+`luxel.x.uv@1`. Reader understands materials, ignores missing UV dependency,
 emits wrong artifact while claiming critical-extension compliance.
 
 **Normative repair.**
@@ -575,7 +575,7 @@ Collection of imported names vs declaration names is unspecified.
 **Counterexample.**
 
 ```python
-from wge.geometry import line
+from luxel.geometry import line
 line = sweep(path=line, profile=diamond(width=1*mm, depth=1*mm))
 ```
 

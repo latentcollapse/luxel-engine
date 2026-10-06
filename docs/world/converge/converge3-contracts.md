@@ -1,4 +1,4 @@
-# WGE CONVERGE-3 Contracts
+# Luxel CONVERGE-3 Contracts
 
 Status: **CONVERGE-3 CLOSED, 2026-10-05.** W-1, R-1, L-2a and N-7 accepted. Closeout at the end. (Order W-1 → R-1 → L-2a → N-7
 approved 2026-10-04; pool: still water, option a.)
@@ -96,7 +96,7 @@ environment read.
 ## 1. W-1 — The pool: still water instead of neon rings
 
 > **Status: ACCEPTED (2026-10-05), revised after the first review.**
-> Arm `converge3` (`WGE_PARITY_RENDER_POLICY=converge3`, kit `tools/kit/kit2.lock.json`).
+> Arm `converge3` (`LUXEL_PARITY_RENDER_POLICY=converge3`, kit `tools/kit/kit2.lock.json`).
 > First review: "the water looks like a large round tree shadow. No depth to it."
 > v2 adds a planar reflection pass (the scene rendered from the camera mirrored
 > about the water surface, sampled by the water by Fresnel), a shallow margin
@@ -390,7 +390,7 @@ environment read.
   Without derivatives in Lava, a mip-level-based width is used. Which one is
   recorded.
 - **Permitted files:** `graphics_lab/vendor/Lava` (patch), `vendor/README.md`,
-  `LavaAdapter.jl`, `WGEGraphics.jl` (policy decode), `render_policy.rs`,
+  `LavaAdapter.jl`, `LuxelGraphics.jl` (policy decode), `render_policy.rs`,
   `tools/foliage_measure.py`, tests.
 - **Tests:** policy round-trip and validation (samples ∈ {2, 4, 8}); every
   existing reference byte-identical with the policy absent; adapter unit test
@@ -503,7 +503,7 @@ because variety pays off only once there are many instances.
   numbers. Packet growth ≤ 2 MB.
 - **Permitted files:** new `scatter.rs`, `kit.rs`, `lib.rs` (converge3
   composition, bilinear height), `render_policy.rs`, `LavaAdapter.jl` /
-  `WGEGraphics.jl` (instance variation only), `tools/build_kit.py` (far LOD
+  `LuxelGraphics.jl` (instance variation only), `tools/build_kit.py` (far LOD
   only if needed), `tests/scatter.rs`.
 - **Tests:** scatter determinism (same seed, identical placements; different
   seed, different placements); every placement satisfies its slope / height /
@@ -563,7 +563,7 @@ kits); Julia protocol (incl. wet zone 8, instance variation 5), render policy,
 and the GPU adapter suite all pass.
 
 **New references:** `artifacts/parity/ab-converge3-final` (converge3: W-1 + R-1 +
-L-2a + N-7, with the trim UV fix below; needs `WGE_KIT_SET=tools/kit/kit2.lock.json` and
+L-2a + N-7, with the trim UV fix below; needs `LUXEL_KIT_SET=tools/kit/kit2.lock.json` and
 `python3 tools/build_kit.py --set kit2`), foliage coverage
 `artifacts/calibration/l2a-foliage-v2` (+ `-base`, `-control-opaque`, `-sun`).
 

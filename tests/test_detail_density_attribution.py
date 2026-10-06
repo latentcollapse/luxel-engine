@@ -30,7 +30,7 @@ from style_reference import (
     detail_density,
     surface_variation_coverage,
 )
-from wge_critic import _detail_pair, diagnose, merge_patches
+from luxel_critic import _detail_pair, diagnose, merge_patches
 
 
 def _ridged(height: int) -> np.ndarray:

@@ -1,4 +1,4 @@
-# WGE gameplay contract
+# Luxel gameplay contract
 
 This engine-neutral Rust crate defines one deterministic, single-process game
 loop. Its closed snapshot includes exactly two playable entities, one guarding
@@ -14,7 +14,7 @@ snapshot, trace, and receipt digests against prior evidence.
 
 All serialized collections are ordered; runtime rules use integer state and a
 fixed NPC policy. The checked-in vertical-slice fixture and expected receipt
-digest pin the deterministic outcome. Run the CLI from the WGE root with:
+digest pin the deterministic outcome. Run the CLI from the Luxel root with:
 
 ```sh
 cargo run --manifest-path world_core/crates/gameplay_contract/Cargo.toml -- \

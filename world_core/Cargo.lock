@@ -1987,8 +1987,8 @@ dependencies = [
  "anyhow",
  "bevy",
  "codeweald-worldspec",
+ "luxel-reference-runtime",
  "serde_json",
- "wge-reference-runtime",
 ]
 
 [[package]]
@@ -3342,6 +3342,115 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
+
+[[package]]
+name = "luxel-asset-contract"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "luxel-certification-authority"
+version = "0.1.0"
+dependencies = [
+ "luxel-asset-contract",
+ "luxel-gameplay-contract",
+ "luxel-intake-repair-contract",
+ "luxel-native-graphics-contract",
+ "luxel-project-ledger",
+ "luxel-reference-runtime",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "luxel-control-plane"
+version = "0.1.0"
+dependencies = [
+ "luxel-certification-authority",
+ "luxel-project-ledger",
+ "luxel-reference-runtime",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "luxel-gameplay-contract"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "luxel-intake-repair-contract"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "luxel-live-evidence-contract"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "luxel-native-graphics-contract"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "image",
+ "luxel-asset-contract",
+ "luxel-live-evidence-contract",
+ "luxel-project-ledger",
+ "luxel-reference-runtime",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "luxel-project-ledger"
+version = "0.1.0"
+dependencies = [
+ "luxel-asset-contract",
+ "luxel-intake-repair-contract",
+ "luxel-reference-runtime",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "luxel-reference-runtime"
+version = "0.1.0"
+dependencies = [
+ "luxel-gameplay-contract",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
+name = "luxel-semantic-kernel"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2",
+]
 
 [[package]]
 name = "matchers"
@@ -5259,115 +5368,6 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "wge-asset-contract"
-version = "0.1.0"
-dependencies = [
- "image",
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "wge-certification-authority"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
- "wge-asset-contract",
- "wge-gameplay-contract",
- "wge-intake-repair-contract",
- "wge-native-graphics-contract",
- "wge-project-ledger",
- "wge-reference-runtime",
-]
-
-[[package]]
-name = "wge-control-plane"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
- "wge-certification-authority",
- "wge-project-ledger",
- "wge-reference-runtime",
-]
-
-[[package]]
-name = "wge-gameplay-contract"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "wge-intake-repair-contract"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "wge-live-evidence-contract"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
-]
-
-[[package]]
-name = "wge-native-graphics-contract"
-version = "0.1.0"
-dependencies = [
- "base64",
- "image",
- "serde",
- "serde_json",
- "sha2",
- "wge-asset-contract",
- "wge-live-evidence-contract",
- "wge-project-ledger",
- "wge-reference-runtime",
-]
-
-[[package]]
-name = "wge-project-ledger"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
- "wge-asset-contract",
- "wge-intake-repair-contract",
- "wge-reference-runtime",
-]
-
-[[package]]
-name = "wge-reference-runtime"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "sha2",
- "wge-gameplay-contract",
-]
-
-[[package]]
-name = "wge-semantic-kernel"
-version = "0.1.0"
-dependencies = [
- "serde_json",
- "sha2",
 ]
 
 [[package]]

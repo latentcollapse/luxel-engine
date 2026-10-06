@@ -3,11 +3,11 @@
 
 use std::path::PathBuf;
 
-use wge_native_graphics_contract::ibl::{
+use luxel_native_graphics_contract::ibl::{
     IBL_BRDF_LUT_TEXTURE_ID, IBL_ENVIRONMENT_TEXTURE_ID, IblEnvironment, apply_ibl, bake, brdf_lut, irradiance,
     irradiance_sh, octahedral_decode, octahedral_encode, prefiltered, validate_packet_ibl,
 };
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     EnvironmentIntent, GraphicsScenePacket, GraphicsScenePacketBody, IblPolicy, LightIntent, LightKind, RenderPolicy,
     SkyModel, SkyPolicy, TexturePayload,
 };
@@ -114,7 +114,7 @@ fn bake_is_deterministic_and_bound_to_the_packet() {
     let mut disabled = body.clone();
     disabled.render_policy.as_mut().unwrap().ibl = Some(IblPolicy { enabled: false });
     apply_ibl(&mut disabled).unwrap();
-    assert!(disabled.textures.iter().all(|t| !t.texture_id.starts_with("wge-ibl-")));
+    assert!(disabled.textures.iter().all(|t| !t.texture_id.starts_with("luxel-ibl-")));
     validate_packet_ibl(&disabled).unwrap();
     let TexturePayload::Rgba8(_) = body.textures.last().unwrap().payload.as_ref().unwrap() else {
         panic!("RGBA8 payload");

@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "wgeGaea": {
+    "luxelGaea": {
       "type": "stdio",
       "command": "python3",
-      "args": ["/mnt/d/Code Projects/WGE/pipeline/gaea_mcp_server.py"],
+      "args": ["/mnt/d/Code Projects/luxel-engine/pipeline/gaea_mcp_server.py"],
       "env": {}
     }
   }

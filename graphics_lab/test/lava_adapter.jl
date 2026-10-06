@@ -2,7 +2,7 @@ using Base64
 using GeometryBasics: Vec4f
 using SHA
 using Test
-using WGEGraphics
+using LuxelGraphics
 
 include(joinpath(@__DIR__, "..", "src", "LavaAdapter.jl"))
 using .LavaAdapter
@@ -39,7 +39,7 @@ end
 end
 
 @testset "analytic environment lighting" begin
-    environment = WGEGraphics.EnvironmentPacket(
+    environment = LuxelGraphics.EnvironmentPacket(
         (0.08f0, 0.16f0, 0.30f0),
         (0.48f0, 0.56f0, 0.62f0),
         (0.16f0, 0.20f0, 0.16f0),
@@ -121,16 +121,16 @@ end
 end
 
 @testset "semantic importance dispatch" begin
-    background = WGEGraphics.BackgroundImportance()
-    landmark = WGEGraphics.LandmarkImportance()
-    critical = WGEGraphics.GameplayCriticalImportance()
+    background = LuxelGraphics.BackgroundImportance()
+    landmark = LuxelGraphics.LandmarkImportance()
+    critical = LuxelGraphics.GameplayCriticalImportance()
     @test LavaAdapter._importance_margin(background) == 0.0f0
     @test LavaAdapter._importance_margin(background) < LavaAdapter._importance_margin(landmark)
     @test LavaAdapter._importance_margin(landmark) < LavaAdapter._importance_margin(critical)
 end
 
 @testset "rotated instance bounds use the instance quaternion" begin
-    mesh = WGEGraphics.MeshPacket(
+    mesh = LuxelGraphics.MeshPacket(
         "rotated-bounds-mesh",
         [(1.0f0, 0.0f0, 0.0f0)],
         [(0.0f0, 1.0f0, 0.0f0)],
@@ -138,7 +138,7 @@ end
         UInt32[0, 0, 0],
         "bounds-material",
     )
-    packet = WGEGraphics.GraphicsScenePacket(
+    packet = LuxelGraphics.GraphicsScenePacket(
         "packet-sha",
         "content-sha",
         "bounds-packet",
@@ -146,9 +146,9 @@ end
         "world-sha",
         "spatial-sha",
         UInt64(1),
-        WGEGraphics.CameraPacket(
+        LuxelGraphics.CameraPacket(
             "camera",
-            WGEGraphics.OrthographicProjection(16.0f0),
+            LuxelGraphics.OrthographicProjection(16.0f0),
             (0.0f0, 8.0f0, 0.0f0),
             (0.0f0, -1.0f0, 0.0f0),
             (0.0f0, 0.0f0, -1.0f0),
@@ -157,7 +157,7 @@ end
             UInt32(64),
             UInt32(64),
         ),
-        WGEGraphics.TerrainPacket(
+        LuxelGraphics.TerrainPacket(
             "terrain",
             16.0f0,
             16.0f0,
@@ -167,7 +167,7 @@ end
             Float32[0.0f0, 0.0f0, 0.0f0, 0.0f0],
             UInt8[0, 0, 0, 0],
         ),
-        [WGEGraphics.MaterialPacket(
+        [LuxelGraphics.MaterialPacket(
             "bounds-material",
             (0.5f0, 0.5f0, 0.5f0, 1.0f0),
             0.0f0,
@@ -184,16 +184,16 @@ end
             1.0f0,
             (0.0f0, 0.0f0, 0.0f0),
         )],
-        WGEGraphics.TexturePacket[],
+        LuxelGraphics.TexturePacket[],
         [mesh],
-        WGEGraphics.InstancePacket[],
-        [WGEGraphics.LightPacket(
+        LuxelGraphics.InstancePacket[],
+        [LuxelGraphics.LightPacket(
             "sun",
-            WGEGraphics.DirectionalLightPacket((0.0f0, -1.0f0, 0.0f0)),
+            LuxelGraphics.DirectionalLightPacket((0.0f0, -1.0f0, 0.0f0)),
             (1.0f0, 1.0f0, 1.0f0),
             1.0f0,
         )],
-        WGEGraphics.EnvironmentPacket(
+        LuxelGraphics.EnvironmentPacket(
             (0.1f0, 0.1f0, 0.1f0),
             (0.2f0, 0.2f0, 0.2f0),
             (0.05f0, 0.05f0, 0.05f0),
@@ -201,21 +201,21 @@ end
             0.0f0,
             1.0f0,
         ),
-        WGEGraphics.OverlayValue[],
+        LuxelGraphics.OverlayValue[],
         "capture",
         UInt32(64),
         UInt32(64),
         false,
-        WGEGraphics.RenderPolicy(),
+        LuxelGraphics.RenderPolicy(),
     )
     angle = Float32(pi / 2)
-    importance = WGEGraphics.BackgroundImportance()
-    transform = WGEGraphics.TransformPacket(
+    importance = LuxelGraphics.BackgroundImportance()
+    transform = LuxelGraphics.TransformPacket(
         (10.0f0, 0.0f0, 0.0f0),
         (0.0f0, sin(angle / 2.0f0), 0.0f0, cos(angle / 2.0f0)),
         (1.0f0, 1.0f0, 1.0f0),
     )
-    instance = WGEGraphics.InstancePacket(
+    instance = LuxelGraphics.InstancePacket(
         "rotated-instance",
         "rotated-bounds-mesh",
         "bounds-material",
@@ -260,9 +260,9 @@ end
 end
 
 @testset "camera projection lowering" begin
-    orthographic = WGEGraphics.CameraPacket(
+    orthographic = LuxelGraphics.CameraPacket(
         "orthographic",
-        WGEGraphics.OrthographicProjection(20.0f0),
+        LuxelGraphics.OrthographicProjection(20.0f0),
         (0.0f0, 10.0f0, 0.0f0),
         (0.0f0, -1.0f0, 0.0f0),
         (0.0f0, 0.0f0, -1.0f0),
@@ -304,7 +304,7 @@ end
     @test LavaAdapter._project_overlay_point(orthographic_frame, (0.0f0, 10.5f0, 0.0f0)) === nothing
     point_positions = Vec4f[]
     point_colors = Vec4f[]
-    point = WGEGraphics.PointOverlay(
+    point = LuxelGraphics.PointOverlay(
         "marker",
         :player_spawn,
         (-6.0f0, 0.0f0, 4.0f0),
@@ -320,9 +320,9 @@ end
         point_positions,
     )
 
-    perspective = WGEGraphics.CameraPacket(
+    perspective = LuxelGraphics.CameraPacket(
         "perspective",
-        WGEGraphics.PerspectiveProjection(60.0f0),
+        LuxelGraphics.PerspectiveProjection(60.0f0),
         (0.0f0, 10.0f0, 0.0f0),
         (0.0f0, -1.0f0, 0.0f0),
         (0.0f0, 0.0f0, -1.0f0),
@@ -363,9 +363,9 @@ end
           (100.0f0 * 2.0f0 - 0.1f0 * 100.0f0) / (99.9f0 * 2.0f0)
     @test (far_clip[3] / far_clip[4]) ≈
           (100.0f0 * 20.0f0 - 0.1f0 * 100.0f0) / (99.9f0 * 20.0f0)
-    thin_perspective = WGEGraphics.CameraPacket(
+    thin_perspective = LuxelGraphics.CameraPacket(
         "thin-perspective",
-        WGEGraphics.PerspectiveProjection(60.0f0),
+        LuxelGraphics.PerspectiveProjection(60.0f0),
         (0.0f0, 10.0f0, 0.0f0),
         (0.0f0, -1.0f0, 0.0f0),
         (0.0f0, 0.0f0, -1.0f0),
@@ -385,9 +385,9 @@ end
         thin_frame.mode,
     )
     @test 0.0f0 < thin_clip[3] / thin_clip[4] < 1.0f0
-    large_frustum = WGEGraphics.CameraPacket(
+    large_frustum = LuxelGraphics.CameraPacket(
         "large-frustum",
-        WGEGraphics.PerspectiveProjection(60.0f0),
+        LuxelGraphics.PerspectiveProjection(60.0f0),
         (0.0f0, 1.0f6, 0.0f0),
         (0.0f0, -1.0f0, 0.0f0),
         (0.0f0, 0.0f0, -1.0f0),
@@ -411,9 +411,9 @@ end
     @test LavaAdapter._project_point(large_frame, (0.0f0, 0.0f0, 0.0f0))[3] ≈ 1.0f0 atol = 1.0f-5
     tiny_near = 0.0001f0
     tiny_far = nextfloat(tiny_near)
-    tiny_camera = WGEGraphics.CameraPacket(
+    tiny_camera = LuxelGraphics.CameraPacket(
         "tiny-overlay-frustum",
-        WGEGraphics.PerspectiveProjection(60.0f0),
+        LuxelGraphics.PerspectiveProjection(60.0f0),
         (0.0f0, 0.0f0, 0.0f0),
         (0.0f0, 0.0f0, 1.0f0),
         (0.0f0, 1.0f0, 0.0f0),
@@ -483,9 +483,9 @@ end
         Vec4f(2.0f0, 2.0f0, -4.0f0, 0.0f0),
     ) ≈ 8.0f0
 
-    degenerate_camera = WGEGraphics.CameraPacket(
+    degenerate_camera = LuxelGraphics.CameraPacket(
         "degenerate",
-        WGEGraphics.OrthographicProjection(20.0f0),
+        LuxelGraphics.OrthographicProjection(20.0f0),
         (0.0f0, 10.0f0, 0.0f0),
         (0.0f0, 0.0f0, 0.0f0),
         (0.0f0, 1.0f0, 0.0f0),
@@ -496,9 +496,9 @@ end
     )
     @test_throws LavaAdapter.AdapterError LavaAdapter._camera_frame(degenerate_camera)
 
-    collinear_camera = WGEGraphics.CameraPacket(
+    collinear_camera = LuxelGraphics.CameraPacket(
         "collinear",
-        WGEGraphics.OrthographicProjection(20.0f0),
+        LuxelGraphics.OrthographicProjection(20.0f0),
         (0.0f0, 10.0f0, 0.0f0),
         (0.0f0, -1.0f0, 0.0f0),
         (0.0f0, 2.0f0, 0.0f0),
@@ -529,7 +529,7 @@ end
     @test state === LavaAdapter.backend()
 
     capabilities = LavaAdapter.backend_probe(state)
-    @test capabilities.schema == "wge.lava-backend-probe/v1"
+    @test capabilities.schema == "luxel.lava-backend-probe/v1"
     @test capabilities.persistent_context
     @test !isempty(capabilities.device_uuid)
     @test capabilities.hardware_ray_tracing

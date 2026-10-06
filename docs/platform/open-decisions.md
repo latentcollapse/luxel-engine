@@ -35,7 +35,7 @@ orthogonal to all five above, so it can land whenever it is convenient rather
 than blocking anything. It should precede item 4, since the second world would
 otherwise be judged against the same flat-topped profile.
 
-**Item 9 is a programme, not a queue entry.** Driving Gaea from WGE is agreed in
+**Item 9 is a programme, not a queue entry.** Driving Gaea from Luxel is agreed in
 principle and scoped nowhere; it does not displace the order above.
 
 ### Progress — 2026-08-04
@@ -336,9 +336,9 @@ varied by turning a parameter. That second loss is the expensive one — a model
 cannot turn a dial on a mountain it did not generate, which is precisely the
 Aisling thesis.
 
-**Resolved 2026-08-03 — WGE drives Gaea. Imports stay Grade A.**
+**Resolved 2026-08-03 — Luxel drives Gaea. Imports stay Grade A.**
 
-WGE emits the `.terrain` graph and builds it headlessly; the built heightfield is
+Luxel emits the `.terrain` graph and builds it headlessly; the built heightfield is
 digest-pinned as a declared input. The world stays regenerable *and* byte-exact,
 and the skill floor survives, because the authored surface is still DSL rather
 than a GUI. Accepting hand-authored imports was declined: it was available almost
@@ -349,12 +349,12 @@ What makes this viable rather than aspirational, from inspecting the 2.3.0.1
 install:
 
 - `.terrain` is plain JSON — a Newtonsoft-serialized object graph with `$id` /
-  `$values` reference tracking. WGE can *write* it, not merely read it.
+  `$values` reference tracking. Luxel can *write* it, not merely read it.
 - `Gaea.Swarm.exe`, `Gaea.Server.exe` and `Gaea.BuildManager.exe` ship in the
   box, alongside `Grpc.Core.Api.dll`. There is a headless build path and a gRPC
   surface without writing a single line against Gaea's UI.
 
-**No Gaea plugin.** A plugin would put WGE logic inside a proprietary Windows
+**No Gaea plugin.** A plugin would put Luxel logic inside a proprietary Windows
 application running under Proton, which is the same error the README forbids for
 backends: a change expressible in only one of them is in the wrong layer.
 Emitting `.terrain` makes Gaea an adapter target, droppable exactly like the
@@ -374,7 +374,7 @@ Gaea.Swarm [[--Filename] <String>] [--buildpath <String>] [--ignorecache]
 The four that matter, and they change the design:
 
 - **`--vars <path>`** — a `.json` or `.txt` of variable name/value pairs, and
-  **`-v name=value`** repeated. Gaea graphs can expose variables, so WGE does not
+  **`-v name=value`** repeated. Gaea graphs can expose variables, so Luxel does not
   have to synthesise a `.terrain` graph to parameterise a world. It can drive a
   *hand-authored* graph.
 - **`--seed <int32>`** — the mutation seed, so stochastic nodes are pinned.
@@ -385,9 +385,9 @@ The four that matter, and they change the design:
 
 **This is a better contract than emitting `.terrain` JSON.** The graph — which is
 where the *taste* lives, and which Matt can shape in the GUI — stays authored in
-Gaea. WGE supplies intent as variables and pins seed, resolution and output. It
+Gaea. Luxel supplies intent as variables and pins seed, resolution and output. It
 keeps the "no Gaea plugin" rule intact: Gaea stays an adapter target, driven from
-outside, and the authored surface is still a WGE artifact.
+outside, and the authored surface is still a Luxel artifact.
 
 Emitting `.terrain` directly remains possible (it is plain JSON) and is the right
 escalation if variables prove too narrow. It is no longer the *starting* point.
@@ -456,7 +456,7 @@ unusable. See [D30](debt-ledger.md).
 **A graph only builds headlessly if it defines a `SaveDefinition`.** Only 3 of
 the 59 bundled examples do; the rest are graph demos with no output node, and
 they exit 0 having written nothing — which looks like a failure and is not one.
-The WGE graph must mark its export nodes.
+The Luxel graph must mark its export nodes.
 
 **Scheduling:** this is a programme, not a task, and it does not enter the work
 order above. It also does not moot D26 — see item 1.

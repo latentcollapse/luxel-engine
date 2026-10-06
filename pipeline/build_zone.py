@@ -55,13 +55,13 @@ BUILD_VERSION = "codeweald.zone-build/v1"
 
 
 def _engine_root() -> Path:
-    """Where WGE's own Julia and Rust components live.
+    """Where Luxel's own Julia and Rust components live.
 
     Found by walking up from this file until a directory holds both, rather
     than derived from the *asset* root as `project_root.parent`. That old form
     encoded "the engine is exactly one level above the art", which is only true
     while the compiler lives inside the game it compiles for -- the assumption
-    that had to go before WGE could be separated from Codeweald (D8).
+    that had to go before Luxel could be separated from Codeweald (D8).
 
     Deriving it from `__file__` is also simply more correct: the engine knows
     where it is. It should never have been inferring its own location from
@@ -71,7 +71,7 @@ def _engine_root() -> Path:
         if (candidate / "terrain_lab").is_dir() and (candidate / "world_core").is_dir():
             return candidate
     raise ZoneCompileError(
-        "cannot locate the WGE engine root: no ancestor of %s contains both "
+        "cannot locate the Luxel engine root: no ancestor of %s contains both "
         "terrain_lab/ and world_core/" % Path(__file__).resolve()
     )
 
@@ -816,7 +816,7 @@ def build(
     annotations = annotations.resolve()
     # A batch does not have to live inside the engine. It used to, because the
     # Godot subprocess needs a `res://`-relative batch path and the guard was
-    # written for it -- but that requirement belongs to Godot, not to WGE, and
+    # written for it -- but that requirement belongs to Godot, not to Luxel, and
     # applying it to every build is what stopped the compiler from being
     # pointable at a scratch directory (D8). A headless build now reads its
     # inputs from wherever the batch is and writes every artifact beside it.
@@ -1001,7 +1001,7 @@ def build(
         )
     catalog = build_catalog(project_root, asset_root)
     # Defaults into the engine tree, which is right for a normal build and
-    # wrong for a sandbox: a shared read-only WGE cannot be written to, and two
+    # wrong for a sandbox: a shared read-only Luxel cannot be written to, and two
     # concurrent runs would race over one file. An explicit path lets a
     # throwaway batch keep its catalog beside itself.
     catalog_path = catalog_path or (project_root / "assets/generated/codeweald_asset_catalog.json")

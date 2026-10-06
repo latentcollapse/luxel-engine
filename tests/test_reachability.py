@@ -327,7 +327,7 @@ class CriticIntegrationTests(unittest.TestCase):
     """
 
     def test_unreachable_parameters_become_non_actionable_findings(self) -> None:
-        from wge_critic import detect_unreachable_parameters
+        from luxel_critic import detect_unreachable_parameters
 
         spec = _both_profiles()
         with mock.patch.object(
@@ -345,7 +345,7 @@ class CriticIntegrationTests(unittest.TestCase):
             self.assertTrue(finding.owner)
 
     def test_a_healthy_world_produces_no_reachability_findings(self) -> None:
-        from wge_critic import detect_unreachable_parameters
+        from luxel_critic import detect_unreachable_parameters
 
         with mock.patch("reachability.SWEEP_RESOLUTION", TEST_RESOLUTION):
             findings = detect_unreachable_parameters(_both_profiles())

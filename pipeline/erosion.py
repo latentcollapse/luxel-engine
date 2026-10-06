@@ -1,6 +1,6 @@
 """Erosion: the process that makes terrain look like somewhere (systems S3).
 
-Every landform WGE builds is noise with a silhouette. Ridged multifractal (S18)
+Every landform Luxel builds is noise with a silhouette. Ridged multifractal (S18)
 gets you *ridges*, and ridges are not the Alps. Reviewed 2026-08-02 against
 Lauterbrunnen and the verdict was fair: the mountains are still odd shapes.
 
@@ -572,7 +572,7 @@ class ErosionWorkerReceipt:
 _WORKSPACE_ROOT = Path(__file__).resolve().parents[1]
 _EROSION_REQUEST_SCHEMA = "codeweald.erosion-request/v1"
 _EROSION_RESULT_SCHEMA = "codeweald.erosion-result/v1"
-_EROSION_RECEIPT_SCHEMA = "wge.erosion-worker-receipt/v1"
+_EROSION_RECEIPT_SCHEMA = "luxel.erosion-worker-receipt/v1"
 _SUPERVISOR_IDLE_SECONDS = 120.0
 _SUPERVISOR_MAX_JOBS = 32
 _SUPERVISOR_REQUEST_TIMEOUT_SECONDS = 300.0
@@ -581,10 +581,10 @@ _SUPERVISOR_STDERR_TAIL_BYTES = 8_192
 
 
 def _erosion_backend() -> str:
-    backend = os.environ.get("WGE_EROSION_BACKEND", "julia").strip().lower()
+    backend = os.environ.get("LUXEL_EROSION_BACKEND", "julia").strip().lower()
     if backend not in {"julia", "python"}:
         raise ValueError(
-            "WGE_EROSION_BACKEND must be 'julia' or 'python', got %r" % backend
+            "LUXEL_EROSION_BACKEND must be 'julia' or 'python', got %r" % backend
         )
     return backend
 
@@ -624,21 +624,21 @@ def _resolve_workspace_path(value: str | None, default: Path) -> Path:
 
 
 def _supervisor_configuration() -> tuple[list[str], tuple[tuple[object, ...], ...]]:
-    julia = os.environ.get("WGE_EROSION_JULIA") or shutil.which("julia") or "julia"
+    julia = os.environ.get("LUXEL_EROSION_JULIA") or shutil.which("julia") or "julia"
     project = _resolve_workspace_path(
-        os.environ.get("WGE_TERRAIN_PROJECT"), _WORKSPACE_ROOT / "terrain_lab"
+        os.environ.get("LUXEL_TERRAIN_PROJECT"), _WORKSPACE_ROOT / "terrain_lab"
     )
     worker = _resolve_workspace_path(
-        os.environ.get("WGE_EROSION_WORKER"), project / "bin" / "erosion_worker.jl"
+        os.environ.get("LUXEL_EROSION_WORKER"), project / "bin" / "erosion_worker.jl"
     )
     manifest = _resolve_workspace_path(
-        os.environ.get("WGE_TERRAIN_MANIFEST"), project / "Manifest.toml"
+        os.environ.get("LUXEL_TERRAIN_MANIFEST"), project / "Manifest.toml"
     )
-    configured_kernel = os.environ.get("WGE_SEMANTIC_KERNEL")
+    configured_kernel = os.environ.get("LUXEL_SEMANTIC_KERNEL")
     if configured_kernel:
         command = shlex.split(configured_kernel)
         if not command:
-            raise ErosionWorkerError("worker_unavailable", "WGE_SEMANTIC_KERNEL is empty")
+            raise ErosionWorkerError("worker_unavailable", "LUXEL_SEMANTIC_KERNEL is empty")
     else:
         command = [
             "cargo",
@@ -648,7 +648,7 @@ def _supervisor_configuration() -> tuple[list[str], tuple[tuple[object, ...], ..
             "--manifest-path",
             str(_WORKSPACE_ROOT / "world_core" / "Cargo.toml"),
             "-p",
-            "wge-semantic-kernel",
+            "luxel-semantic-kernel",
             "--",
         ]
     command.extend(
@@ -706,10 +706,10 @@ class _ErosionSupervisorClient:
         self.jobs = 0
         self.last_used = time.monotonic()
         self._stdout_thread = threading.Thread(
-            target=self._read_stdout, name="wge-erosion-supervisor-stdout", daemon=True
+            target=self._read_stdout, name="luxel-erosion-supervisor-stdout", daemon=True
         )
         self._stderr_thread = threading.Thread(
-            target=self._read_stderr, name="wge-erosion-supervisor-stderr", daemon=True
+            target=self._read_stderr, name="luxel-erosion-supervisor-stderr", daemon=True
         )
         self._stdout_thread.start()
         self._stderr_thread.start()
@@ -796,7 +796,7 @@ class _ErosionSupervisorClient:
             or event["pid"] <= 0
             or not isinstance(event.get("cold_ms"), int)
             or event["cold_ms"] < 0
-            or event.get("wrapper_version") != "wge.erosion-worker/v1"
+            or event.get("wrapper_version") != "luxel.erosion-worker/v1"
             or not all(
                 _is_sha256(event.get(key))
                 for key in ("manifest_sha256", "project_sha256", "script_sha256")
@@ -1062,7 +1062,7 @@ atexit.register(_shutdown_erosion_supervisor)
 def _get_erosion_supervisor() -> _ErosionSupervisorClient:
     global _SUPERVISOR, _SUPERVISOR_BACKEND_SETTING
     command, fingerprint = _supervisor_configuration()
-    backend_setting = os.environ.get("WGE_EROSION_BACKEND")
+    backend_setting = os.environ.get("LUXEL_EROSION_BACKEND")
     with _SUPERVISOR_LOCK:
         if _SUPERVISOR is not None and (
             _SUPERVISOR_BACKEND_SETTING != backend_setting
@@ -1154,7 +1154,7 @@ def _julia_operation(
         raise ValueError("heightfield must be a two-dimensional array")
     if not np.isfinite(array).all():
         raise ValueError("heightfield must contain only finite values")
-    with tempfile.TemporaryDirectory(prefix="wge-erosion-") as directory:
+    with tempfile.TemporaryDirectory(prefix="luxel-erosion-") as directory:
         root = Path(directory)
         height_path = root / "height.f64"
         height_digest = _write_float64(height_path, array)
@@ -1194,7 +1194,7 @@ def flux_field(
             )
         return _python_flux_field(height, source=source, exponent=exponent)
     source_path_fields: dict[str, object] = {"source_path": None, "source_sha256": None}
-    with tempfile.TemporaryDirectory(prefix="wge-erosion-source-") as directory:
+    with tempfile.TemporaryDirectory(prefix="luxel-erosion-source-") as directory:
         if source is not None:
             source_array = np.asarray(source, dtype=np.float64)
             if source_array.shape != np.asarray(height).shape:
@@ -1204,7 +1204,7 @@ def flux_field(
                 "source_path": str(source_path),
                 "source_sha256": _write_float64(source_path, source_array),
             }
-        with tempfile.TemporaryDirectory(prefix="wge-erosion-output-") as output_directory:
+        with tempfile.TemporaryDirectory(prefix="luxel-erosion-output-") as output_directory:
             output_path = Path(output_directory) / "result.f64"
             result, _response, receipt = _julia_operation(
                 "flux_field",
@@ -1236,7 +1236,7 @@ def thermal_erosion(
         return _python_thermal_erosion(
             height, cell_m=cell_m, talus_degrees=talus_degrees, rate=rate
         )
-    with tempfile.TemporaryDirectory(prefix="wge-erosion-output-") as directory:
+    with tempfile.TemporaryDirectory(prefix="luxel-erosion-output-") as directory:
         output_path = Path(directory) / "result.f64"
         result, _response, receipt = _julia_operation(
             "thermal_erosion",
@@ -1271,7 +1271,7 @@ def erode(
     if _erosion_backend() == "python":
         _shutdown_erosion_supervisor()
         return _python_erode(height, profile, cell_m=cell_m, protect=protect)
-    with tempfile.TemporaryDirectory(prefix="wge-erosion-output-") as directory:
+    with tempfile.TemporaryDirectory(prefix="luxel-erosion-output-") as directory:
         protect_path_fields: dict[str, object] = {
             "protect_path": None,
             "protect_sha256": None,

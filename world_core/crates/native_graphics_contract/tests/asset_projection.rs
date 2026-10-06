@@ -1,10 +1,10 @@
 use sha2::{Digest, Sha256};
-use wge_asset_contract::{
+use luxel_asset_contract::{
     AssetIdentity, RENDER_ASSET_PACKAGE_SCHEMA, RenderAlphaMode, RenderAssetPackage,
     RenderAssetProvenance, RenderMaterial, RenderMesh, RenderProducerIdentity, RenderTexture,
     RenderTextureColorSpace, RenderTextureMip, RenderTextureTransform, RenderTransform,
 };
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     TextureColorSpace, TexturePayload, project_render_asset, validate_graphics_asset_projection,
 };
 
@@ -20,8 +20,8 @@ fn package() -> RenderAssetPackage {
         },
         transform: RenderTransform {
             meters_per_unit: 1.0,
-            source_vertical_axis: wge_asset_contract::Axis::Y,
-            canonical_vertical_axis: wge_asset_contract::Axis::Y,
+            source_vertical_axis: luxel_asset_contract::Axis::Y,
+            canonical_vertical_axis: luxel_asset_contract::Axis::Y,
         },
         meshes: vec![RenderMesh {
             mesh_id: "hero-mesh".into(),
@@ -92,7 +92,7 @@ fn seal(mut package: RenderAssetPackage) -> RenderAssetPackage {
         .expect("package is an object")
         .remove("package_id");
     let mut hasher = Sha256::new();
-    hasher.update(wge_asset_contract::canonical_json(&value).as_bytes());
+    hasher.update(luxel_asset_contract::canonical_json(&value).as_bytes());
     let digest = format!("{:x}", hasher.finalize());
     package.package_id = format!("render_asset_sha256_{digest}");
     package
@@ -139,7 +139,7 @@ fn projection_preserves_multilevel_payload_and_digest() {
         .remove("package_id");
     let digest = format!(
         "{:x}",
-        Sha256::digest(wge_asset_contract::canonical_json(&value).as_bytes())
+        Sha256::digest(luxel_asset_contract::canonical_json(&value).as_bytes())
     );
     package.package_id = format!("render_asset_sha256_{digest}");
 
@@ -148,7 +148,7 @@ fn projection_preserves_multilevel_payload_and_digest() {
     assert_eq!(reference.mip_levels, 2);
     assert_eq!(
         reference.sha256,
-        wge_native_graphics_contract::sha256_prefixed(&[base, mip].concat())
+        luxel_native_graphics_contract::sha256_prefixed(&[base, mip].concat())
     );
     let Some(TexturePayload::Rgba8MipChain { levels }) = reference.payload.as_ref() else {
         panic!("multi-level projection must retain the mip-chain payload");

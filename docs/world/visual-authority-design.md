@@ -7,8 +7,8 @@ contract as a required `visual_quality` gate:
 
 | Field | Value |
 | --- | --- |
-| Validator | `wge.validator.visual-quality/v1` |
-| Receipt schema | `wge.visual-quality-receipt/v1` |
+| Validator | `luxel.validator.visual-quality/v1` |
+| Receipt schema | `luxel.visual-quality-receipt/v1` |
 | Packet artifact kind | `native_graphics_scene_packet` |
 | Frame receipt artifact kind | `native_graphics_frame_receipt` |
 | Capture artifact kind | `native_rgba8_capture` |
@@ -28,7 +28,7 @@ For a candidate receipt, the Rust validator:
    world digest, and spatial-field digest against the bound world bytes.
 3. Parses the exact `GraphicsFrameReceipt` and raw RGBA bytes.
 4. Parses `VisualQualityEvidence` and calls
-   `wge_native_graphics_contract::validate_visual_quality_evidence` with those
+   `luxel_native_graphics_contract::validate_visual_quality_evidence` with those
    exact values. That contract verifies packet and frame-receipt identities,
    raw capture dimensions and digest, native frame measurements, profile and
    evidence digests, then recomputes the strict visual assessment.
@@ -62,7 +62,7 @@ profile.
 ## Profile policy and compatibility
 
 Both standard profiles now require `visual_quality` alongside the existing
-`visual` gate. The existing `wge.validator.visual-reference/v1` remains
+`visual` gate. The existing `luxel.validator.visual-reference/v1` remains
 registered and unchanged; it continues to revalidate the reference-runtime P6
 capture and evidence. The additional gate evaluates the native scene packet,
 promoted frame receipt, raw RGBA capture, and strict technical quality

@@ -3,16 +3,16 @@
 
 use std::path::PathBuf;
 
-use wge_native_graphics_contract::session::{PresentedGraphicsSession, PresentedSessionRequest};
-use wge_reference_runtime::build_from_layout_path;
+use luxel_native_graphics_contract::session::{PresentedGraphicsSession, PresentedSessionRequest};
+use luxel_reference_runtime::build_from_layout_path;
 
 fn julia_executable() -> PathBuf {
-    std::env::var_os("WGE_JULIA")
+    std::env::var_os("LUXEL_JULIA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("julia"))
 }
 
-fn build_world_fixture() -> wge_reference_runtime::WorldArtifact {
+fn build_world_fixture() -> luxel_reference_runtime::WorldArtifact {
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let workspace_root = manifest_dir
         .ancestors()
@@ -24,7 +24,7 @@ fn build_world_fixture() -> wge_reference_runtime::WorldArtifact {
         .expect("reference layout exists");
     let terrain_lab = workspace_root.join("terrain_lab");
     let input = std::env::temp_dir().join(format!(
-        "wge-session-fixture-{}-{}",
+        "luxel-session-fixture-{}-{}",
         std::process::id(),
         std::thread::current().name().unwrap_or("t")
     ));
@@ -39,8 +39,8 @@ fn build_world_fixture() -> wge_reference_runtime::WorldArtifact {
 /// One shared world per process: the build spawns a Julia subprocess, and a
 /// per-test fixture directory races when parallel test threads copy the same
 /// layout file over each other mid-read.
-fn world_fixture() -> wge_reference_runtime::WorldArtifact {
-    static WORLD: std::sync::OnceLock<wge_reference_runtime::WorldArtifact> =
+fn world_fixture() -> luxel_reference_runtime::WorldArtifact {
+    static WORLD: std::sync::OnceLock<luxel_reference_runtime::WorldArtifact> =
         std::sync::OnceLock::new();
     WORLD.get_or_init(build_world_fixture).clone()
 }
@@ -51,9 +51,9 @@ fn request() -> PresentedSessionRequest {
 }
 
 fn packet_for(
-    world: &wge_reference_runtime::WorldArtifact,
-) -> wge_native_graphics_contract::GraphicsScenePacket {
-    wge_native_graphics_contract::lower_reference_world(world)
+    world: &luxel_reference_runtime::WorldArtifact,
+) -> luxel_native_graphics_contract::GraphicsScenePacket {
+    luxel_native_graphics_contract::lower_reference_world(world)
         .expect("world lowers to scene packet")
 }
 

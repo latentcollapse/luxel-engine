@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use wge_reference_runtime::{
+use luxel_reference_runtime::{
     KinematicInput, KinematicState, PhysicsWorld, REFERENCE_TICK_RATE_HZ,
 };
 
@@ -24,9 +24,9 @@ use crate::{
     session::{PresentedGraphicsSession, WindowFrameReport},
 };
 
-pub const INPUT_SAMPLE_SCHEMA: &str = "wge.input-sample/v1";
-pub const INPUT_FRAME_SCHEMA: &str = "wge.input-frame/v1";
-pub const INPUT_TRACE_SCHEMA: &str = "wge.input-trace/v1";
+pub const INPUT_SAMPLE_SCHEMA: &str = "luxel.input-sample/v1";
+pub const INPUT_FRAME_SCHEMA: &str = "luxel.input-frame/v1";
+pub const INPUT_TRACE_SCHEMA: &str = "luxel.input-trace/v1";
 
 /// Fixed simulated timestep the worker batches against. The worker is asked
 /// for whole multiples of this interval, so sim time and present time stay
@@ -382,7 +382,7 @@ pub struct TraceStep {
 
 /// Rolling input-trace digest. The digest chains frame bytes with the previous
 /// digest, so a replay is byte-comparable against the registered trace.
-pub const INPUT_TRACE_DIGEST_DOMAIN: &[u8] = b"wge.input-trace/v1\0";
+pub const INPUT_TRACE_DIGEST_DOMAIN: &[u8] = b"luxel.input-trace/v1\0";
 
 pub fn trace_digest(steps: &[TraceStep]) -> String {
     let mut hasher = Sha256::new();
@@ -410,7 +410,7 @@ fn hex(bytes: &[u8]) -> String {
 pub struct InputDrivenSession<'world> {
     session: PresentedGraphicsSession,
     physics: PhysicsWorld<'world>,
-    world: &'world wge_reference_runtime::WorldArtifact,
+    world: &'world luxel_reference_runtime::WorldArtifact,
     player: KinematicState,
     yaw_rad: f32,
     pitch_rad: f32,
@@ -424,7 +424,7 @@ impl<'world> InputDrivenSession<'world> {
     /// world. The player starts at the authored spawn.
     pub fn new(
         session: PresentedGraphicsSession,
-        world: &'world wge_reference_runtime::WorldArtifact,
+        world: &'world luxel_reference_runtime::WorldArtifact,
     ) -> Result<Self, GraphicsWorkerError> {
         session.validate_bound_world(world)?;
         let physics_world = PhysicsWorld::new(world)
@@ -494,8 +494,8 @@ impl<'world> InputDrivenSession<'world> {
             })?;
         self.player = receipt.body.next_state.clone();
         let disposition = match receipt.body.disposition {
-            wge_reference_runtime::KinematicStepDisposition::Advanced => "advanced",
-            wge_reference_runtime::KinematicStepDisposition::Rejected => "rejected",
+            luxel_reference_runtime::KinematicStepDisposition::Advanced => "advanced",
+            luxel_reference_runtime::KinematicStepDisposition::Rejected => "rejected",
         };
         let step = TraceStep {
             frame,
@@ -599,7 +599,7 @@ mod tests {
     #[test]
     fn input_sample_rejects_bad_schema_and_nonfinite_fields() {
         let mut sample = InputSample::new(1.0);
-        sample.schema_version = "wge.input-sample/v0".into();
+        sample.schema_version = "luxel.input-sample/v0".into();
         assert!(sample.validate().is_err());
         let mut sample = InputSample::new(f64::NAN);
         sample.schema_version = INPUT_SAMPLE_SCHEMA.into();
@@ -659,8 +659,8 @@ mod tests {
 
     #[test]
     fn camera_intent_stays_above_the_body_origin() {
-        let mut body_body = wge_reference_runtime::KinematicStateBody {
-            schema_version: wge_reference_runtime::PHYSICS_STATE_SCHEMA.into(),
+        let mut body_body = luxel_reference_runtime::KinematicStateBody {
+            schema_version: luxel_reference_runtime::PHYSICS_STATE_SCHEMA.into(),
             world_artifact_id: "w".into(),
             world_artifact_sha256: "sha256:0".into(),
             tick: 3,

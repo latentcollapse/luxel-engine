@@ -1,7 +1,7 @@
-# WGE TetCageRT Seam Design — Native Graphics Packet Integration
+# Luxel TetCageRT Seam Design — Native Graphics Packet Integration
 
 Status: **design registered 2026-10-02; extends `tet-lab/tetcage-rt-integration-contract.md` (DESIGN ONLY) to the measured technology**
-Authority chain: WGE Rust kernel owns identity/policy/evidence; Julia/Lava execute; TetLab remains a quarantined research lane until Phase 1 lands behind the capability flag.
+Authority chain: Luxel Rust kernel owns identity/policy/evidence; Julia/Lava execute; TetLab remains a quarantined research lane until Phase 1 lands behind the capability flag.
 
 ## 0. What changed since the integration contract was written
 
@@ -24,7 +24,7 @@ living world affordable — and it deliberately leaves the RT facet's memory the
 
 ## 1. The decisive constraint: no CUDA in the shipped game
 
-TetLab's pinned kernels are CUDA.jl (`tet-lab/gpu/Project.toml`). WGE's product
+TetLab's pinned kernels are CUDA.jl (`tet-lab/gpu/Project.toml`). Luxel's product
 envelope is Rust/Julia/Lava-Vulkan; a shipped arena demo that requires the CUDA
 runtime violates the doctrine and the "it just works when the window comes up"
 requirement. Therefore:
@@ -155,7 +155,7 @@ P1   Packet v7 extension lands behind the flag: conifer-wind single instance on 
      rejections; static fallback proven. GATE: existing suites byte-identical with
      flag off; flagged run presents deformed frames with receipts.
      >>> CLOSED 2026-10-02. `native_graphics_contract::deformation` +
-     `WGEGraphics.jl`, flag `WGE_TETCAGE_DEFORM_V7`. **GATE MET on both
+     `LuxelGraphics.jl`, flag `LUXEL_TETCAGE_DEFORM_V7`. **GATE MET on both
      halves.** (a) BYTE-IDENTICAL WITH FLAG OFF, proved against a COMMITTED
      v6 artifact rather than a round-trip: re-sealing
      `artifacts/campaign2/adapter-v6-baseline-replay-2026-09-29/run-a/
@@ -173,7 +173,7 @@ P1   Packet v7 extension lands behind the flag: conifer-wind single instance on 
      Julia/Rust boundary — a receiver never has to guess whether the section
      was ignored.
      >>> AND ONE FINDING P1 SURPRISED US WITH, recorded because it will recur:
-     `wge-certification-authority` did not compile at HEAD — the earlier
+     `luxel-certification-authority` did not compile at HEAD — the earlier
      mip-residency slice added a field to `GraphicsTelemetry` and closed
      without running the WORKSPACE gate, so a crate outside its own lane sat
      broken and invisible until P1 happened to touch the same struct.

@@ -1,7 +1,7 @@
 # Campaign 1: live graphics supervisor seam
 
-`wge-native-graphics-contract::LiveGraphicsSession` binds the existing Rust
-`GraphicsWorkerSupervisor` to `wge-live-evidence-contract`. It is an on-demand
+`luxel-native-graphics-contract::LiveGraphicsSession` binds the existing Rust
+`GraphicsWorkerSupervisor` to `luxel-live-evidence-contract`. It is an on-demand
 **offscreen capture** adapter. The current worker does not own a window,
 swapchain, or presentation loop. `request_live_present()` returns an explicit
 unsupported outcome and never substitutes a capture for a presented frame. A

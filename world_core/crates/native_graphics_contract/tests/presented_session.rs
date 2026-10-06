@@ -6,14 +6,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use wge_native_graphics_contract::session::{PresentedGraphicsSession, PresentedSessionRequest};
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::session::{PresentedGraphicsSession, PresentedSessionRequest};
+use luxel_native_graphics_contract::{
     GraphicsWorkerSupervisor, lower_reference_world, lower_showcase_packet,
 };
-use wge_reference_runtime::build_from_layout_path;
+use luxel_reference_runtime::build_from_layout_path;
 
 fn julia_executable() -> PathBuf {
-    std::env::var_os("WGE_JULIA")
+    std::env::var_os("LUXEL_JULIA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("julia"))
 }
@@ -39,9 +39,9 @@ fn presented_session_presents_frames_and_samples_tier_a_evidence() {
         .expect("reference layout exists");
     let graphics_lab = workspace_root.join("graphics_lab");
     let terrain_lab = workspace_root.join("terrain_lab");
-    let worker = graphics_lab.join("bin/wge_graphics_worker.jl");
+    let worker = graphics_lab.join("bin/luxel_graphics_worker.jl");
     let output_dir =
-        std::env::temp_dir().join(format!("wge-presented-session-{}", std::process::id()));
+        std::env::temp_dir().join(format!("luxel-presented-session-{}", std::process::id()));
     fs::create_dir_all(&output_dir).expect("test output directory is writable");
     let input = output_dir.join("riverwatch.layout.json");
     fs::copy(&layout, &input).expect("layout copies into temp fixture directory");
@@ -117,7 +117,7 @@ fn presented_session_presents_frames_and_samples_tier_a_evidence() {
     );
     assert_eq!(
         promoted.receipt.body.status,
-        wge_native_graphics_contract::FrameStatus::Passed
+        luxel_native_graphics_contract::FrameStatus::Passed
     );
 
     // The presented loop continues on the same window after evidence sampling.
@@ -154,8 +154,8 @@ fn presented_session_rejects_presenting_without_an_open_window() {
         .expect("reference layout exists");
     let graphics_lab = workspace_root.join("graphics_lab");
     let terrain_lab = workspace_root.join("terrain_lab");
-    let worker = graphics_lab.join("bin/wge_graphics_worker.jl");
-    let input = std::env::temp_dir().join(format!("wge-session-negative-{}", std::process::id()));
+    let worker = graphics_lab.join("bin/luxel_graphics_worker.jl");
+    let input = std::env::temp_dir().join(format!("luxel-session-negative-{}", std::process::id()));
     fs::create_dir_all(&input).expect("fixture dir is writable");
     let layout_path = input.join("riverwatch.layout.json");
     fs::copy(&layout, &layout_path).expect("layout copies");

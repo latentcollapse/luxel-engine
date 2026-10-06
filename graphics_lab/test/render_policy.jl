@@ -1,7 +1,7 @@
 using Test
 using JSON3
 using GeometryBasics: Vec2f, Vec4f
-using WGEGraphics
+using LuxelGraphics
 
 include(joinpath(@__DIR__, "..", "src", "LavaAdapter.jl"))
 using .LavaAdapter
@@ -17,7 +17,7 @@ using .LavaAdapter
 # ---------------------------------------------------------------------------
 
 @testset "render policy defaults reproduce the frozen baseline" begin
-    policy = WGEGraphics.RenderPolicy()
+    policy = LuxelGraphics.RenderPolicy()
     @test policy.dither.amplitude_milli_lsb == 0
     @test policy.sampler.anisotropy == 1
     @test policy.terrain_surface.uv_repeat_scale_milli == 1000
@@ -30,14 +30,14 @@ using .LavaAdapter
     @test policy.shadow.filter_radius_milli == 1000
     @test policy.bloom.intensity_bp == 0
     @test policy.vignette.strength_bp == 0
-    @test policy.grade.gamma_bp == WGEGraphics.POLICY_SCALE
-    @test policy.grade.saturation_bp == WGEGraphics.POLICY_SCALE
+    @test policy.grade.gamma_bp == LuxelGraphics.POLICY_SCALE
+    @test policy.grade.saturation_bp == LuxelGraphics.POLICY_SCALE
     @test policy.grade.lift_rgb_bp == (0, 0, 0)
-    @test policy.grade.gain_rgb_bp == ntuple(_ -> WGEGraphics.POLICY_SCALE, 3)
+    @test policy.grade.gain_rgb_bp == ntuple(_ -> LuxelGraphics.POLICY_SCALE, 3)
 end
 
 @testset "resolve policy lowering is the single audit point" begin
-    lowered = LavaAdapter._resolve_policy(WGEGraphics.RenderPolicy())
+    lowered = LavaAdapter._resolve_policy(LuxelGraphics.RenderPolicy())
     @test lowered.grade_lift_rgb[1] == 0.0f0
     @test lowered.grade_gain_rgb[1] == 1.0f0
     @test lowered.grade_gamma_saturation[1] == 1.0f0
@@ -46,14 +46,14 @@ end
     @test lowered.vignette[1] == 0.0f0     # vignette off
     @test lowered.dither[1] == 0.0f0       # dither off
 
-    styled = WGEGraphics.RenderPolicy(
-        WGEGraphics.GradePolicy((120, -60, 240), 9800, (10400, 10200, 10600), 9200),
-        WGEGraphics.BloomPolicy(8200, 1400),
-        WGEGraphics.VignettePolicy(2200, 6800, 3500),
-        WGEGraphics.DitherPolicy(1000),
-        WGEGraphics.TerrainSurfacePolicy(8000, true, 900, 55),
-        WGEGraphics.SamplerPolicy(8),
-        WGEGraphics.ShadowPolicy(9600, 2400),
+    styled = LuxelGraphics.RenderPolicy(
+        LuxelGraphics.GradePolicy((120, -60, 240), 9800, (10400, 10200, 10600), 9200),
+        LuxelGraphics.BloomPolicy(8200, 1400),
+        LuxelGraphics.VignettePolicy(2200, 6800, 3500),
+        LuxelGraphics.DitherPolicy(1000),
+        LuxelGraphics.TerrainSurfacePolicy(8000, true, 900, 55),
+        LuxelGraphics.SamplerPolicy(8),
+        LuxelGraphics.ShadowPolicy(9600, 2400),
     )
     low = LavaAdapter._resolve_policy(styled)
     @test low.grade_lift_rgb[1] ≈ 0.012f0 atol = 1.0f-6
@@ -71,7 +71,7 @@ end
 
     # Default lowering must be EXACTLY the historical arithmetic, not merely
     # close: 1.0f0 - 7500/10000 == 0.25f0 and 1000/1000 == 1.0f0.
-    default_shadow = LavaAdapter._shadow_uniform(WGEGraphics.RenderPolicy())
+    default_shadow = LavaAdapter._shadow_uniform(LuxelGraphics.RenderPolicy())
     @test default_shadow[1] === 0.75f0
     @test default_shadow[2] === 1.0f0
 end
@@ -200,16 +200,16 @@ end
     # host (doing so segfaults inside the shader JIT). What IS host-testable is
     # the short-circuit predicate, and the default that keeps it false. Bloom's
     # actual appearance is verified by the fixed-camera A/B capture, not here.
-    @test !LavaAdapter._bloom_engaged(LavaAdapter._resolve_policy(WGEGraphics.RenderPolicy()).bloom)
+    @test !LavaAdapter._bloom_engaged(LavaAdapter._resolve_policy(LuxelGraphics.RenderPolicy()).bloom)
     @test LavaAdapter._bloom_engaged(
-        LavaAdapter._resolve_policy(WGEGraphics.RenderPolicy(
-            WGEGraphics.GradePolicy(),
-            WGEGraphics.BloomPolicy(8200, 1400),
-            WGEGraphics.VignettePolicy(),
-            WGEGraphics.DitherPolicy(),
-            WGEGraphics.TerrainSurfacePolicy(),
-            WGEGraphics.SamplerPolicy(),
-            WGEGraphics.ShadowPolicy(),
+        LavaAdapter._resolve_policy(LuxelGraphics.RenderPolicy(
+            LuxelGraphics.GradePolicy(),
+            LuxelGraphics.BloomPolicy(8200, 1400),
+            LuxelGraphics.VignettePolicy(),
+            LuxelGraphics.DitherPolicy(),
+            LuxelGraphics.TerrainSurfacePolicy(),
+            LuxelGraphics.SamplerPolicy(),
+            LuxelGraphics.ShadowPolicy(),
         )).bloom,
     )
     # The threshold knee is pure arithmetic and must be host-testable.
@@ -227,30 +227,30 @@ end
         JSON3.write(Dict{String,Any}("render_policy" => overrides)),
     )
 
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("dither" => Dict("amplitude_milli_lsb" => 9000))),
     )
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("sampler" => Dict("anisotropy" => 0))),
     )
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("terrain_surface" => Dict(
             "uv_repeat_scale_milli" => 0, "wrap_repeat" => false,
             "macro_variation_bp" => 0, "macro_frequency_milli" => 40,
         ))),
     )
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("vignette" => Dict(
             "strength_bp" => 2000, "radius_bp" => 10000, "softness_bp" => 0,
         ))),
     )
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("shadow" => Dict("darkness_bp" => 10001, "filter_radius_milli" => 1000))),
     )
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("shadow" => Dict("darkness_bp" => 7500, "filter_radius_milli" => 99))),
     )
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("grade" => Dict(
             "lift_r_bp" => -5000, "lift_g_bp" => 0, "lift_b_bp" => 0,
             "gamma_bp" => 10000,
@@ -260,7 +260,7 @@ end
     )
 
     # And a legal policy must parse.
-    ok = WGEGraphics._parse_render_policy(policy_json(Dict(
+    ok = LuxelGraphics._parse_render_policy(policy_json(Dict(
         "dither" => Dict("amplitude_milli_lsb" => 1000),
         "sampler" => Dict("anisotropy" => 8),
         "shadow" => Dict("darkness_bp" => 9600, "filter_radius_milli" => 2400),
@@ -270,7 +270,7 @@ end
     @test ok.shadow.darkness_bp == 9600
     @test ok.shadow.filter_radius_milli == 2400
     # Omitted sections take declared defaults, not errors.
-    @test ok.grade.gamma_bp == WGEGraphics.POLICY_SCALE
+    @test ok.grade.gamma_bp == LuxelGraphics.POLICY_SCALE
 end
 
 @testset "anisotropy refusal is driven by MEASURED capability" begin
@@ -339,12 +339,12 @@ end
     # split, both surfaces shared ONE sampler keyed by material id, so asking
     # terrain to tile silently changed mesh UV addressing at uv == 1.0 — the
     # exact contamination that made terrain tiling unimplementable.
-    tiled = WGEGraphics.RenderPolicy(
-        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
-        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(8000, true, 0, 40),
-        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(),
+    tiled = LuxelGraphics.RenderPolicy(
+        LuxelGraphics.GradePolicy(), LuxelGraphics.BloomPolicy(), LuxelGraphics.VignettePolicy(),
+        LuxelGraphics.DitherPolicy(), LuxelGraphics.TerrainSurfacePolicy(8000, true, 0, 40),
+        LuxelGraphics.SamplerPolicy(), LuxelGraphics.ShadowPolicy(),
     )
-    default = WGEGraphics.RenderPolicy()
+    default = LuxelGraphics.RenderPolicy()
 
     terrain_spec = LavaAdapter._surface_sampler_spec(tiled, :terrain)
     mesh_spec = LavaAdapter._surface_sampler_spec(tiled, :mesh)
@@ -379,18 +379,18 @@ end
     # claim a policy took effect when it did not — which is exactly the failure
     # this sprint exists to prevent.
     @test LavaAdapter._assert_render_policy_supported(
-        WGEGraphics.RenderPolicy(), LavaAdapter.UNKNOWN_CAPABILITY_PROFILE,
+        LuxelGraphics.RenderPolicy(), LavaAdapter.UNKNOWN_CAPABILITY_PROFILE,
     ) === nothing
-    @test LavaAdapter._assert_render_policy_supported(WGEGraphics.RenderPolicy(
-        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
-        WGEGraphics.DitherPolicy(1000), WGEGraphics.TerrainSurfacePolicy(),
-        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(9600, 2400),
+    @test LavaAdapter._assert_render_policy_supported(LuxelGraphics.RenderPolicy(
+        LuxelGraphics.GradePolicy(), LuxelGraphics.BloomPolicy(), LuxelGraphics.VignettePolicy(),
+        LuxelGraphics.DitherPolicy(1000), LuxelGraphics.TerrainSurfacePolicy(),
+        LuxelGraphics.SamplerPolicy(), LuxelGraphics.ShadowPolicy(9600, 2400),
     ), LavaAdapter.UNKNOWN_CAPABILITY_PROFILE) === nothing
 
-    aniso_policy = WGEGraphics.RenderPolicy(
-        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
-        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(),
-        WGEGraphics.SamplerPolicy(8), WGEGraphics.ShadowPolicy(),
+    aniso_policy = LuxelGraphics.RenderPolicy(
+        LuxelGraphics.GradePolicy(), LuxelGraphics.BloomPolicy(), LuxelGraphics.VignettePolicy(),
+        LuxelGraphics.DitherPolicy(), LuxelGraphics.TerrainSurfacePolicy(),
+        LuxelGraphics.SamplerPolicy(8), LuxelGraphics.ShadowPolicy(),
     )
     # Wrapped in a thunk: calling it eagerly would throw outside the assertion.
     # The profile is the hardware-capable one, so the refusal must be the
@@ -408,10 +408,10 @@ end
     @test occursin("anisotropy", aniso_error.detail)
     @test occursin("maxSamplerAnisotropy=16.0", aniso_error.detail)
 
-    terrain_policy = WGEGraphics.RenderPolicy(
-        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
-        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(8000, true, 700, 40),
-        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(),
+    terrain_policy = LuxelGraphics.RenderPolicy(
+        LuxelGraphics.GradePolicy(), LuxelGraphics.BloomPolicy(), LuxelGraphics.VignettePolicy(),
+        LuxelGraphics.DitherPolicy(), LuxelGraphics.TerrainSurfacePolicy(8000, true, 700, 40),
+        LuxelGraphics.SamplerPolicy(), LuxelGraphics.ShadowPolicy(),
     )
     terrain_error = try
         LavaAdapter._assert_render_policy_supported(terrain_policy, capable)
@@ -425,17 +425,17 @@ end
     # The axes that ARE implemented must NOT be refused any more. This is the
     # regression guard for F-4: a tiling policy that still threw would mean the
     # sampler split did not land.
-    tiling_ok = WGEGraphics.RenderPolicy(
-        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
-        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(8000, true, 0, 40),
-        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(),
+    tiling_ok = LuxelGraphics.RenderPolicy(
+        LuxelGraphics.GradePolicy(), LuxelGraphics.BloomPolicy(), LuxelGraphics.VignettePolicy(),
+        LuxelGraphics.DitherPolicy(), LuxelGraphics.TerrainSurfacePolicy(8000, true, 0, 40),
+        LuxelGraphics.SamplerPolicy(), LuxelGraphics.ShadowPolicy(),
     )
     @test LavaAdapter._assert_render_policy_supported(tiling_ok, capable) === nothing
 
     # Non-boolean wrap_repeat must be refused rather than coerced: Julia's
     # `Bool(1)` is `true`, which would let the receiver disagree with Rust.
     bad_wrap = try
-        WGEGraphics._parse_render_policy(JSON3.read(JSON3.write(Dict{String,Any}(
+        LuxelGraphics._parse_render_policy(JSON3.read(JSON3.write(Dict{String,Any}(
             "render_policy" => Dict("terrain_surface" => Dict(
                 "uv_repeat_scale_milli" => 8000, "wrap_repeat" => 1,
                 "macro_variation_bp" => 0, "macro_frequency_milli" => 40,
@@ -445,16 +445,16 @@ end
     catch e
         e
     end
-    @test bad_wrap isa WGEGraphics.ProtocolError
+    @test bad_wrap isa LuxelGraphics.ProtocolError
     @test occursin("not a JSON boolean", bad_wrap.detail)
 end
 
 @testset "an absent policy section is not an error" begin
     empty_body = JSON3.read("{}")
-    policy = WGEGraphics._parse_render_policy(empty_body)
+    policy = LuxelGraphics._parse_render_policy(empty_body)
     @test policy.dither.amplitude_milli_lsb == 0
     @test policy.shadow.darkness_bp == 7500
-    @test policy == WGEGraphics.RenderPolicy()
+    @test policy == LuxelGraphics.RenderPolicy()
 end
 
 # ---------------------------------------------------------------------------
@@ -464,23 +464,23 @@ end
 @testset "unknown render policy keys fail closed (CONVERGE-0)" begin
     policy_json(overrides) = JSON3.read(JSON3.write(Dict{String,Any}("render_policy" => overrides)))
     # An axis this worker does not know must be refused, not ignored.
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("volumetrics" => Dict("density_bp" => 100))),
     )
     # So must an unknown field inside a known axis.
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("dither" => Dict("amplitude_milli_lsb" => 1000, "pattern" => "blue"))),
     )
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("sky" => Dict("sun_disc_radius_milli_deg" => 650))),
     )
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("shadow_fit" => Dict("view_distance_m" => 7))),
     )
-    @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(
+    @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(
         policy_json(Dict("mesh_surface" => Dict("wrap_repeat" => 1))),
     )
-    parsed = WGEGraphics._parse_render_policy(policy_json(Dict(
+    parsed = LuxelGraphics._parse_render_policy(policy_json(Dict(
         "mesh_surface" => Dict("wrap_repeat" => true),
         "shadow_fit" => Dict("view_distance_m" => 60),
         "sky" => Dict("sun_disc_radius_milli_deg" => 650, "sun_disc_gain_bp" => 120000, "sun_glow_gain_bp" => 2400),
@@ -489,18 +489,18 @@ end
     @test parsed.shadow_fit.view_distance_m == 60
     @test parsed.sky.sun_disc_gain_bp == 120000
     # Absent axes keep their absent meaning.
-    absent = WGEGraphics.RenderPolicy()
+    absent = LuxelGraphics.RenderPolicy()
     @test absent.shadow_fit === nothing
     @test absent.sky === nothing
     @test absent.mesh_surface.wrap_repeat == false
 end
 
 @testset "mesh repeat wrap is its own axis (CONVERGE-0)" begin
-    wrapped = WGEGraphics.RenderPolicy(
-        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
-        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(),
-        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(),
-        WGEGraphics.MeshSurfacePolicy(true), nothing, nothing,
+    wrapped = LuxelGraphics.RenderPolicy(
+        LuxelGraphics.GradePolicy(), LuxelGraphics.BloomPolicy(), LuxelGraphics.VignettePolicy(),
+        LuxelGraphics.DitherPolicy(), LuxelGraphics.TerrainSurfacePolicy(),
+        LuxelGraphics.SamplerPolicy(), LuxelGraphics.ShadowPolicy(),
+        LuxelGraphics.MeshSurfacePolicy(true), nothing, nothing,
     )
     @test LavaAdapter._surface_sampler_spec(wrapped, :mesh).wrap == :repeat
     # Mesh wrap must not leak onto terrain either (the F-4 split, reversed).
@@ -508,9 +508,9 @@ end
 end
 
 @testset "view-fitted shadow frame bounds the frustum slice (CONVERGE-0)" begin
-    camera = WGEGraphics.CameraPacket(
+    camera = LuxelGraphics.CameraPacket(
         "fit-camera",
-        WGEGraphics.PerspectiveProjection(50.0f0),
+        LuxelGraphics.PerspectiveProjection(50.0f0),
         (54.5f0, 26.0f0, 49.0f0),
         (-0.6f0, -0.2f0, -0.77f0),
         (0.0f0, 1.0f0, 0.0f0),
@@ -552,7 +552,7 @@ end
 
 @testset "terrain layer schema fails closed (N-4)" begin
     materials = [
-        WGEGraphics.MaterialPacket(
+        LuxelGraphics.MaterialPacket(
             id, (1.0f0, 1.0f0, 1.0f0, 1.0f0), 0.0f0, 1.0f0, 0.0f0, 0.5f0, :opaque,
             String[], nothing, nothing, nothing, nothing, 1.0f0, 1.0f0, (0.0f0, 0.0f0, 0.0f0),
         ) for id in ("ground-mat", "rock-mat")
@@ -564,7 +564,7 @@ end
         "set_id" => "s", "set_sha256" => "sha256:" * repeat("a", 64), "macro_texture_id" => "m", "layers" => layers,
     ), extra)))
     good = doc([layer("ground", "ground-mat", nothing), layer("rock", "rock-mat", Dict("slope_bp" => [450, 850]))])
-    parsed = WGEGraphics._parse_terrain_layers(good, materials)
+    parsed = LuxelGraphics._parse_terrain_layers(good, materials)
     @test length(parsed.layers) == 2
     @test parsed.layers[2].coverage.slope_bp == (450, 850)
     @test parsed.layers[2].coverage.height_mm === nothing
@@ -577,15 +577,15 @@ end
         doc([layer("ground", "ground-mat", nothing), layer("rock", "rock-mat", Dict("slope_bp" => [450, 850]))]; extra=Dict("tint" => 1)),  # unknown key
     ]
     for case in bad
-        @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_terrain_layers(case, materials)
+        @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_terrain_layers(case, materials)
     end
 end
 
 @testset "layered terrain uniforms encode absent terms and padding (N-4)" begin
-    ground = WGEGraphics.TerrainLayerPacket("ground", "g", UInt32(2000), nothing)
-    rock = WGEGraphics.TerrainLayerPacket(
-        "rock", "r", UInt32(3000), WGEGraphics.TerrainLayerCoverage((Int32(450), Int32(850)), nothing, nothing))
-    policy = WGEGraphics.TerrainSurfacePolicy(1000, true, 2000, 15)
+    ground = LuxelGraphics.TerrainLayerPacket("ground", "g", UInt32(2000), nothing)
+    rock = LuxelGraphics.TerrainLayerPacket(
+        "rock", "r", UInt32(3000), LuxelGraphics.TerrainLayerCoverage((Int32(450), Int32(850)), nothing, nothing))
+    policy = LuxelGraphics.TerrainSurfacePolicy(1000, true, 2000, 15)
     u = LavaAdapter._terrain_layer_uniforms([ground, rock], Float32[1.0, 0.8], policy)
     @test u[1][1] ≈ 0.5f0          # 1 / 2 m
     @test u[3][1] ≈ 1.0f0 / 3.0f0  # 1 / 3 m
@@ -607,17 +607,17 @@ end
 
 @testset "macro variation runs only on layered terrain (N-4)" begin
     caps = LavaAdapter.GpuCapabilityProfile("NVIDIA GeForce RTX 5060", 16.0f0, true, true, 1.0f0, UInt32(64), true)
-    macro_policy = WGEGraphics.RenderPolicy(
-        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
-        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(1000, true, 2000, 15),
-        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(),
+    macro_policy = LuxelGraphics.RenderPolicy(
+        LuxelGraphics.GradePolicy(), LuxelGraphics.BloomPolicy(), LuxelGraphics.VignettePolicy(),
+        LuxelGraphics.DitherPolicy(), LuxelGraphics.TerrainSurfacePolicy(1000, true, 2000, 15),
+        LuxelGraphics.SamplerPolicy(), LuxelGraphics.ShadowPolicy(),
     )
     @test_throws LavaAdapter.AdapterError LavaAdapter._assert_render_policy_supported(macro_policy, caps)
     @test LavaAdapter._assert_render_policy_supported(macro_policy, caps; layered_terrain=true) === nothing
-    clamped = WGEGraphics.RenderPolicy(
-        WGEGraphics.GradePolicy(), WGEGraphics.BloomPolicy(), WGEGraphics.VignettePolicy(),
-        WGEGraphics.DitherPolicy(), WGEGraphics.TerrainSurfacePolicy(1000, false, 0, 40),
-        WGEGraphics.SamplerPolicy(), WGEGraphics.ShadowPolicy(),
+    clamped = LuxelGraphics.RenderPolicy(
+        LuxelGraphics.GradePolicy(), LuxelGraphics.BloomPolicy(), LuxelGraphics.VignettePolicy(),
+        LuxelGraphics.DitherPolicy(), LuxelGraphics.TerrainSurfacePolicy(1000, false, 0, 40),
+        LuxelGraphics.SamplerPolicy(), LuxelGraphics.ShadowPolicy(),
     )
     @test_throws LavaAdapter.AdapterError LavaAdapter._assert_render_policy_supported(clamped, caps; layered_terrain=true)
 end
@@ -630,7 +630,7 @@ const N1_POLICY_JSON(overrides) = JSON3.read(JSON3.write(Dict{String,Any}("rende
 const N1_SKY = Dict{String,Any}("sun_disc_radius_milli_deg" => 650, "sun_disc_gain_bp" => 120000, "sun_glow_gain_bp" => 2400)
 const N1_AIR = Dict{String,Any}("height_falloff_milli_per_m" => 10, "density_at_ground_bp" => 70, "sun_scatter_gain_bp" => 300)
 # converge0 content: environment and the 25°-elevation key light.
-const N1_ENVIRONMENT = WGEGraphics.EnvironmentPacket(
+const N1_ENVIRONMENT = LuxelGraphics.EnvironmentPacket(
     (0.16f0, 0.30f0, 0.58f0), (0.62f0, 0.66f0, 0.72f0), (0.11f0, 0.12f0, 0.085f0),
     (0.52f0, 0.58f0, 0.67f0), 0.0011f0, 1.08f0,
 )
@@ -645,7 +645,7 @@ n1_sky_with(model) = merge(N1_SKY, Dict{String,Any}("model" => model))
 n1_luminance(c) = 0.2126f0 * c[1] + 0.7152f0 * c[2] + 0.0722f0 * c[3]
 
 function n1_analytic_parameters(turbidity_milli=3000)
-    policy = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict(
+    policy = LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict(
         "sky" => n1_sky_with(Dict("kind" => "analytic", "turbidity_milli" => turbidity_milli)),
     )))
     return LavaAdapter._sky_parameters(policy, N1_LIGHT, N1_ENVIRONMENT)
@@ -654,7 +654,7 @@ end
 n1_sky(direction, sky=n1_analytic_parameters()) = LavaAdapter._analytic_sky(direction, N1_SUN, sky, N1_TOP, N1_HORIZON)
 
 @testset "N-1 sky model and atmosphere parse and fail closed" begin
-    analytic = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict(
+    analytic = LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict(
         "sky" => n1_sky_with(Dict("kind" => "analytic", "turbidity_milli" => 3000)),
         "atmosphere" => N1_AIR,
     )))
@@ -664,18 +664,18 @@ n1_sky(direction, sky=n1_analytic_parameters()) = LavaAdapter._analytic_sky(dire
     @test analytic.atmosphere.density_at_ground_bp == 70
     @test analytic.atmosphere.sun_scatter_gain_bp == 300
     # Absent model and explicit gradient are the same CONVERGE-0 sky.
-    absent_model = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => N1_SKY)))
-    explicit = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => n1_sky_with(Dict("kind" => "gradient")))))
+    absent_model = LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => N1_SKY)))
+    explicit = LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => n1_sky_with(Dict("kind" => "gradient")))))
     @test absent_model.sky == explicit.sky
     @test absent_model.sky.model === :gradient
     @test absent_model.atmosphere === nothing
-    @test WGEGraphics.RenderPolicy().atmosphere === nothing
+    @test LuxelGraphics.RenderPolicy().atmosphere === nothing
     # k = 0 is a homogeneous haze, accepted.
-    @test WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict(
+    @test LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict(
         "sky" => N1_SKY, "atmosphere" => merge(N1_AIR, Dict("height_falloff_milli_per_m" => 0)),
     ))).atmosphere.height_falloff_milli_per_m == 0
 
-    refuses(overrides) = @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(N1_POLICY_JSON(overrides))
+    refuses(overrides) = @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(N1_POLICY_JSON(overrides))
     refuses(Dict("sky" => n1_sky_with(Dict("kind" => "hosek", "turbidity_milli" => 3000))))
     refuses(Dict("sky" => n1_sky_with(Dict("kind" => "analytic"))))
     refuses(Dict("sky" => n1_sky_with(Dict("turbidity_milli" => 3000))))
@@ -704,9 +704,9 @@ end
         color, point, camera, distance, fog, 0.0011f0, N1_LIGHT.direction, N1_LIGHT.color, N1_LIGHT.intensity,
         N1_TOP, N1_HORIZON, N1_ZERO, N1_ZERO,
     ) === LavaAdapter._apply_fog(color, fog, distance, 0.0011f0)
-    @test LavaAdapter._sky_parameters(WGEGraphics.RenderPolicy(), N1_LIGHT, N1_ENVIRONMENT) == N1_ZERO
-    @test LavaAdapter._sky_parameters(WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => N1_SKY))), N1_LIGHT, N1_ENVIRONMENT) == N1_ZERO
-    @test LavaAdapter._atmosphere_parameters(WGEGraphics.RenderPolicy()) == N1_ZERO
+    @test LavaAdapter._sky_parameters(LuxelGraphics.RenderPolicy(), N1_LIGHT, N1_ENVIRONMENT) == N1_ZERO
+    @test LavaAdapter._sky_parameters(LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => N1_SKY))), N1_LIGHT, N1_ENVIRONMENT) == N1_ZERO
+    @test LavaAdapter._atmosphere_parameters(LuxelGraphics.RenderPolicy()) == N1_ZERO
     # The gradient model's sky radiance is the CONVERGE-0 sky-pass formula.
     for direction in (Vec4f(0.0f0, 1.0f0, 0.0f0, 0.0f0), LavaAdapter._normalize_vector(Vec4f(0.6f0, 0.1f0, -0.79f0, 0.0f0)), Vec4f(0.6f0, -0.2f0, 0.77f0, 0.0f0))
         weight = direction[2] > 0.0f0 ? sqrt(direction[2]) : 0.0f0
@@ -768,7 +768,7 @@ end
     @test straight_down[1:3] == N1_GROUND[1:3]
     # A sun at or below the horizon is outside the Preetham fit: refused.
     low = LavaAdapter.DirectionalLighting(Vec4f(1.0f0, 0.1f0, 0.0f0, 0.0f0), N1_LIGHT.color, 5.0f0)
-    policy = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => n1_sky_with(Dict("kind" => "analytic", "turbidity_milli" => 3000)))))
+    policy = LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => n1_sky_with(Dict("kind" => "analytic", "turbidity_milli" => 3000)))))
     @test_throws LavaAdapter.AdapterError LavaAdapter._sky_parameters(policy, low, N1_ENVIRONMENT)
 end
 
@@ -803,16 +803,16 @@ end
 end
 
 @testset "CALIBRATION-1 debug albedo override" begin
-    parsed = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("debug" => Dict("albedo_override_bp" => 5000))))
+    parsed = LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict("debug" => Dict("albedo_override_bp" => 5000))))
     @test parsed.debug.albedo_override_bp == 5000
-    @test WGEGraphics.RenderPolicy().debug === nothing
-    @test WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => N1_SKY))).debug === nothing
-    refuses(overrides) = @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(N1_POLICY_JSON(overrides))
+    @test LuxelGraphics.RenderPolicy().debug === nothing
+    @test LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict("sky" => N1_SKY))).debug === nothing
+    refuses(overrides) = @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(N1_POLICY_JSON(overrides))
     refuses(Dict("debug" => Dict("albedo_override_bp" => 10001)))
     refuses(Dict("debug" => Dict("albedo_override_bp" => -1)))
     refuses(Dict("debug" => Dict("albedo_override_bp" => 5000, "normals" => true)))
     # Absent: zeros, and the override is the identity (packets keep their bytes).
-    @test LavaAdapter._surface_options(WGEGraphics.RenderPolicy()) == N1_ZERO
+    @test LavaAdapter._surface_options(LuxelGraphics.RenderPolicy()) == N1_ZERO
     color = Vec4f(0.3f0, 0.6f0, 0.1f0, 0.8f0)
     @test LavaAdapter._albedo_override(color, N1_ZERO) === color
     forced = LavaAdapter._albedo_override(color, LavaAdapter._surface_options(parsed))
@@ -820,13 +820,13 @@ end
 end
 
 @testset "N-2 IBL axis, layout and octahedral parity" begin
-    on = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("ibl" => Dict("enabled" => true))))
+    on = LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict("ibl" => Dict("enabled" => true))))
     @test on.ibl.enabled
-    @test WGEGraphics.RenderPolicy().ibl === nothing
+    @test LuxelGraphics.RenderPolicy().ibl === nothing
     @test LavaAdapter._surface_options(on) == Vec4f(0.0f0, 0.0f0, 1.0f0, 0.0f0)
-    off = WGEGraphics._parse_render_policy(N1_POLICY_JSON(Dict("ibl" => Dict("enabled" => false))))
+    off = LuxelGraphics._parse_render_policy(N1_POLICY_JSON(Dict("ibl" => Dict("enabled" => false))))
     @test LavaAdapter._surface_options(off) == N1_ZERO
-    refuses(overrides) = @test_throws WGEGraphics.ProtocolError WGEGraphics._parse_render_policy(N1_POLICY_JSON(overrides))
+    refuses(overrides) = @test_throws LuxelGraphics.ProtocolError LuxelGraphics._parse_render_policy(N1_POLICY_JSON(overrides))
     refuses(Dict("ibl" => Dict("enabled" => 1)))
     refuses(Dict("ibl" => Dict("enabled" => true, "probes" => 4)))
     # Atlas layout mirrors ibl::atlas_layout(): tiles of 128..4 then 32, +2 gutter each.

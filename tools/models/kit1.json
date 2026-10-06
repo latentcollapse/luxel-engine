@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.model-manifest/v1",
+  "schema_version": "luxel.model-manifest/v1",
   "set_id": "kit1",
   "provider": "polyhaven.com",
   "license": "CC0-1.0",

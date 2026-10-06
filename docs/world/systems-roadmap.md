@@ -1,4 +1,4 @@
-# WGE systems roadmap — the algorithmic layer
+# Luxel systems roadmap — the algorithmic layer
 
 Written 2026-08-02, out of a working session that fixed two sealed keeps, a
 world identity that depended on its own directory, and a Unity adapter that had

@@ -1,4 +1,4 @@
-# WGE C2.7 Deterministic Mip-Chain Handoff
+# Luxel C2.7 Deterministic Mip-Chain Handoff
 
 Status: **green contract checkpoint**, 2026-09-30  
 Parent campaign: `docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md`  
@@ -10,9 +10,9 @@ C2.7 closes the authority-side representation of deterministic texture mip
 chains without pretending that the current Lava adapter already has GPU
 residency or sampler-LOD support.
 
-The Rust render package is now `wge.render-asset-package/v2` and the receipt is
-`wge.render-asset-receipt/v2`; the conditioning request remains
-`wge.render-asset-request/v1`.
+The Rust render package is now `luxel.render-asset-package/v2` and the receipt is
+`luxel.render-asset-receipt/v2`; the conditioning request remains
+`luxel.render-asset-request/v1`.
 
 `generate_cpu_chain` now:
 
@@ -48,10 +48,10 @@ The focused gates are:
 
 ```text
 cargo fmt --manifest-path world_core/Cargo.toml --all -- --check
-cargo test --manifest-path world_core/Cargo.toml --offline --package wge-asset-contract --test render_conditioning
-cargo clippy --manifest-path world_core/Cargo.toml --offline --package wge-asset-contract --all-targets -- -D warnings
-cargo test --manifest-path world_core/Cargo.toml --offline --package wge-native-graphics-contract --test asset_projection
-cargo test --manifest-path world_core/Cargo.toml --offline --package wge-project-ledger --test scene
+cargo test --manifest-path world_core/Cargo.toml --offline --package luxel-asset-contract --test render_conditioning
+cargo clippy --manifest-path world_core/Cargo.toml --offline --package luxel-asset-contract --all-targets -- -D warnings
+cargo test --manifest-path world_core/Cargo.toml --offline --package luxel-native-graphics-contract --test asset_projection
+cargo test --manifest-path world_core/Cargo.toml --offline --package luxel-project-ledger --test scene
 julia --project=graphics_lab graphics_lab/test/runtests.jl
 ```
 
@@ -78,7 +78,7 @@ collision/LOD carry-through, and broader material quality remain separate
 frontiers.
 
 C2.8 is now closed: GPU mip residency, a sampler LOD span, and residency
-telemetry are green on `wge.lava-adapter/v7` — see
+telemetry are green on `luxel.lava-adapter/v7` — see
 [`docs/archive/2026-09_native-graphics-checkpoints/c2-8-gpu-mip-residency-handoff.md`](c2-8-gpu-mip-residency-handoff.md).
 
 The supplied malformed GLB remains a permanent rejection control. Rigging,

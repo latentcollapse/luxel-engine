@@ -1,16 +1,16 @@
-WGE Gameplay Kit Architecture
+Luxel Gameplay Kit Architecture
 Modular Gameplay Capability Pool, Genre Profiles, and Model-Assembled Custom Kits
 Status
 Design contract connected to the native reference-runtime slice; the broader
 capability pool remains a staged design surface.
 
 The current certified runtime emits and verifies `gameplay_kit.json`, a typed
-`ResolvedKit` for `wge.reference.vertical-slice` (the `action_rpg` profile plus
+`ResolvedKit` for `luxel.reference.vertical-slice` (the `action_rpg` profile plus
 the `network.offline` capability). Rust gameplay authority re-resolves and
 compares the kit before promoting the gameplay receipt. This proves the kit
 architecture is load-bearing for the vertical slice without claiming that
 every capability listed in this document has already been implemented.
-This document defines how WGE should represent reusable gameplay machinery for model-driven game development.
+This document defines how Luxel should represent reusable gameplay machinery for model-driven game development.
 It is not a mandate to implement every listed genre immediately.
 The primary architectural goal is:
 Make common game-development systems reusable, composable, tunable, inspectable, and easy for a model to assemble without forcing the model to repeatedly reinvent established gameplay infrastructure.
@@ -21,7 +21,7 @@ FPS Template
 RPG Template
 Survival Template
 That is useful for humans, but it creates artificial boundaries.
-WGE should instead maintain:
+Luxel should instead maintain:
                Gameplay Capability Pool
                          │
           ┌──────────────┼──────────────┐
@@ -58,7 +58,7 @@ Looter Shooter Kit
 + co-op/persistence
 The implementation should not care that one component is culturally associated with an RPG and another with a shooter.
 2. The model's job
-A model operating WGE should not normally implement:
+A model operating Luxel should not normally implement:
 - health systems;
 - inventories;
 - cooldown systems;
@@ -74,7 +74,7 @@ from scratch.
 Instead the model should reason at the design level:
 “This is a third-person action RPG with deliberate combat, high player mobility, equipment-driven progression, Souls-like checkpoints, optional co-op, and a Diablo-style affix system.”
 
-WGE should then help translate that into an explicit capability graph.
+Luxel should then help translate that into an explicit capability graph.
 game vision
     ↓
 capability requirements
@@ -88,8 +88,8 @@ dependency resolution
 tuning/specification
     ↓
 generated game runtime
-3. WGE Gameplay Capability System
-WGE should eventually provide a common gameplay substrate analogous in spirit to systems such as gameplay ability frameworks, but designed specifically around model ergonomics and composability.
+3. Luxel Gameplay Capability System
+Luxel should eventually provide a common gameplay substrate analogous in spirit to systems such as gameplay ability frameworks, but designed specifically around model ergonomics and composability.
 Working name:
 Gameplay Capability System — GCS
 GCS should own generic machinery such as:
@@ -111,7 +111,7 @@ equipment
 inventory
 interaction
 progression
-The existing WGE generalized gameplay contract is the embryonic form of this system.
+The existing Luxel generalized gameplay contract is the embryonic form of this system.
 GCS should remain:
 - deterministic where appropriate;
 - schema-driven;
@@ -522,7 +522,7 @@ deckbuilder
 platformer
 survival
 14. Immersive sim kit
-Especially interesting for WGE because it depends on systemic composition.
+Especially interesting for Luxel because it depends on systemic composition.
 interaction
 physics
 AI perception
@@ -568,7 +568,7 @@ City builder
 - economy
 - simulation metrics
 16. Other useful kit profiles
-WGE may eventually ship semantic profiles for:
+Luxel may eventually ship semantic profiles for:
 - platformer
 - metroidvania
 - stealth
@@ -681,7 +681,7 @@ CustomKit
 ├── PersistentCharacter
 ├── SocialHub
 └── MultiplayerSession
-Then WGE validates the composition.
+Then Luxel validates the composition.
 19. Capability dependency graph
 Every capability should declare:
 requires
@@ -823,13 +823,13 @@ network requirements
 persistence requirements
 This becomes part of project identity and provenance.
 26. Custom game mechanics
-WGE must not force every mechanic into GCS.
+Luxel must not force every mechanic into GCS.
 A game may contain something genuinely unusual.
 That should be represented as:
 Known capability pool
         +
 CustomCapability
-Custom capability modules must still satisfy WGE contracts:
+Custom capability modules must still satisfy Luxel contracts:
 - bounded authority;
 - declared state;
 - deterministic/replay semantics where required;
@@ -850,7 +850,7 @@ generalize carefully
 prove across multiple games
 ↓
 promote into shared pool
-This mirrors the rest of WGE's architecture.
+This mirrors the rest of Luxel's architecture.
 28. Why this matters for model ergonomics
 Without kits:
 model
@@ -877,12 +877,12 @@ It can spend more capability on:
 - balance
 - narrative
 - art direction
-That is exactly WGE's broader thesis.
+That is exactly Luxel's broader thesis.
 29. Product structure
 This also produces natural product/package layers:
-WGE Core
+Luxel Core
     ↓
-WGE GCS
+Luxel GCS
     ↓
 Capability Pool
     ↓
@@ -892,17 +892,17 @@ Custom Game Kit
     ↓
 Specific Game
 Potential commercial distributions could eventually include:
-WGE Action RPG Kit
-WGE Shooter Kit
-WGE Survival Kit
-WGE MMO Systems Kit
-WGE Strategy Kit
+Luxel Action RPG Kit
+Luxel Shooter Kit
+Luxel Survival Kit
+Luxel MMO Systems Kit
+Luxel Strategy Kit
 But they should remain interoperable because they are all built from the same underlying capability system.
 30. End-state workflow
 The ideal interaction becomes:
 “I want a four-player gothic science-fiction extraction RPG. Gunplay should be deliberate, melee should use high-commitment Souls-like principles, loot should support deep buildcraft, runs should last around 30 minutes, and players return to a persistent hub.”
 
-WGE/model:
+Luxel/model:
 interprets vision
     ↓
 selects:
@@ -936,7 +936,7 @@ An MMO is not one codebase.
 A Souls-like is not one codebase.
 A looter-shooter is not one codebase.
 They are recognizable regions in a much larger gameplay-system design space.
-WGE should expose those regions because they are useful to humans and models, but the engine underneath should see:
+Luxel should expose those regions because they are useful to humans and models, but the engine underneath should see:
 capabilities
 dependencies
 constraints

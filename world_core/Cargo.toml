@@ -11,7 +11,7 @@ members = [
     "crates/certification_authority",
     "crates/live_evidence_contract",
     "crates/native_graphics_contract",
-    "crates/wge_control_plane",
+    "crates/luxel_control_plane",
 ]
 # The default native gate intentionally excludes the compatibility worldspec,
 # semantic-kernel, and inspection-app lanes. They remain workspace members so
@@ -25,7 +25,7 @@ default-members = [
     "crates/certification_authority",
     "crates/live_evidence_contract",
     "crates/native_graphics_contract",
-    "crates/wge_control_plane",
+    "crates/luxel_control_plane",
 ]
 resolver = "3"
 

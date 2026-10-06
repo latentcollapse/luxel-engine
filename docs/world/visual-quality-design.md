@@ -7,7 +7,7 @@ the gate.
 
 ## Contract boundary
 
-`wge-native-graphics-contract::visual_quality` adds a versioned quality
+`luxel-native-graphics-contract::visual_quality` adds a versioned quality
 assessment alongside the existing native frame gate. The existing gate still
 owns capture integrity, packet binding, measurement agreement, minimum terrain
 presence, and semantic-marker visibility. Quality assessment requires that

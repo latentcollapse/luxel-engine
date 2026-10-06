@@ -1,6 +1,6 @@
-# Red team 01 — WGE model-native language specification
+# Red team 01 — Luxel model-native language specification
 
-**Reviewing:** `docs/DSL docs/WGE_LANGUAGE_SPEC.md` draft 0.1, 2026-08-03
+**Reviewing:** `docs/DSL docs/LUXEL_LANGUAGE_SPEC.md` draft 0.1, 2026-08-03
 **Reviewer:** Claude (Opus), 2026-08-03
 **Requested by:** Matt
 **Against:** §20 "Red-team requirements before 1.0 freeze"
@@ -8,7 +8,7 @@
 This is the first of the two independent frontier-model red teams §25 requires.
 It is a review of the specification only — no implementation was exercised.
 
-**Resolution:** accepted into `WGE_LANGUAGE_SPEC.md` draft 0.2 on 2026-08-03.
+**Resolution:** accepted into `LUXEL_LANGUAGE_SPEC.md` draft 0.2 on 2026-08-03.
 All fifteen findings were incorporated. Finding 12's proposed source-span or
 occurrence-index identity was replaced with a stronger stable semantic-key
 rule, because source spans and ambient indexes also move under unrelated edits.
@@ -24,11 +24,11 @@ Ordered by what it costs if it ships wrong.
 
 Nothing here argues against the design. The invariants in §2 are the right
 invariants, and §2.13 — authoring difficulty as a compatibility dimension — is a
-better idea than anything WGE asked for. All three properties worth carrying
+better idea than anything Luxel asked for. All three properties worth carrying
 from the prototype survive: parsed-never-executed (§2.1, §5.2), actionable
 repairs (§2.7, §15), round-trip scaffolding (§2.8). The findings below are
 places where a normative rule contradicts another normative rule, where a MUST
-has no mechanism, or where the spec quietly gives up something WGE already has.
+has no mechanism, or where the spec quietly gives up something Luxel already has.
 
 ---
 
@@ -98,9 +98,9 @@ does not hit across them.
 ## 3. Artifact-level byte determinism is silently demoted
 
 **Classification:** usability regression
-**Where:** §2.4, §19.1, open decision 11, against current WGE behavior
+**Where:** §2.4, §19.1, open decision 11, against current Luxel behavior
 
-WGE has this property today: the same batch compiled from two different working
+Luxel has this property today: the same batch compiled from two different working
 directories produces **byte-identical artifacts**. It was established
 deliberately on 2026-08-02 and it is what makes a rebuild trustworthy.
 
@@ -230,10 +230,10 @@ exists, ships, and carries roughly 484 green tests — three paragraphs and **no
 vocabulary at all**.
 
 §10 promises typed policies covering `acceptance_policy`, `traversal_policy` and
-`border_policy`. WGE's actual policy surface also includes hydrology,
+`border_policy`. Luxel's actual policy surface also includes hydrology,
 vegetation, siting and surfacing. None of those appear anywhere in the document.
 
-§25 nonetheless gates 1.0 readiness on "one Blender asset pipeline **and one WGE
+§25 nonetheless gates 1.0 readiness on "one Blender asset pipeline **and one Luxel
 world pipeline** consume canonical IR." A domain that is not specified cannot be
 a freeze gate.
 
@@ -321,7 +321,7 @@ bounded constructors such as `repeat`, `scatter` and `sample`. Both rules are
 correct and worth keeping.
 
 What the spec does not then supply is any way to express a *predicate over a
-field*. The authoring task WGE actually has is "conifers above 900 m on north
+field*. The authoring task Luxel actually has is "conifers above 900 m on north
 aspects, none in the bog." §11.1 offers "signed-distance fields and bounded
 field modifiers," which is a geometry facility, not a mask language, and §12
 defines no world vocabulary at all.
@@ -350,7 +350,7 @@ rebuilds.
 diagnostic MUST identify the responsible declaration or parameter."
 
 Acceptance gates are measurements over a realized artifact, and their failures
-are frequently emergent with no single cause. The live example: WGE's
+are frequently emergent with no single cause. The live example: Luxel's
 black-pixel gate reads 0.094 against a 0.08 threshold, and the responsible
 parameter is arguably the 62 m vertical budget — a global aesthetic decision —
 and arguably nothing local at all. Under §2.3 as written the compiler must
@@ -363,7 +363,7 @@ implementable; attribution to one declaration is not always true.
 
 **Related, and worth a normative answer rather than a bullet:** §20's final item
 asks reviewers to find "incentives where acceptance metrics reward worse art or
-gameplay." Nothing in the spec counters that incentive. WGE has hit it twice
+gameplay." Nothing in the spec counters that incentive. Luxel has hit it twice
 already — a gate that can be passed by flattening the mountains rewards
 flattening the mountains, and the correct action was to refuse the gate and log
 the defect. A specification that makes gates normative should say, normatively,
@@ -467,16 +467,16 @@ success, collateral edits.
 
 ---
 
-## Relationship between WGE and the language
+## Relationship between Luxel and the language
 
 Not a finding — an agreement that should be written into the spec because it
 binds both sides.
 
-WGE **pins a released language version and feeds requirements upstream rather
+Luxel **pins a released language version and feeds requirements upstream rather
 than forking**. §18 approaches this ("no ambient latest in reproducible builds")
 and §23.8 protects the running build, but the pinning relationship itself is not
 stated. It belongs in §18 or §23, because it is the clause that keeps a language
-change from becoming an unscheduled WGE migration.
+change from becoming an unscheduled Luxel migration.
 
 ---
 
@@ -503,4 +503,4 @@ change from becoming an unscheduled WGE migration.
 Findings 1, 2 and 12 are mechanical and cheap to fix now. Findings 4, 7 and 11
 are the ones that decide whether the language is honest about what it
 guarantees. Finding 3 is the only place the spec is currently worse than what
-WGE already has.
+Luxel already has.

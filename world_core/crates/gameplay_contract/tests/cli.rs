@@ -4,7 +4,7 @@ use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
-use wge_gameplay_contract::GameplayReceipt;
+use luxel_gameplay_contract::GameplayReceipt;
 
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
@@ -14,7 +14,7 @@ impl TempDir {
     fn new() -> Self {
         let id = NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
-            "wge-gameplay-contract-cli-{}-{id}",
+            "luxel-gameplay-contract-cli-{}-{id}",
             std::process::id()
         ));
         fs::create_dir(&path).expect("create isolated CLI test directory");
@@ -38,7 +38,7 @@ fn checked_in_fixture() -> PathBuf {
 }
 
 fn run_cli(input: &std::path::Path, output: &std::path::Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_wge-gameplay-contract"))
+    Command::new(env!("CARGO_BIN_EXE_luxel-gameplay-contract"))
         .arg("run")
         .arg(input)
         .arg(output)

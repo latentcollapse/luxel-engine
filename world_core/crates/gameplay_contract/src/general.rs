@@ -9,9 +9,9 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const GENERAL_SNAPSHOT_SCHEMA: &str = "wge.gameplay-snapshot/v2";
-pub const GENERAL_TRACE_SCHEMA: &str = "wge.gameplay-trace/v2";
-pub const GENERAL_RECEIPT_SCHEMA: &str = "wge.gameplay-receipt/v2";
+pub const GENERAL_SNAPSHOT_SCHEMA: &str = "luxel.gameplay-snapshot/v2";
+pub const GENERAL_TRACE_SCHEMA: &str = "luxel.gameplay-trace/v2";
+pub const GENERAL_RECEIPT_SCHEMA: &str = "luxel.gameplay-receipt/v2";
 pub const GENERAL_MAX_REPLAY_EVENTS: usize = 100_000;
 pub const GENERAL_MAX_ENTITIES: usize = 256;
 pub const GENERAL_MAX_LOCATIONS: usize = 1_024;

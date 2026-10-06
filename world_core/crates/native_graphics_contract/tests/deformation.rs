@@ -1,6 +1,6 @@
-//! P1 gate evidence — scene packet v7 deformation, behind `WGE_TETCAGE_DEFORM_V7`.
+//! P1 gate evidence — scene packet v7 deformation, behind `LUXEL_TETCAGE_DEFORM_V7`.
 //!
-//! The registered gate (WGE_TETCAGE_SEAM_DESIGN §3 P1): "existing suites
+//! The registered gate (LUXEL_TETCAGE_SEAM_DESIGN §3 P1): "existing suites
 //! byte-identical with flag off; flagged run presents deformed frames with
 //! receipts."
 //!
@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     BufferPayload, BufferReference, DEFORMATION_V7_ENV, DeformationFamily, DeformationField,
     DeformationIntent, DeformationRejection, DeformationTelemetry, GraphicsScenePacketBody,
     SCENE_PACKET_SCHEMA, SCENE_PACKET_SCHEMA_V7, deformation_v7_enabled, seal_scene_packet,
@@ -58,7 +58,7 @@ fn corner_indices(verts: usize, tets: usize) -> BufferReference {
 }
 
 fn conifer_body(deformation: Option<DeformationIntent>) -> GraphicsScenePacketBody {
-    use wge_native_graphics_contract::{
+    use luxel_native_graphics_contract::{
         AlphaMode, CameraProjection, CaptureFormat, CoordinateSystem, EnvironmentIntent,
         GraphicsCamera, GraphicsCaptureRequest, InstanceImportance, InstancePacket, LightIntent,
         LightKind, MaterialIntent, MeshPacket, TerrainPacket, Transform3d,
@@ -84,8 +84,8 @@ fn conifer_body(deformation: Option<DeformationIntent>) -> GraphicsScenePacketBo
         spatial_fields_sha256: sha256_prefixed(b"fields-conifer"),
         frame_seed: 1,
         coordinate_system: CoordinateSystem {
-            up_axis: wge_native_graphics_contract::Axis::Y,
-            handedness: wge_native_graphics_contract::Handedness::Right,
+            up_axis: luxel_native_graphics_contract::Axis::Y,
+            handedness: luxel_native_graphics_contract::Handedness::Right,
             units_per_meter: 1.0,
         },
         camera: GraphicsCamera {
@@ -203,7 +203,7 @@ fn wind_intent() -> DeformationIntent {
     }
 }
 
-fn rejection_code(result: Result<(), wge_native_graphics_contract::GraphicsContractError>) -> String {
+fn rejection_code(result: Result<(), luxel_native_graphics_contract::GraphicsContractError>) -> String {
     result.expect_err("expected a typed rejection").code.to_owned()
 }
 
@@ -217,8 +217,8 @@ fn reject_with(intent: DeformationIntent) -> String {
     // validates, and the whole point of this helper is to feed the validator a
     // packet it must REJECT. The digest is computed the same way so the only
     // thing under test is the content rule, not provenance.
-    let digest = sha256_prefixed(&wge_native_graphics_contract::canonical_json(&body).expect("canonical"));
-    let packet = wge_native_graphics_contract::GraphicsScenePacket { body, packet_sha256: digest };
+    let digest = sha256_prefixed(&luxel_native_graphics_contract::canonical_json(&body).expect("canonical"));
+    let packet = luxel_native_graphics_contract::GraphicsScenePacket { body, packet_sha256: digest };
     rejection_code(validate_scene_packet(&packet))
 }
 
@@ -253,7 +253,7 @@ fn committed_v6_packet_reseals_to_its_committed_digest() {
         .expect("committed packet carries packet_sha256")
         .to_owned();
     assert_eq!(
-        value["body"]["schema_version"], "wge.graphics-scene-packet/v6",
+        value["body"]["schema_version"], "luxel.graphics-scene-packet/v6",
         "the pinned artifact must be a v6 packet for this to mean anything"
     );
     assert!(
@@ -280,7 +280,7 @@ fn flag_off_serializes_no_deformation_key() {
     }
     let body = conifer_body(None);
     let json = String::from_utf8(
-        wge_native_graphics_contract::canonical_json(&body).expect("canonical json"),
+        luxel_native_graphics_contract::canonical_json(&body).expect("canonical json"),
     )
     .expect("utf8");
     assert!(
@@ -522,10 +522,10 @@ fn deformation_section_survives_a_serde_round_trip() {
     let packet = seal_scene_packet(body).expect("v7 seals");
 
     let json = serde_json::to_string(&packet).expect("serializes");
-    assert!(json.contains("wge.graphics-scene-packet/v7"));
+    assert!(json.contains("luxel.graphics-scene-packet/v7"));
     assert!(json.contains("\"deformation\""));
 
-    let back: wge_native_graphics_contract::GraphicsScenePacket =
+    let back: luxel_native_graphics_contract::GraphicsScenePacket =
         serde_json::from_str(&json).expect("round trips");
     validate_scene_packet(&back).expect("round-tripped v7 validates");
     let recovered = back.body.deformation.expect("deformation survived the boundary");
@@ -534,7 +534,7 @@ fn deformation_section_survives_a_serde_round_trip() {
     assert_eq!(recovered.cage.payload, intent.cage.payload);
     assert!(matches!(recovered.corner_indices.payload, BufferPayload::U32(_)));
     assert_eq!(
-        sha256_prefixed(&wge_native_graphics_contract::canonical_json(&packet.body).expect("canonical")),
+        sha256_prefixed(&luxel_native_graphics_contract::canonical_json(&packet.body).expect("canonical")),
         packet.packet_sha256
     );
 }

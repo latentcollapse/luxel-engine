@@ -1,15 +1,15 @@
-# WGE Game Development Harness Roadmap
+# Luxel Game Development Harness Roadmap
 
 Status: strategic execution plan
 Date: 2026-09-26
-Scope: WGE as the model-native game-development harness and eventual NIRA-Prime Game Dev mode
+Scope: Luxel as the model-native game-development harness and eventual NIRA-Prime Game Dev mode
 
 This document is the architecture and sequencing plan. Execution tasks belong in
 the Tether board; this is not a markdown ticket backlog.
 
 ## North star
 
-WGE is a temporary game studio that an agent can inhabit.
+Luxel is a temporary game studio that an agent can inhabit.
 
 Given a game brief, concept art, design documents, a target runtime, and a
 quality profile, Game Dev mode must be able to:
@@ -40,7 +40,7 @@ playtest, and repair iterations. It does not mean one inference pass.
 The model owns intent, composition, taste, and design choices. Algorithms own
 answers that can be computed: geometry validity, navigation, collision, ability
 costs, dependency invalidation, replay correctness, and performance budgets.
-WGE owns the boundary, evidence, identity, and acceptance decision.
+Luxel owns the boundary, evidence, identity, and acceptance decision.
 
 Three identities must remain distinct:
 
@@ -59,7 +59,7 @@ Three identities must remain distinct:
 5. Generated artifacts are content-addressed and provenance-carrying.
 6. Candidate work happens against a pinned snapshot. The project pointer advances
    only after required gates pass.
-7. A model may propose a new asset or code module, but WGE decides whether it is
+7. A model may propose a new asset or code module, but Luxel decides whether it is
    valid, usable, compatible, and releasable.
 8. The harness is model-native. Human editor ergonomics are not a design target.
 
@@ -84,7 +84,7 @@ model inferred this.”
 
 ### 2. Project specification and dependency graph
 
-Extend the WGE authoring language and IR envelope across:
+Extend the Luxel authoring language and IR envelope across:
 
 - world and level structure;
 - assets and semantic parts;
@@ -98,7 +98,7 @@ versioned runtime contracts. Do not build a universal all-genre gameplay DSL.
 
 ### 3. World and level construction
 
-WGE owns playability and semantic layout:
+Luxel owns playability and semantic layout:
 
 - terrain import and datum contracts;
 - regions, routes, structures, landmarks, and encounters;
@@ -107,7 +107,7 @@ WGE owns playability and semantic layout:
 - camera and traversal plans;
 - target-engine handoff.
 
-Specialist systems such as Gaea may own landform appearance. WGE owns the
+Specialist systems such as Gaea may own landform appearance. Luxel owns the
 playable world that is carved from it, its evidence, and its certification.
 
 ### 4. Gameplay substrate and GAS equivalent
@@ -129,7 +129,7 @@ only when a real target requires them.
 
 ### 5. Physics, simulation, and NPCs
 
-WGE should contract with mature runtime systems rather than immediately
+Luxel should contract with mature runtime systems rather than immediately
 reimplement them. The harness must still specify and verify:
 
 - movement and contacts;
@@ -172,11 +172,11 @@ Evaluate tetrahedral-cage representations as an optional animation and
 ray-tracing lowering for dense, connectivity-preserving geometry. This is a
 research track, not a prerequisite for the current engine-neutral vertical
 slice and not permission to replace the canonical semantic mesh/asset
-representation. WGE may materialize a TetCageRT representation only after the
+representation. Luxel may materialize a TetCageRT representation only after the
 evidence and profitability policy below are independently green.
 
-The central question is not “should WGE use tetrahedral cages?” It is “when
-should WGE materialize animated geometry as tetrahedral cages?” The candidate
+The central question is not “should Luxel use tetrahedral cages?” It is “when
+should Luxel materialize animated geometry as tetrahedral cages?” The candidate
 policy may ultimately choose a hybrid hierarchy—full BLAS for near detail,
 cluster AS for intermediate scale, and TetCageRT for far/dense geometry—but
 that is a hypothesis to test, not a design decision.
@@ -221,7 +221,7 @@ The harness must be able to launch fresh builds, send scripted input, capture
 screenshots/video, collect logs and profiler data, evaluate the run, and
 produce source-level repair proposals.
 
-Bevy remains a valuable reference/world-inspection renderer. The native WGE
+Bevy remains a valuable reference/world-inspection renderer. The native Luxel
 runtime is the delivery and playtest target for this roadmap; its typed build,
 runtime, and evidence path is mandatory.
 
@@ -268,14 +268,14 @@ controls.
 Exit condition: an agent can inspect a project snapshot, understand its failing
 gates, and identify the semantic source or artifact that must change.
 
-### Phase 1 — A genuinely playable WGE world
+### Phase 1 — A genuinely playable Luxel world
 
 Connect the semantic kernel to the actual world build path. Make collision and
 navigation acceptance hard requirements, finish spawns and objectives, build
-through the native WGE runtime, and prove traversal with an automated
+through the native Luxel runtime, and prove traversal with an automated
 controller.
 
-This is the immediate continuation of the current WGE MVP work.
+This is the immediate continuation of the current Luxel MVP work.
 
 Exit condition: a fresh build produces a traversable Codeweald arena with
 correct collision, navigation, spawns, and target-runtime behavior.
@@ -303,7 +303,7 @@ quality checks without editor-only hand repair.
 Add scripted input/replay, captures, telemetry, multimodal critics, performance
 budgets, gameplay diagnosis, source-level repairs, and a regression corpus.
 
-Exit condition: WGE can observe a bad playthrough, identify the responsible
+Exit condition: Luxel can observe a bad playthrough, identify the responsible
 semantic layer, repair it, rebuild, and verify the improvement.
 
 ### Phase 5 — Generality
@@ -317,9 +317,9 @@ the transaction model, and the result is not Codeweald-specific.
 
 ### Phase 6 — NIRA-Prime Game Dev mode
 
-Load WGE as a native capability bundle containing project state, specialist
+Load Luxel as a native capability bundle containing project state, specialist
 workers, tool registry, artifact cache, quality profile, budgets, memory, and
-the WGE verifier as completion authority.
+the Luxel verifier as completion authority.
 
 Exit condition: one game brief produces a runnable, inspected, traceable build
 or an honest failure report with the remaining blockers.
@@ -392,7 +392,7 @@ The first decisive milestone is:
 
 > An agent receives one Codeweald brief, builds the world, imports it, traverses
 > it, plays a complete loop, detects failures, repairs them, and produces a
-> verified runnable build through WGE alone.
+> verified runnable build through Luxel alone.
 
 Once that loop is real, each additional subsystem becomes a certified
 extension to an operating game-development studio rather than another isolated

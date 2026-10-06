@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use wge_reference_runtime::{
+use luxel_reference_runtime::{
     AuthoredLayout, KinematicContactKind, KinematicInput, KinematicStepDisposition, PhysicsWorld,
     REFERENCE_TICK_RATE_HZ, WorldArtifact, build_from_layout_path,
 };
@@ -19,8 +19,8 @@ fn world() -> &'static WorldArtifact {
         let project_root = manifest_dir
             .ancestors()
             .nth(3)
-            .expect("WGE root is an ancestor");
-        let julia = std::env::var_os("WGE_JULIA")
+            .expect("Luxel root is an ancestor");
+        let julia = std::env::var_os("LUXEL_JULIA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("julia"));
         build_from_layout_path(&layout, &julia, &project_root.join("terrain_lab"))
@@ -36,7 +36,7 @@ fn slope_world() -> &'static WorldArtifact {
                 .expect("authored layout fixture deserializes");
         layout.traversal.maximum_grade = 0.3;
         let directory = std::env::temp_dir().join(format!(
-            "wge-physics-slope-{}-{}",
+            "luxel-physics-slope-{}-{}",
             std::process::id(),
             TEMP_ID.fetch_add(1, Ordering::Relaxed)
         ));
@@ -50,8 +50,8 @@ fn slope_world() -> &'static WorldArtifact {
         let project_root = Path::new(env!("CARGO_MANIFEST_DIR"))
             .ancestors()
             .nth(3)
-            .expect("WGE root is an ancestor");
-        let julia = std::env::var_os("WGE_JULIA")
+            .expect("Luxel root is an ancestor");
+        let julia = std::env::var_os("LUXEL_JULIA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("julia"));
         let built = build_from_layout_path(&input, &julia, &project_root.join("terrain_lab"));

@@ -1,6 +1,6 @@
 """Adversarial controls for the visual metrics.
 
-Tooling item 6 (see WGE/docs/platform/tooling-upgrades.md). Four "the pipeline works"
+Tooling item 6 (see Luxel/docs/platform/tooling-upgrades.md). Four "the pipeline works"
 claims turned out to be wrong in a single session, and the pattern behind them
 was always the same: a number that moved in the right direction for the wrong
 reason, with nothing standing behind it to say otherwise.

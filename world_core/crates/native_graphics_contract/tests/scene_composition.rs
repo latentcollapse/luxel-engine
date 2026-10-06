@@ -1,10 +1,10 @@
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     AlphaMode, BufferReference, CameraProjection, CaptureFormat, CoordinateSystem,
     EnvironmentIntent, GraphicsAssetMesh, GraphicsAssetProjection, GraphicsCamera,
     GraphicsCaptureRequest, GraphicsScenePacketBody, Handedness, InstanceImportance, LightIntent,
     LightKind, MaterialIntent, MeshPacket, compose_bound_scene, sha256_prefixed,
 };
-use wge_project_ledger::{
+use luxel_project_ledger::{
     CollisionPolicy, GameplayReference, MaterialAssignment, SCENE_ARTIFACT_SCHEMA,
     SCENE_OBJECT_SCHEMA, SceneArtifact, SceneArtifactBody, SceneImportance, SceneLodLevel,
     SceneLodPolicy, SceneObject, SceneObjectProvenance, SceneProvenance, SceneTransform,
@@ -86,7 +86,7 @@ fn scene() -> SceneArtifact {
 
 fn asset() -> GraphicsAssetProjection {
     GraphicsAssetProjection {
-        schema_version: "wge.graphics-asset-projection/v1".into(),
+        schema_version: "luxel.graphics-asset-projection/v1".into(),
         render_package_id: RENDER_PACKAGE_ID.into(),
         source_asset_id: "asset-v1".into(),
         source_asset_sha256: SOURCE_SHA.into(),
@@ -129,7 +129,7 @@ fn body() -> GraphicsScenePacketBody {
     GraphicsScenePacketBody {
         deformation: None,
         render_policy: None,
-        schema_version: "wge.graphics-scene-packet/v6".into(),
+        schema_version: "luxel.graphics-scene-packet/v6".into(),
         packet_id: "packet-v1".into(),
         scene_artifact_id: None,
         scene_artifact_sha256: None,
@@ -138,7 +138,7 @@ fn body() -> GraphicsScenePacketBody {
         spatial_fields_sha256: sha256_prefixed(b"fields-v1"),
         frame_seed: 1,
         coordinate_system: CoordinateSystem {
-            up_axis: wge_native_graphics_contract::Axis::Y,
+            up_axis: luxel_native_graphics_contract::Axis::Y,
             handedness: Handedness::Right,
             units_per_meter: 1.0,
         },
@@ -155,7 +155,7 @@ fn body() -> GraphicsScenePacketBody {
             width_px: 64,
             height_px: 64,
         },
-        terrain: wge_native_graphics_contract::TerrainPacket {
+        terrain: luxel_native_graphics_contract::TerrainPacket {
             terrain_id: "terrain-v1".into(),
             width_m: 10.0,
             length_m: 10.0,
@@ -254,7 +254,7 @@ fn bound_scene_rejects_world_or_source_identity_drift() {
 /// recomposition check distinguishes them).
 #[test]
 fn calibration_rig_seam_changes_only_lighting_and_is_enumerated() {
-    use wge_native_graphics_contract::{CalibrationRig, compose_bound_scene_with_camera, compose_bound_scene_with_view};
+    use luxel_native_graphics_contract::{CalibrationRig, compose_bound_scene_with_camera, compose_bound_scene_with_view};
     let plain = compose_bound_scene_with_camera(&mut body(), &scene(), &[asset()], None).unwrap();
     let no_rig = compose_bound_scene_with_view(&mut body(), &scene(), &[asset()], None, None).unwrap();
     assert_eq!(plain, no_rig, "rig None must be byte-identical to the camera-only seam");

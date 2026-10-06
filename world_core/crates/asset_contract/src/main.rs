@@ -3,7 +3,7 @@ use std::fs;
 use std::process::ExitCode;
 
 use serde::Serialize;
-use wge_asset_contract::{
+use luxel_asset_contract::{
     AcceptanceStatus, AssetPreparationRequest, AssetUse, PhysicalCalibration, PhysicalRole,
     PreparationStatus, RenderConditioningRequest, RenderPreparationStatus, StructuralAcceptance,
     condition_render_asset, evaluate_physical_acceptance, evaluate_structural_acceptance,
@@ -12,9 +12,9 @@ use wge_asset_contract::{
 
 #[derive(Serialize)]
 struct Output<'a> {
-    inspection: &'a wge_asset_contract::AssetReport,
+    inspection: &'a luxel_asset_contract::AssetReport,
     structural_acceptance: StructuralAcceptance,
-    physical_acceptance: Option<wge_asset_contract::PhysicalAcceptance>,
+    physical_acceptance: Option<luxel_asset_contract::PhysicalAcceptance>,
 }
 
 fn main() -> ExitCode {
@@ -68,9 +68,9 @@ fn run() -> Result<ExitCode, String> {
             "--placed-scale" => placed_scale = Some(parse_positive(&flag, &value)?),
             "--vertical-axis" => {
                 vertical_axis = Some(match value.as_str() {
-                    "x" => wge_asset_contract::Axis::X,
-                    "y" => wge_asset_contract::Axis::Y,
-                    "z" => wge_asset_contract::Axis::Z,
+                    "x" => luxel_asset_contract::Axis::X,
+                    "y" => luxel_asset_contract::Axis::Y,
+                    "z" => luxel_asset_contract::Axis::Z,
                     _ => return Err(format!("unsupported vertical axis {value:?}\n{}", usage())),
                 });
             }
@@ -122,7 +122,7 @@ fn run() -> Result<ExitCode, String> {
 fn run_prepare(args: impl Iterator<Item = String>) -> Result<ExitCode, String> {
     let values = args.collect::<Vec<_>>();
     if values.len() != 2 {
-        return Err("usage: wge-asset-contract prepare ASSET.glb REQUEST.json".into());
+        return Err("usage: luxel-asset-contract prepare ASSET.glb REQUEST.json".into());
     }
     let asset_path = &values[0];
     let request_path = &values[1];
@@ -146,7 +146,7 @@ fn run_prepare(args: impl Iterator<Item = String>) -> Result<ExitCode, String> {
 fn run_prepare_render(args: impl Iterator<Item = String>) -> Result<ExitCode, String> {
     let values = args.collect::<Vec<_>>();
     if values.len() != 2 {
-        return Err("usage: wge-asset-contract prepare-render ASSET.glb REQUEST.json".into());
+        return Err("usage: luxel-asset-contract prepare-render ASSET.glb REQUEST.json".into());
     }
     let asset_path = &values[0];
     let request_path = &values[1];
@@ -195,8 +195,8 @@ fn parse_role(value: &str) -> Option<PhysicalRole> {
 }
 
 fn usage() -> &'static str {
-    "usage: wge-asset-contract ASSET.glb [--kind character|static_mesh|unspecified] \
+    "usage: luxel-asset-contract ASSET.glb [--kind character|static_mesh|unspecified] \
      [--role ROLE] [--meters-per-unit N --vertical-axis x|y|z --placed-scale N]\n\
-     or: wge-asset-contract prepare ASSET.glb REQUEST.json\n\
-     or: wge-asset-contract prepare-render ASSET.glb REQUEST.json"
+     or: luxel-asset-contract prepare ASSET.glb REQUEST.json\n\
+     or: luxel-asset-contract prepare-render ASSET.glb REQUEST.json"
 }

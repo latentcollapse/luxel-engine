@@ -14,10 +14,10 @@ Added:
 
 - `world_core/crates/semantic_kernel/` (library, binary, `registry_v0.json`)
 - `terrain_lab/bin/lane_overlap_worker.jl`
-- `pipeline/wge_semantic_ir.py`
-- `pipeline/wge_kernel_demo.py`
+- `pipeline/luxel_semantic_ir.py`
+- `pipeline/luxel_kernel_demo.py`
 - `tests/test_semantic_kernel.py`
-- `tests/fixtures/semantic_kernel/{invalid,repaired,tampered}.wge`
+- `tests/fixtures/semantic_kernel/{invalid,repaired,tampered}.luxel`
 - `docs/content-sdk/semantic-kernel-handoff.md`
 - this report
 
@@ -28,8 +28,8 @@ Existing terrain, worldspec, worldbuilder, and `build_zone.py` paths were not re
 ## 3. Spike architecture
 
 ```text
-.wge text
-  → Python parse_module (no exec) → wge.semantic-ir/v0
+.luxel text
+  → Python parse_module (no exec) → luxel.semantic-ir/v0
   → Rust kernel store
        generation.propose
        solver.invoke  →  warm Julia lane_overlap
@@ -42,11 +42,11 @@ Julia's heap holds `AxisAligned` methods and scratch rectangles. The world is th
 
 ## 4. IR shape
 
-`wge.semantic-ir/v0`: `schema`, `registry_digest`, `module_id`, `declarations[]`. Each declaration has `binding`, `constructor` (`lane` or `place`), `id`, integer `footprint` `{x0,x1,y0,y1}`, and `span` `{line,column,end_line,end_column}`. Unknown fields and constructors fail. Digest is SHA-256 of canonical JSON.
+`luxel.semantic-ir/v0`: `schema`, `registry_digest`, `module_id`, `declarations[]`. Each declaration has `binding`, `constructor` (`lane` or `place`), `id`, integer `footprint` `{x0,x1,y0,y1}`, and `span` `{line,column,end_line,end_column}`. Unknown fields and constructors fail. Digest is SHA-256 of canonical JSON.
 
 ## 5. Generation shape
 
-`wge.generation/v0` as listed in the handoff. G0 has null authoring, IR, solver, and receipt. A committed generation points at the measurement by hash. Candidate records live beside the pointer and do not replace it when rejected.
+`luxel.generation/v0` as listed in the handoff. G0 has null authoring, IR, solver, and receipt. A committed generation points at the measurement by hash. Candidate records live beside the pointer and do not replace it when rejected.
 
 ## 6. Effects implemented
 
@@ -66,14 +66,14 @@ Minted only in Rust after a passing predicate. `verify-current` rehashes the sto
 
 ## 10. Repair authorization
 
-The legal class is `move_placement_off_lane`. Rust locates the `blocked_keep = place(...)` line in the original and edited sources and requires every other byte to match. The failing span is line 5 of `invalid.wge`. The kernel does not choose the new coordinates.
+The legal class is `move_placement_off_lane`. Rust locates the `blocked_keep = place(...)` line in the original and edited sources and requires every other byte to match. The failing span is line 5 of `invalid.luxel`. The kernel does not choose the new coordinates.
 
 ## 11. Demo command
 
-From `WGE/`:
+From `Luxel/`:
 
 ```sh
-python3 pipeline/wge_kernel_demo.py
+python3 pipeline/luxel_kernel_demo.py
 ```
 
 Tests:
@@ -86,10 +86,10 @@ python3 -m unittest tests.test_semantic_kernel
 
 Checkpoint commands on 2026-09-25, all exit 0:
 
-- `python3 -m unittest discover -s tests -v` from `WGE/`: 640 passed, 234.615 s, none skipped.
-- `cargo test --workspace --offline` from `world_core/`: viewer 22, worldspec 24, `wge-semantic-kernel` 6. None ignored.
+- `python3 -m unittest discover -s tests -v` from `Luxel/`: 640 passed, 234.615 s, none skipped.
+- `cargo test --workspace --offline` from `world_core/`: viewer 22, worldspec 24, `luxel-semantic-kernel` 6. None ignored.
 - `julia --project=. --startup-file=no test/runtests.jl` from `terrain_lab/`: 8 passed.
-- `python3 pipeline/wge_kernel_demo.py`: one fresh store, exit 0, wall clock 1.49 s.
+- `python3 pipeline/luxel_kernel_demo.py`: one fresh store, exit 0, wall clock 1.49 s.
 
 That demo committed `G-0a6a9aa426ead34a` with measurement `sha256:111e05ce547ad67fa68d69c5d8ff2f2b44a2bddfc3ed9c26080cdd534b1a6bb5` and IR `sha256:bbe9a08e60f450f3e73d1ea76ddf484b69fe52271ce19462caa7227ac10f5e20`. The failing measurement was `sha256:54b44a3d10b2d43e441ae8933dfa1d6a915b6bd2625d11c148296bdf49a91d56` (area 600). Those three digests matched the earlier Goal 001 pair of runs. `tests/test_semantic_kernel.py` is inside the 640 and still covers checks A–R.
 

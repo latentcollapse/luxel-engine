@@ -2,7 +2,7 @@
 
 This module only invokes Blender and transports the generated artifact. Asset
 identity, schema validation, rig/animation facts, and acceptance remain owned
-by ``wge-asset-contract``.
+by ``luxel-asset-contract``.
 """
 
 from __future__ import annotations
@@ -137,7 +137,7 @@ socket.parent = rig
 socket.parent_type = "BONE"
 socket.parent_bone = "hand_r"
 socket.location = (0.10, 0.0, 0.0)
-socket["wge_socket"] = True
+socket["luxel_socket"] = True
 
 def make_action(name, frames):
     action = bpy.data.actions.new(name)
@@ -194,10 +194,10 @@ def generate_rigged_character_control(
 ) -> subprocess.CompletedProcess[str]:
     """Generate a deterministic, inspectable rigged character GLB using Blender."""
 
-    blender = blender_executable or os.environ.get("WGE_BLENDER_BIN", "blender")
+    blender = blender_executable or os.environ.get("LUXEL_BLENDER_BIN", "blender")
     destination = Path(output_glb).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="wge-rigging-provider-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="luxel-rigging-provider-") as temporary:
         script = Path(temporary) / "generate_control.py"
         script.write_text(_BLENDER_CONTROL_SCRIPT, encoding="utf-8")
         command: Sequence[str] = (

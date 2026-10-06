@@ -1,4 +1,4 @@
-# WGE engine-neutral reference world runtime
+# Luxel engine-neutral reference world runtime
 
 This crate compiles a typed authored layout through a Julia field worker into a
 content-addressed Rust world artifact. Rust validates the returned height,
@@ -10,15 +10,15 @@ measured visual receipt.
 Build a fresh authored layout:
 
 ```sh
-cargo run --offline -p wge-reference-runtime -- build \
+cargo run --offline -p luxel-reference-runtime -- build \
   --layout world_core/crates/reference_runtime/examples/riverwatch.layout.json \
-  --output-dir /tmp/wge-riverwatch
+  --output-dir /tmp/luxel-riverwatch
 ```
 
 Independently revalidate the stored candidate and evidence:
 
 ```sh
-cargo run --offline -p wge-reference-runtime -- verify --bundle /tmp/wge-riverwatch
+cargo run --offline -p luxel-reference-runtime -- verify --bundle /tmp/luxel-riverwatch
 ```
 
 `build` writes the authored-layout-derived world artifact, traversal receipt,
@@ -29,11 +29,11 @@ not inspect or promote the supplied GLB and has no external-engine import
 dependency.
 
 The reference vertical slice binds the registered
-`wge.reference.vertical-slice` kit (`action_rpg` plus `network.offline`). Rust
+`luxel.reference.vertical-slice` kit (`action_rpg` plus `network.offline`). Rust
 re-resolves that kit during verification; `gameplay_kit.json` is not a
 producer-only label.
 
-The gameplay/world binding uses `wge.gameplay-world-binding/v2`. It includes a
+The gameplay/world binding uses `luxel.gameplay-world-binding/v2`. It includes a
 30 Hz deterministic action-tick stream with world-cell poses, input and NPC
 transitions, objective/outcome state, and the gameplay state digest at each
 tick. Its capture metadata identifies the exact overview capture bytes, visual
@@ -45,7 +45,7 @@ build, or playthrough behavior; those still require evidence from the normal
 engine and MCP path.
 
 The JSON exchange schema and Julia worker are in
-`terrain_lab/bin/wge_reference_world_fields.jl`. The receipt retains exact
+`terrain_lab/bin/luxel_reference_world_fields.jl`. The receipt retains exact
 request/response bytes and pins the worker and terrain project digests. Rust
 also rerasterizes authored regions and recomputes the slope field before using
 the worker values.

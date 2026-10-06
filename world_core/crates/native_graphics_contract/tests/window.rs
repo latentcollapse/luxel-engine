@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     CapabilityState, WINDOW_PROBE_RECEIPT_SCHEMA, WindowBackendEvidence, WindowCapabilities,
     WindowProbeReceipt, WindowProbeStage, WindowProbeStatus, WindowTargetRequest,
     probe_lava_window,
@@ -140,7 +140,7 @@ fn receipt_rejects_unknown_fields_and_schema_drift() {
     assert!(serde_json::from_value::<WindowProbeReceipt>(value).is_err());
 
     let mut receipt = present_receipt();
-    receipt.schema_version = "wge.window-probe-receipt/v0".to_owned();
+    receipt.schema_version = "luxel.window-probe-receipt/v0".to_owned();
     assert_eq!(receipt.validate().unwrap_err().code, "schema_mismatch");
 }
 
@@ -149,7 +149,7 @@ fn receipt_rejects_unknown_fields_and_schema_drift() {
 fn lava_window_target_opens_surface_swapchain_and_presents_a_real_frame() {
     let project = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../graphics_lab");
     let project = project.canonicalize().expect("graphics_lab project exists");
-    let julia = std::env::var_os("WGE_JULIA").unwrap_or_else(|| "julia".into());
+    let julia = std::env::var_os("LUXEL_JULIA").unwrap_or_else(|| "julia".into());
     let display_available = ["WAYLAND_DISPLAY", "DISPLAY"]
         .into_iter()
         .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()));

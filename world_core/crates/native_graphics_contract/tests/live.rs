@@ -2,16 +2,16 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use wge_live_evidence_contract::{
+use luxel_live_evidence_contract::{
     DiagnosticCode, LIVE_FRAME_SCHEMA, LiveEvidenceSession, LiveFrameAttestation,
     LiveFrameTelemetry, PacketIdentity, SampleTrigger, SamplingPolicy, SemanticEvent,
     SemanticEventKind, SessionState,
 };
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     GraphicsSessionMode, GraphicsWorkerSupervisor, LiveGraphicsSession, LivePresentOutcome,
     lower_reference_world, lower_showcase_packet,
 };
-use wge_reference_runtime::build_from_layout_path;
+use luxel_reference_runtime::build_from_layout_path;
 
 fn digest(label: &str) -> String {
     use sha2::{Digest, Sha256};
@@ -169,7 +169,7 @@ fn session_digest_is_deterministic_for_identical_transitions() {
 }
 
 fn julia_executable() -> PathBuf {
-    std::env::var_os("WGE_JULIA")
+    std::env::var_os("LUXEL_JULIA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("julia"))
 }
@@ -195,9 +195,9 @@ fn supervised_offscreen_capture_is_bound_into_the_live_session() {
         .expect("reference layout exists");
     let graphics_lab = workspace_root.join("graphics_lab");
     let terrain_lab = workspace_root.join("terrain_lab");
-    let worker = graphics_lab.join("bin/wge_graphics_worker.jl");
+    let worker = graphics_lab.join("bin/luxel_graphics_worker.jl");
     let output_dir =
-        std::env::temp_dir().join(format!("wge-live-graphics-contract-{}", std::process::id()));
+        std::env::temp_dir().join(format!("luxel-live-graphics-contract-{}", std::process::id()));
     fs::create_dir_all(&output_dir).expect("test output directory is writable");
     let input = output_dir.join("riverwatch.layout.json");
     fs::copy(&layout, &input).expect("layout copies into temp fixture directory");

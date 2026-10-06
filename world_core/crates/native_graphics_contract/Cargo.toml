@@ -1,11 +1,11 @@
 [package]
-name = "wge-native-graphics-contract"
+name = "luxel-native-graphics-contract"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
 rust-version.workspace = true
-description = "Typed, engine-neutral WGE scene packets and native graphics evidence"
+description = "Typed, engine-neutral Luxel scene packets and native graphics evidence"
 
 [dependencies]
 base64 = "0.22"
@@ -13,11 +13,11 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["float_roundtrip"] }
 sha2 = "0.10"
 image = { version = "0.25.9", default-features = false, features = ["png", "jpeg"] }
-wge-reference-runtime = { path = "../reference_runtime" }
-wge-live-evidence-contract = { path = "../live_evidence_contract" }
-wge-asset-contract = { path = "../asset_contract" }
-wge-project-ledger = { path = "../project_ledger" }
+luxel-reference-runtime = { path = "../reference_runtime" }
+luxel-live-evidence-contract = { path = "../live_evidence_contract" }
+luxel-asset-contract = { path = "../asset_contract" }
+luxel-project-ledger = { path = "../project_ledger" }
 
 [[bin]]
-name = "wge-native-graphics-contract"
+name = "luxel-native-graphics-contract"
 path = "src/main.rs"

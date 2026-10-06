@@ -2,7 +2,7 @@
 
 ## Name and date
 
-`WGE-checkpoint-goal002-2026-09-25`
+`Luxel-checkpoint-goal002-2026-09-25`
 
 Checkpoint date: 2026-09-25.
 
@@ -10,7 +10,7 @@ Archive, beside the repository:
 
 `/mnt/d/Code Projects/WGE-checkpoint-goal002-2026-09-25.zip`
 
-The zip's top directory is `WGE/`.
+The zip's top directory is `Luxel/`.
 
 The Goal 001 archive is historical and was not overwritten:
 
@@ -42,12 +42,12 @@ Untracked, present in the archive:
 - `docs/archive/2026-09_native-graphics-checkpoints/checkpoint-manifest.md`
 - `docs/content-sdk/semantic-kernel-handoff.md`
 - `docs/archive/2026-09_roadmaps-and-audits/semantic-kernel-spike-report.md`
-- `pipeline/wge_kernel_demo.py`
-- `pipeline/wge_semantic_ir.py`
+- `pipeline/luxel_kernel_demo.py`
+- `pipeline/luxel_semantic_ir.py`
 - `terrain_lab/bin/lane_overlap_worker.jl`
 - `tests/test_semantic_kernel.py`
 - `tests/test_semantic_kernel_persistence.py`
-- `tests/fixtures/semantic_kernel/` (`invalid.wge`, `repaired.wge`, `repaired_note.wge`, `tampered.wge`)
+- `tests/fixtures/semantic_kernel/` (`invalid.luxel`, `repaired.luxel`, `repaired_note.luxel`, `tampered.luxel`)
 - `world_core/crates/semantic_kernel/` (`Cargo.toml`, `registry_v0.json`, `src/lib.rs`, `src/lane.rs`, `src/main.rs`, `src/store.rs`, `src/worker.rs`)
 
 Also present, gitignored, and required:
@@ -56,7 +56,7 @@ Also present, gitignored, and required:
 
 ## Archive contents and exclusions
 
-Included: WGE source, tests, fixtures, docs, engine adapters, `terrain_lab` source and `Manifest.toml`, and the Rust workspace manifests.
+Included: Luxel source, tests, fixtures, docs, engine adapters, `terrain_lab` source and `Manifest.toml`, and the Rust workspace manifests.
 
 Excluded:
 
@@ -74,7 +74,7 @@ No generation store is in the archive. A run creates one in the directory passed
 
 ## Test commands and results
 
-From unpacked `WGE/`, 2026-09-25, all exit 0:
+From unpacked `Luxel/`, 2026-09-25, all exit 0:
 
 ```sh
 python3 -m unittest discover -s tests -v
@@ -96,22 +96,22 @@ Run from `terrain_lab/`. 5 semantic terrain-analysis tests and 3 hydrology tests
 
 ## Demonstration commands
 
-Single-process Goal 001 path, from `WGE/`:
+Single-process Goal 001 path, from `Luxel/`:
 
 ```sh
-python3 pipeline/wge_kernel_demo.py
+python3 pipeline/luxel_kernel_demo.py
 ```
 
 Multi-process Goal 002 path on one store. Each command is a new process. Paths below are the repository fixtures.
 
 ```sh
-wge-semantic-kernel fail-proposal --store STORE ...fixtures...
-wge-semantic-kernel inspect --store STORE
-wge-semantic-kernel apply-repair --store STORE ...fixtures...
-wge-semantic-kernel inspect --store STORE
-wge-semantic-kernel submit-equivalent --store STORE --source repaired_note.wge ...
-wge-semantic-kernel inspect --store STORE
-wge-semantic-kernel status --store STORE
+luxel-semantic-kernel fail-proposal --store STORE ...fixtures...
+luxel-semantic-kernel inspect --store STORE
+luxel-semantic-kernel apply-repair --store STORE ...fixtures...
+luxel-semantic-kernel inspect --store STORE
+luxel-semantic-kernel submit-equivalent --store STORE --source repaired_note.luxel ...
+luxel-semantic-kernel inspect --store STORE
+luxel-semantic-kernel status --store STORE
 ```
 
 Checkpoint result, every command exit 0:
@@ -125,11 +125,11 @@ Checkpoint result, every command exit 0:
 
 ## Store schema
 
-`store.json` schema is `wge.store/v0`. It also pins `registry_digest`. An unknown schema is `unsupported_schema`. There is no migration.
+`store.json` schema is `luxel.store/v0`. It also pins `registry_digest`. An unknown schema is `unsupported_schema`. There is no migration.
 
 ## Canonical generation
 
-`wge.generation/v0`.
+`luxel.generation/v0`.
 
 G0: `generation_id` `G0`, null parent, null IR, null measurement, null solver image, null receipt, the pinned `registry_digest`, empty indexes, `determinism` `exact`, `seed` null.
 
@@ -139,7 +139,7 @@ Open rebuilds that body from the store's pinned registry and the fixed operation
 
 ## Proposal
 
-`wge.proposal/v0`: `proposal_id`, `candidate_id`, `authoring_digest`, `parent_id`, `ir_digest`, `measurement_sha256`, `operation`, `role` (`world_author`), `repair_id`, `solver_image`, `registry_digest`, `generation_id`, `receipt_id`, `status` (`rejected` or `committed`).
+`luxel.proposal/v0`: `proposal_id`, `candidate_id`, `authoring_digest`, `parent_id`, `ir_digest`, `measurement_sha256`, `operation`, `role` (`world_author`), `repair_id`, `solver_image`, `registry_digest`, `generation_id`, `receipt_id`, `status` (`rejected` or `committed`).
 
 Candidate ids include the authoring digest. The generation id does not.
 
@@ -149,13 +149,13 @@ Candidate ids include the authoring digest. The generation id does not.
 
 ## Evidence binding
 
-`wge.evidence-binding/v0`: `binding_id`, `candidate_id`, `parent_id`, `operation`, `gate_id`, `solver_image`, `input_digest`, `evidence_sha256`, `proposal_id`.
+`luxel.evidence-binding/v0`: `binding_id`, `candidate_id`, `parent_id`, `operation`, `gate_id`, `solver_image`, `input_digest`, `evidence_sha256`, `proposal_id`.
 
 The binding id is recomputed from candidate, parent, evidence hash, solver image, and input digest. Two candidates may share one blob. Editing `candidate_id` inside a binding file breaks the id, so the file certifies neither the forged candidate nor the original one.
 
 ## Receipt
 
-`wge.receipt/v0`: `receipt_id`, `generation_id`, `parent_id`, `ir_digest`, `measurement_sha256`, `registry_digest`, `solver_image`, `gate_id`, `gate_result` `pass`, `operation` `generation.commit`, `minted_by` `rust-kernel`.
+`luxel.receipt/v0`: `receipt_id`, `generation_id`, `parent_id`, `ir_digest`, `measurement_sha256`, `registry_digest`, `solver_image`, `gate_id`, `gate_result` `pass`, `operation` `generation.commit`, `minted_by` `rust-kernel`.
 
 No authoring digest and no candidate id. The id is a hash of generation id, measurement, gate, solver image, and registry. Open recomputes it and requires the receipt body to be that decision. A rewritten gate result, solver, IR, parent, or registry is `forged_receipt`.
 
@@ -167,7 +167,7 @@ sha256 over the length-prefixed bytes of:
 - `terrain_lab/Project.toml`
 - `terrain_lab/Manifest.toml`
 - the `julia --version` line
-- the protocol string `wge.worker-protocol/v0`
+- the protocol string `luxel.worker-protocol/v0`
 
 Not included: pid, hostname, timestamp, username, temp path. A different Julia version string changes the image. `check-solver` rejects a different image and does not move the pointer.
 
@@ -183,7 +183,7 @@ The generation file is written first. `pointer.json` is written to a temp file, 
 
 ## Repair persistence and staleness
 
-A failed proposal writes `wge.semantic-repair/v0` with the candidate, parent, base authoring digest, span, gate `lane.footprint_clear`, and repair class `move_placement_off_lane`. A later process can `apply-repair` while current is still that parent. If current has moved, the same command returns `stale_repair` and does not change the generation bytes.
+A failed proposal writes `luxel.semantic-repair/v0` with the candidate, parent, base authoring digest, span, gate `lane.footprint_clear`, and repair class `move_placement_off_lane`. A later process can `apply-repair` while current is still that parent. If current has moved, the same command returns `stale_repair` and does not change the generation bytes.
 
 ## Semantic identity rule
 
@@ -211,7 +211,7 @@ None of these recreate G0 or repair the store.
 
 ## Goal 001 and Goal 002 contracts the tests prove
 
-Goal 001, still green inside the 646: parse-only `.wge` source, canonical IR, one warm Julia process for both measurements, Rust predicate, `SemanticRepair` on `blocked_keep`, out-of-span edit rejected, G0 held until the in-span repair commits, host-minted receipt.
+Goal 001, still green inside the 646: parse-only `.luxel` source, canonical IR, one warm Julia process for both measurements, Rust predicate, `SemanticRepair` on `blocked_keep`, out-of-span edit rejected, G0 held until the in-span repair commits, host-minted receipt.
 
 Goal 002: create is not open, the pointer survives process exit, semantic identity is separate from authoring provenance, generation and evidence bytes are immutable, bindings and receipts are checked by recomputed ids, solver image includes the Julia version, and corruption fails closed.
 
@@ -219,7 +219,7 @@ Goal 002: create is not open, the pointer survives process exit, semantic identi
 
 - One domain: lane overlap. `build_zone.py` does not use this store.
 - Span check is "delete the `blocked_keep = place(...)` line and compare the rest." Declarations are single-line.
-- No PackageCompiler sysimage. No migration from `wge.store/v0`.
+- No PackageCompiler sysimage. No migration from `luxel.store/v0`.
 - Power loss during the pointer rename is not injected. The tested facts are write order and a missing target.
 - `terrain_lab/Manifest.toml` is gitignored. This archive includes it because the solver pin reads it.
 - Pre-existing worldspec warning: unused field `steep_edge_fraction`. Those tests still passed.

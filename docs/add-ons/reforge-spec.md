@@ -1,8 +1,8 @@
-# WGE Reforge — Brownfield Modernization, Preservation, Refactoring, and Remastering
+# Luxel Reforge — Brownfield Modernization, Preservation, Refactoring, and Remastering
 
 Status: **Semantic Stub / Agent-Executed Subsystem, registered 2026-10-02.**
-Namespace `wge.reforge`. Initial implementation strategy: Cyan procedure +
-existing repository / build / profiling / WGE capabilities. Development method:
+Namespace `luxel.reforge`. Initial implementation strategy: Cyan procedure +
+existing repository / build / profiling / Luxel capabilities. Development method:
 **RPDO Semantic Stubbing** (register the canonical semantics and the artifact
 contracts now; let dedicated machinery be *earned* through repeated use — see
 §18). Maturity: **REFORGE = SEMANTIC / PROCEDURAL** (see §5 — this status must
@@ -12,7 +12,7 @@ exist).
 Provenance: operator-authored product specification, registered verbatim-intent
 as a semantic stub. Where this condensation and the operator's full text
 differ, the operator's text wins; file corrections as evidence. Authority
-chain as elsewhere in WGE: the Rust kernel owns identity/policy/evidence;
+chain as elsewhere in Luxel: the Rust kernel owns identity/policy/evidence;
 Julia/Lava execute; Cyan is the executing agent; the operator is
 creative/technical director.
 
@@ -53,7 +53,7 @@ crystallize into dedicated Reforge machinery.
 Reforge may support goals such as: preservation, modernization, refactoring,
 performance improvement, portability, renderer replacement, remastering,
 architectural cleanup, moddability, accessibility improvement, maintainability,
-tooling modernization, partial WGE migration, full WGE-native migration.
+tooling modernization, partial Luxel migration, full Luxel-native migration.
 
 A Remaster project may include modern rendering and presentation while
 preserving game identity. A Reforge project may involve no visual changes at
@@ -96,17 +96,17 @@ grows underneath.
 
 | Operation | Intent | Primary artifacts | Exit condition |
 |---|---|---|---|
-| `wge.reforge.intake` | Accept the system + goals; establish rights posture | `REFORGE_GOAL.md`, `SOURCE_MANIFEST`, `RIGHTS_AND_PROVENANCE_MANIFEST`, `INITIAL_CONSTRAINTS`, `INITIAL_OPEN_QUESTIONS` | Goals, preservation requirements, desired changes, optional improvements, and uncertain areas are separated |
-| `wge.reforge.inspect` | Archaeology: structured inventory | `REFORGE_INVENTORY` (24 categories, §8) | Enough semantic understanding exists to modernize safely (not documentation completeness) |
-| `wge.reforge.baseline` | Get the original running reproducibly; freeze observable behavior | `BASELINE_MANIFEST`, `COMPATIBILITY_CONTRACT`, `PERFORMANCE_BASELINE`, `VISUAL_BASELINE`, `PROTOCOL_BASELINE`, `GAMEPLAY_BASELINE`, `KNOWN_QUIRKS`, `REPLAY_FIXTURES` | The ratchet exists: implementation may change; protected behavior is evidenced |
-| `wge.reforge.model` | Repository structure → semantic system structure | `SEMANTIC_SYSTEM_MAP` | Every major subsystem has locations, dependencies, ownership, mutable state, thread affinity, external contracts, preserved behavior, goals |
-| `wge.reforge.classify` | Assign explicit migration posture per subsystem | `MODERNIZATION_CLASSIFICATION` | Every major subsystem is PRESERVE/WRAP/REFACTOR/REPLACE/RETIRE/UNKNOWN with risk + validation method + order |
-| `wge.reforge.plan` | Bounded migration design | `MODERNIZATION_PLAN` | Each slice answers: what changes / what stays invariant / how equivalence is checked / how to revert / what capability is gained |
-| `wge.reforge.migrate` | Execute one bounded slice | slice record (§24) | Slice's test plan + comparison evidence pass; rollback remains available |
-| `wge.reforge.compare` | Continuous old/new comparison | comparison evidence per slice | Continuously comparable, not asserted at the end |
-| `wge.reforge.verify` | Verification against protected behavior | `VERIFICATION_REPORT` | Each check is classified equivalent / intentionally changed / unresolved / regressed |
-| `wge.reforge.refine` | Fold in Grindstone experience findings | accepted repairs, updated contracts | Accepted experience repairs are incorporated as evidence-backed changes |
-| `wge.reforge.package` | Honest packaging + provenance | §26 output set | Rights fail-closed; known differences explicit |
+| `luxel.reforge.intake` | Accept the system + goals; establish rights posture | `REFORGE_GOAL.md`, `SOURCE_MANIFEST`, `RIGHTS_AND_PROVENANCE_MANIFEST`, `INITIAL_CONSTRAINTS`, `INITIAL_OPEN_QUESTIONS` | Goals, preservation requirements, desired changes, optional improvements, and uncertain areas are separated |
+| `luxel.reforge.inspect` | Archaeology: structured inventory | `REFORGE_INVENTORY` (24 categories, §8) | Enough semantic understanding exists to modernize safely (not documentation completeness) |
+| `luxel.reforge.baseline` | Get the original running reproducibly; freeze observable behavior | `BASELINE_MANIFEST`, `COMPATIBILITY_CONTRACT`, `PERFORMANCE_BASELINE`, `VISUAL_BASELINE`, `PROTOCOL_BASELINE`, `GAMEPLAY_BASELINE`, `KNOWN_QUIRKS`, `REPLAY_FIXTURES` | The ratchet exists: implementation may change; protected behavior is evidenced |
+| `luxel.reforge.model` | Repository structure → semantic system structure | `SEMANTIC_SYSTEM_MAP` | Every major subsystem has locations, dependencies, ownership, mutable state, thread affinity, external contracts, preserved behavior, goals |
+| `luxel.reforge.classify` | Assign explicit migration posture per subsystem | `MODERNIZATION_CLASSIFICATION` | Every major subsystem is PRESERVE/WRAP/REFACTOR/REPLACE/RETIRE/UNKNOWN with risk + validation method + order |
+| `luxel.reforge.plan` | Bounded migration design | `MODERNIZATION_PLAN` | Each slice answers: what changes / what stays invariant / how equivalence is checked / how to revert / what capability is gained |
+| `luxel.reforge.migrate` | Execute one bounded slice | slice record (§24) | Slice's test plan + comparison evidence pass; rollback remains available |
+| `luxel.reforge.compare` | Continuous old/new comparison | comparison evidence per slice | Continuously comparable, not asserted at the end |
+| `luxel.reforge.verify` | Verification against protected behavior | `VERIFICATION_REPORT` | Each check is classified equivalent / intentionally changed / unresolved / regressed |
+| `luxel.reforge.refine` | Fold in Grindstone experience findings | accepted repairs, updated contracts | Accepted experience repairs are incorporated as evidence-backed changes |
+| `luxel.reforge.package` | Honest packaging + provenance | §26 output set | Rights fail-closed; known differences explicit |
 
 ## 5. Maturity status
 
@@ -154,7 +154,7 @@ PACKAGE
 
 ## 7. Intake
 
-`wge.reforge.intake`
+`luxel.reforge.intake`
 
 Inputs may include: source repository, binaries, documentation, build scripts,
 assets, protocol documentation, screenshots, videos, design notes, existing bug
@@ -170,7 +170,7 @@ improvements, and uncertain areas.
 
 ## 8. Archaeology
 
-`wge.reforge.inspect` builds a structured inventory (`REFORGE_INVENTORY`):
+`luxel.reforge.inspect` builds a structured inventory (`REFORGE_INVENTORY`):
 
 languages · build systems · dependencies · repository topology · renderer ·
 GPU APIs · networking · input · simulation · world state · threading model ·
@@ -183,7 +183,7 @@ enough semantic understanding to modernize safely.
 
 ## 9. Baseline first
 
-`wge.reforge.baseline`: before significant refactoring, get the original
+`luxel.reforge.baseline`: before significant refactoring, get the original
 system running reproducibly whenever possible. Freeze observable behavior.
 
 Potential evidence: build result, startup behavior, network traces, packet
@@ -220,7 +220,7 @@ This avoids confusing implementation preservation with experience preservation.
 
 ## 11. Semantic system map
 
-`wge.reforge.model` converts repository structure into system structure —
+`luxel.reforge.model` converts repository structure into system structure —
 e.g. Authentication, Character Selection, Network Transport, Packet Decode,
 World State, Simulation, Input, Camera, Rendering, Asset Loading, UI, Audio,
 Persistence, Modding.
@@ -453,12 +453,12 @@ expected improvement · implementation delta · test plan ·
 comparison evidence · rollback plan · resulting generation
 ```
 
-This aligns Reforge with WGE's general generation/receipt philosophy: the old
+This aligns Reforge with Luxel's general generation/receipt philosophy: the old
 path survives until the replacement proves itself.
 
 ## 25. Verify
 
-`wge.reforge.verify` — verification depends on protected behavior. Possible
+`luxel.reforge.verify` — verification depends on protected behavior. Possible
 checks: build reproducibility, protocol fixtures, gameplay traces, screenshot
 comparison, render semantics, input behavior, replay comparison, performance
 regression, asset loading, extension compatibility, startup/shutdown, save
@@ -469,7 +469,7 @@ Verification must distinguish: `equivalent` · `intentionally changed` ·
 
 ## 26. Package
 
-`wge.reforge.package` describes the resulting system honestly. Outputs:
+`luxel.reforge.package` describes the resulting system honestly. Outputs:
 
 ```
 MODERNIZED_CLIENT · REFORGE_REPORT · COMPATIBILITY_REPORT · RIGHTS_MANIFEST ·
@@ -554,7 +554,7 @@ A user should eventually be able to say:
 And Cyan should be able to turn that intent into a disciplined modernization
 campaign rather than a speculative rewrite.
 
-WGE Reforge is the mechanism for bringing old software forward without
+Luxel Reforge is the mechanism for bringing old software forward without
 discarding the reasons it mattered.
 
 ## 32. The stub pattern beyond Reforge

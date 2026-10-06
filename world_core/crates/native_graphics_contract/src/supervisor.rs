@@ -10,8 +10,8 @@ use std::time::Duration;
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::Deserialize;
 use serde_json::{Value, json};
-use wge_asset_contract::{AssetPreparationReceipt, RenderAssetPackage};
-use wge_project_ledger::{SceneArtifact, validate_scene_against_asset_receipts_and_render_assets};
+use luxel_asset_contract::{AssetPreparationReceipt, RenderAssetPackage};
+use luxel_project_ledger::{SceneArtifact, validate_scene_against_asset_receipts_and_render_assets};
 
 use crate::{
     ADAPTER_REVISION, Campaign2View, CaptureFormat, FRAME_RECEIPT_SCHEMA, FrameStatus,
@@ -26,13 +26,13 @@ use crate::{
     seal_scene_packet, sha256_prefixed, validate_native_visual_gate, validate_ready,
     validate_scene_packet, validate_texture_residency_telemetry,
 };
-use wge_reference_runtime::{WorldArtifact, validate_world_artifact};
+use luxel_reference_runtime::{WorldArtifact, validate_world_artifact};
 
-pub const WORKER_SCHEMA: &str = "wge.graphics-worker/v1";
+pub const WORKER_SCHEMA: &str = "luxel.graphics-worker/v1";
 /// Request/response frame bound. Raised from 64 MiB for CONVERGE-2 N-5: the
 /// converge packets carry ~31 MB of terrain-layer textures before any imported
 /// kit, and meshes travel as JSON floats (~96 bytes per vertex). Must match
-/// `MAX_WORKER_FRAME_BYTES` in `graphics_lab/bin/wge_graphics_worker.jl`.
+/// `MAX_WORKER_FRAME_BYTES` in `graphics_lab/bin/luxel_graphics_worker.jl`.
 const MAX_WORKER_FRAME_BYTES: usize = 128 * 1024 * 1024;
 const DEFAULT_WORKER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(120);
 /// The ready handshake covers Julia package loading, which on a cold or
@@ -216,7 +216,7 @@ impl GraphicsWorkerSupervisor {
             .ok_or_else(|| GraphicsWorkerError::io("Julia worker stdout was not captured"))?;
         let (response_sender, responses) = mpsc::channel();
         let reader = thread::Builder::new()
-            .name("wge-lava-worker-reader".into())
+            .name("luxel-lava-worker-reader".into())
             .spawn(move || {
                 let mut stdout = BufReader::new(stdout);
                 loop {
@@ -436,7 +436,7 @@ impl GraphicsWorkerSupervisor {
             serde_json::from_value(frame_value.clone()).map_err(|error| {
                 GraphicsWorkerError::protocol(format!("frame payload is not typed: {error}"))
             })?;
-        if frame.schema != "wge.lava-frame/v1" {
+        if frame.schema != "luxel.lava-frame/v1" {
             return Err(GraphicsWorkerError::protocol(format!(
                 "unsupported frame schema {}",
                 frame.schema
@@ -670,7 +670,7 @@ impl GraphicsWorkerSupervisor {
             ),
             (
                 "graphics_contract".into(),
-                sha256_file(&self.project.join("src/WGEGraphics.jl"))?,
+                sha256_file(&self.project.join("src/LuxelGraphics.jl"))?,
             ),
             (
                 "project".into(),
@@ -721,7 +721,7 @@ impl GraphicsWorkerSupervisor {
         let timeout = self.response_timeout;
         let (sender, receiver) = mpsc::channel();
         thread::Builder::new()
-            .name("wge-lava-worker-writer".into())
+            .name("luxel-lava-worker-writer".into())
             .spawn(move || {
                 let mut stdin = stdin;
                 let result = stdin

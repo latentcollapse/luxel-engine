@@ -1,7 +1,7 @@
 # GCS foundation: capability contracts and kit resolution
 
 Status: bounded semantic foundation. This document covers the registry and resolver in
-`wge-gameplay-contract::gcs`; it does not define gameplay runtime behavior.
+`luxel-gameplay-contract::gcs`; it does not define gameplay runtime behavior.
 
 ## Contract surface
 
@@ -56,7 +56,7 @@ This proves semantic composition only; it does not claim those systems execute i
 `ResolvedKit` stores profile and capability specifications in `BTreeMap`s and active optional links
 in a `BTreeSet`. `canonical_bytes()` uses the crate's existing compact `serde_json::to_vec`
 convention. `sha256()` hashes those exact bytes and returns the canonical
-`sha256:<64 lowercase hex>` identity form used by the other WGE contracts. Equivalent manifests
+`sha256:<64 lowercase hex>` identity form used by the other Luxel contracts. Equivalent manifests
 with different input ordering therefore produce identical resolved bytes and digests. The digest
 covers selected profile/capability specifications and active optional links, not diagnostics or
 unselected optional integrations.

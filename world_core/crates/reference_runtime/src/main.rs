@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use serde::Serialize;
-use wge_reference_runtime::{
+use luxel_reference_runtime::{
     GameplayWorldBinding, TraversalEvidence, VisualEvidence, WorldArtifact, build_from_layout_path,
     validate_gameplay_kit, validate_gameplay_world_binding, validate_traversal_evidence,
     validate_visual_evidence, validate_world_artifact,
@@ -55,7 +55,7 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
             let output_dir = PathBuf::from(take(&mut flags, "output-dir")?);
             let julia = flags
                 .remove("julia")
-                .or_else(|| env::var("WGE_JULIA").ok())
+                .or_else(|| env::var("LUXEL_JULIA").ok())
                 .unwrap_or_else(|| "julia".into());
             reject_extra(flags)?;
             let terrain_lab = terrain_lab_root();
@@ -88,7 +88,7 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
             write_json(&output_dir.join("visual_evidence.json"), &build.visual)?;
             let passed = build.reference_gates_passed();
             let report = CandidateReport {
-                schema_version: "wge.reference-runtime-candidate/v1",
+                schema_version: "luxel.reference-runtime-candidate/v1",
                 status: if passed { "passed" } else { "failed" },
                 reference_gates_passed: passed,
                 world_artifact_id: &build.world.artifact_id,
@@ -97,22 +97,22 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
                 julia_worker_id: &build.world.body.julia_provenance.worker_id,
                 julia_version: &build.world.body.julia_provenance.julia_version,
                 traversal_outcome: match build.traversal.body.outcome {
-                    wge_reference_runtime::TraversalOutcome::Completed => "completed",
-                    wge_reference_runtime::TraversalOutcome::Incomplete => "incomplete",
+                    luxel_reference_runtime::TraversalOutcome::Completed => "completed",
+                    luxel_reference_runtime::TraversalOutcome::Incomplete => "incomplete",
                 },
                 traversal_steps: build.traversal.body.steps.len(),
                 gameplay_outcome: match build.gameplay.body.outcome {
-                    wge_gameplay_contract::GameOutcome::Won => "won",
-                    wge_gameplay_contract::GameOutcome::Lost => "lost",
-                    wge_gameplay_contract::GameOutcome::InProgress => "in_progress",
+                    luxel_gameplay_contract::GameOutcome::Won => "won",
+                    luxel_gameplay_contract::GameOutcome::Lost => "lost",
+                    luxel_gameplay_contract::GameOutcome::InProgress => "in_progress",
                 },
                 gameplay_receipt_sha256: &build.gameplay.body.gameplay_receipt.receipt_sha256,
                 gameplay_fixed_tick_rate_hz: build.gameplay.body.fixed_tick_rate_hz,
                 gameplay_telemetry_ticks: build.gameplay.body.telemetry.len(),
                 gameplay_capture_sha256: &build.gameplay.body.capture.capture_sha256,
                 visual_status: match build.visual.body.status {
-                    wge_reference_runtime::VisualGateStatus::Passed => "passed",
-                    wge_reference_runtime::VisualGateStatus::Failed => "failed",
+                    luxel_reference_runtime::VisualGateStatus::Passed => "passed",
+                    luxel_reference_runtime::VisualGateStatus::Failed => "failed",
                 },
                 visual_evidence_sha256: &build.visual.evidence_sha256,
                 visual_failure_reasons: &build.visual.body.failure_reasons,
@@ -128,7 +128,7 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
             let traversal: TraversalEvidence = read_json(&bundle.join("traversal_evidence.json"))?;
             let gameplay: GameplayWorldBinding =
                 read_json(&bundle.join("gameplay_world_binding.json"))?;
-            let gameplay_kit: wge_gameplay_contract::ResolvedKit =
+            let gameplay_kit: luxel_gameplay_contract::ResolvedKit =
                 read_json(&bundle.join("gameplay_kit.json"))?;
             let visual: VisualEvidence = read_json(&bundle.join("visual_evidence.json"))?;
             let capture = fs::read(bundle.join("reference_capture.ppm"))?;
@@ -138,13 +138,13 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
             validate_gameplay_world_binding(&world, &traversal, &capture, &visual, &gameplay)?;
             validate_gameplay_kit(&gameplay_kit)?;
             let passed = traversal.body.outcome
-                == wge_reference_runtime::TraversalOutcome::Completed
-                && gameplay.body.outcome == wge_gameplay_contract::GameOutcome::Won
-                && visual.body.status == wge_reference_runtime::VisualGateStatus::Passed;
+                == luxel_reference_runtime::TraversalOutcome::Completed
+                && gameplay.body.outcome == luxel_gameplay_contract::GameOutcome::Won
+                && visual.body.status == luxel_reference_runtime::VisualGateStatus::Passed;
             println!(
                 "{}",
                 serde_json::json!({
-                    "schema_version": "wge.reference-runtime-verification/v1",
+                    "schema_version": "luxel.reference-runtime-verification/v1",
                     "status": if passed { "passed" } else { "failed" },
                     "world_artifact_id": world.artifact_id,
                     "world_artifact_sha256": world.artifact_sha256,
@@ -159,7 +159,7 @@ fn dispatch() -> Result<u8, Box<dyn std::error::Error>> {
         }
         "help" | "--help" | "-h" => {
             println!(
-                "wge-reference-runtime\n\n  build --layout FILE --output-dir DIR [--julia PATH]\n  verify --bundle DIR\n\nBuild creates world_artifact.json, traversal_evidence.json, gameplay_world_binding.json, gameplay_kit.json, reference_capture.ppm, visual_evidence.json, and candidate_report.json. A measured visual failure is retained in the bundle and exits 2."
+                "luxel-reference-runtime\n\n  build --layout FILE --output-dir DIR [--julia PATH]\n  verify --bundle DIR\n\nBuild creates world_artifact.json, traversal_evidence.json, gameplay_world_binding.json, gameplay_kit.json, reference_capture.ppm, visual_evidence.json, and candidate_report.json. A measured visual failure is retained in the bundle and exits 2."
             );
             Ok(0)
         }

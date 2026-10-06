@@ -10,7 +10,7 @@ use crate::{
     validate_layout,
 };
 
-const WORLD_FIELDS_WORKER_ID: &str = "terrain_lab/bin/wge_reference_world_fields.jl";
+const WORLD_FIELDS_WORKER_ID: &str = "terrain_lab/bin/luxel_reference_world_fields.jl";
 const MAX_PROTOCOL_BYTES: usize = 16 * 1024 * 1024;
 
 pub fn julia_field_request(
@@ -35,7 +35,7 @@ pub fn run_julia_field_worker(
     julia_executable: &Path,
     terrain_lab: &Path,
 ) -> Result<(NumericalFields, JuliaFieldProvenance), ReferenceRuntimeError> {
-    let worker_path = terrain_lab.join("bin/wge_reference_world_fields.jl");
+    let worker_path = terrain_lab.join("bin/luxel_reference_world_fields.jl");
     let project_path = terrain_lab.join("Project.toml");
     let manifest_path = terrain_lab.join("Manifest.toml");
     let script_bytes = fs::read(&worker_path).map_err(|error| {
@@ -135,7 +135,7 @@ pub fn run_julia_field_worker(
     }
 
     let provenance = JuliaFieldProvenance {
-        schema_version: "wge.julia-world-fields-provenance/v1".into(),
+        schema_version: "luxel.julia-world-fields-provenance/v1".into(),
         worker_id: WORLD_FIELDS_WORKER_ID.into(),
         request_sha256,
         response_sha256,
@@ -177,7 +177,7 @@ pub fn build_from_layout_path(
     let traversal = run_playthrough(&world)?;
     let (capture_bytes, visual) = render_reference_capture(&world)?;
     let gameplay_kit =
-        wge_gameplay_contract::reference_vertical_slice_kit().map_err(|diagnostics| {
+        luxel_gameplay_contract::reference_vertical_slice_kit().map_err(|diagnostics| {
             ReferenceRuntimeError::contract(format!(
                 "reference gameplay kit resolution failed: {diagnostics:?}"
             ))

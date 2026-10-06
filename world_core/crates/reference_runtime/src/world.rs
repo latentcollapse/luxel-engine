@@ -108,7 +108,7 @@ pub struct WorldBuild {
     pub capture_bytes: Vec<u8>,
     pub visual: crate::VisualEvidence,
     pub gameplay: crate::GameplayWorldBinding,
-    pub gameplay_kit: wge_gameplay_contract::ResolvedKit,
+    pub gameplay_kit: luxel_gameplay_contract::ResolvedKit,
 }
 
 impl WorldBuild {
@@ -117,7 +117,7 @@ impl WorldBuild {
     pub fn reference_gates_passed(&self) -> bool {
         self.traversal.body.outcome == crate::TraversalOutcome::Completed
             && self.visual.body.status == crate::VisualGateStatus::Passed
-            && self.gameplay.body.outcome == wge_gameplay_contract::GameOutcome::Won
+            && self.gameplay.body.outcome == luxel_gameplay_contract::GameOutcome::Won
     }
 }
 
@@ -294,8 +294,8 @@ fn validate_fields_and_provenance(
         ));
     }
     validate_height_field(layout, &fields.heights_m)?;
-    if provenance.schema_version != "wge.julia-world-fields-provenance/v1"
-        || provenance.worker_id != "terrain_lab/bin/wge_reference_world_fields.jl"
+    if provenance.schema_version != "luxel.julia-world-fields-provenance/v1"
+        || provenance.worker_id != "terrain_lab/bin/luxel_reference_world_fields.jl"
         || !is_sha256(&provenance.request_sha256)
         || !is_sha256(&provenance.response_sha256)
         || !is_sha256(&provenance.worker_script_sha256)
@@ -407,7 +407,7 @@ fn validate_julia_regions(
 
 fn collision_artifact(layout: &AuthoredLayout, fields: &NumericalFields) -> CollisionArtifact {
     CollisionArtifact {
-        schema_version: "wge.collision-world/v1".into(),
+        schema_version: "luxel.collision-world/v1".into(),
         world_id: layout.world_id.clone(),
         spatial_fields_sha256: fields.spatial_sha256.clone(),
         world_bounds_m: [layout.width_m, layout.length_m],
@@ -543,7 +543,7 @@ fn navigation_artifact(
         ));
     }
     Ok(NavigationArtifact {
-        schema_version: "wge.navigation-grid/v1".into(),
+        schema_version: "luxel.navigation-grid/v1".into(),
         world_id: layout.world_id.clone(),
         spatial_fields_sha256: fields.spatial_sha256.clone(),
         agent_radius_m: layout.traversal.agent_radius_m,
@@ -734,7 +734,7 @@ fn verify_worker_identity(provenance: &JuliaFieldProvenance) -> Result<(), Refer
         .ok_or_else(|| {
             ReferenceRuntimeError::provenance("crate repository root is unavailable".into())
         })?;
-    let worker = repo.join("terrain_lab/bin/wge_reference_world_fields.jl");
+    let worker = repo.join("terrain_lab/bin/luxel_reference_world_fields.jl");
     let project = repo.join("terrain_lab/Project.toml");
     let manifest = repo.join("terrain_lab/Manifest.toml");
     let worker_bytes = fs::read(&worker).map_err(|error| {

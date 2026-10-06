@@ -16,11 +16,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-BINARY = ROOT / "world_core" / "target" / "debug" / "wge-semantic-kernel"
+BINARY = ROOT / "world_core" / "target" / "debug" / "luxel-semantic-kernel"
 PROJECT = ROOT / "terrain_lab"
 MANIFEST = PROJECT / "Manifest.toml"
 EROSION_WORKER = PROJECT / "bin" / "erosion_worker.jl"
-JULIA = os.environ.get("WGE_EROSION_JULIA") or shutil.which("julia") or "julia"
+JULIA = os.environ.get("LUXEL_EROSION_JULIA") or shutil.which("julia") or "julia"
 
 
 def events(text: str) -> list[dict]:
@@ -29,7 +29,7 @@ def events(text: str) -> list[dict]:
 
 def project_digest() -> str:
     hasher = hashlib.sha256()
-    hasher.update(b"wge.julia-project/v0\0")
+    hasher.update(b"luxel.julia-project/v0\0")
     for path in (PROJECT / "Project.toml", MANIFEST):
         data = path.read_bytes()
         hasher.update(len(data).to_bytes(8, "big"))
@@ -46,7 +46,7 @@ class SemanticKernelWorkerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         subprocess.run(
-            ["cargo", "build", "-p", "wge-semantic-kernel", "--quiet"],
+            ["cargo", "build", "-p", "luxel-semantic-kernel", "--quiet"],
             cwd=ROOT / "world_core",
             check=True,
         )
@@ -116,8 +116,8 @@ if "--version" in sys.argv:
     raise SystemExit(0)
 
 source = open(sys.argv[-1], encoding="utf-8").read()
-script_hash = re.search(r'_WGE_SCRIPT_SHA256 = "([0-9a-f]{64})"', source).group(1)
-project_hash = re.search(r'_WGE_PROJECT_SHA256 = "([0-9a-f]{64})"', source).group(1)
+script_hash = re.search(r'_LUXEL_SCRIPT_SHA256 = "([0-9a-f]{64})"', source).group(1)
+project_hash = re.search(r'_LUXEL_PROJECT_SHA256 = "([0-9a-f]{64})"', source).group(1)
 def write_frame(payload):
     sys.stdout.buffer.write(struct.pack(">I", len(payload)) + payload)
     sys.stdout.buffer.flush()
@@ -130,7 +130,7 @@ length = struct.unpack(">I", header)[0]
 payload = sys.stdin.buffer.read(length)
 if len(payload) != length:
     raise SystemExit(4)
-mode = os.environ["WGE_TEST_FAKE_MODE"]
+mode = os.environ["LUXEL_TEST_FAKE_MODE"]
 if mode == "exit":
     raise SystemExit(0)
 if mode == "oversized-frame":
@@ -153,7 +153,7 @@ if mode == "forged-result-digest":
         return executable
 
     def test_two_erosion_jobs_share_one_warm_julia_pid(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="wge-warm-erosion-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="luxel-warm-erosion-") as temporary:
             directory = Path(temporary)
             jobs = [
                 self.flux_request(directory, 1, (0.0, 1.0, 2.0, 1.0, 2.0, 3.0)),
@@ -189,7 +189,7 @@ if mode == "forged-result-digest":
                 result_digests.append(response["result_sha256"])
 
                 receipt = result["receipt"]
-                self.assertEqual(receipt["schema"], "wge.erosion-worker-receipt/v1")
+                self.assertEqual(receipt["schema"], "luxel.erosion-worker-receipt/v1")
                 self.assertEqual(receipt["job_index"], index + 1)
                 self.assertEqual(receipt["operation"], job["operation"])
                 self.assertEqual(receipt["worker_pid"], ready[0]["pid"])
@@ -202,14 +202,14 @@ if mode == "forged-result-digest":
             self.assertNotEqual(result_digests[0], result_digests[1])
 
     def assert_fake_worker_failure(self, mode: str, expected_code: str) -> None:
-        with tempfile.TemporaryDirectory(prefix=f"wge-fake-julia-{mode}-") as temporary:
+        with tempfile.TemporaryDirectory(prefix=f"luxel-fake-julia-{mode}-") as temporary:
             directory = Path(temporary)
             request, _output_path = self.flux_request(directory, 1, (0.0, 1.0, 2.0, 1.0, 2.0, 3.0))
             fake = self.fake_julia(directory, mode)
             completed = self.run_supervisor(
                 json.dumps(request, separators=(",", ":")) + "\n",
                 julia=str(fake),
-                env={"WGE_TEST_FAKE_MODE": mode},
+                env={"LUXEL_TEST_FAKE_MODE": mode},
             )
             self.assertNotEqual(completed.returncode, 0, completed.stdout)
             failures = [row for row in events(completed.stdout) if row.get("event") == "failure"]

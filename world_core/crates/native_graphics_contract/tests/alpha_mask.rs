@@ -4,7 +4,7 @@
 //! committed packet whose materials carry neither field. These tests pin the
 //! validation rules on the same committed packet.
 
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     AlphaMode, GraphicsScenePacketBody, canonical_json, seal_scene_packet, validate_scene_packet,
 };
 

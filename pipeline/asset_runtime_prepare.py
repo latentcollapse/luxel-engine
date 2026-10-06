@@ -1,6 +1,6 @@
 """Thin transport adapter for Rust-owned runtime asset preparation.
 
-This module locates and invokes ``wge-asset-contract prepare``. It does not
+This module locates and invokes ``luxel-asset-contract prepare``. It does not
 parse the receipt or apply any acceptance policy; callers receive the native
 process result unchanged.
 """
@@ -24,9 +24,9 @@ def prepare_asset_runtime(
     """Invoke Rust preparation and return its stdout, stderr, and exit status."""
 
     project_root = Path(__file__).resolve().parents[1]
-    native = executable or os.environ.get("WGE_ASSET_CONTRACT_BIN")
+    native = executable or os.environ.get("LUXEL_ASSET_CONTRACT_BIN")
     if native is None:
-        native = project_root / "world_core" / "target" / "debug" / "wge-asset-contract"
+        native = project_root / "world_core" / "target" / "debug" / "luxel-asset-contract"
 
     command: Sequence[str] = (
         str(native),

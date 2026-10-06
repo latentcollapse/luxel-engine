@@ -1,8 +1,8 @@
-# WGE Graphics Convergence Audit
+# Luxel Graphics Convergence Audit
 
 Status: **independent review, no implementation**, 2026-10-03
 Reviewer role: graphics / art-pipeline (external to the parity sprint)
-Question answered: *what must change before a human looks at a WGE frame and says "okay, this is actually beautiful"?*
+Question answered: *what must change before a human looks at a Luxel frame and says "okay, this is actually beautiful"?*
 
 Evidence tags used throughout:
 
@@ -270,7 +270,7 @@ Items 1–3 and 9 need no new rendering features beyond a sky shader and fog ter
 
 ## 6. Rendering versus world authoring
 
-WGE has a strong **authority chain**: `AssetPreparationReceipt → RuntimeAssetPackage → SceneObject → SceneArtifact → GraphicsScenePacket` (`docs/platform/scene-object-contract.md`). It has a **semantic facade** that lists `world.construct` and `scene.compose` but marks them planned/partial (`docs/content-sdk/semantic-facade-contract.md`). The renderer receives `mesh + material + transform`. Nothing in between knows what a tree, a road or a village is.
+Luxel has a strong **authority chain**: `AssetPreparationReceipt → RuntimeAssetPackage → SceneObject → SceneArtifact → GraphicsScenePacket` (`docs/platform/scene-object-contract.md`). It has a **semantic facade** that lists `world.construct` and `scene.compose` but marks them planned/partial (`docs/content-sdk/semantic-facade-contract.md`). The renderer receives `mesh + material + transform`. Nothing in between knows what a tree, a road or a village is.
 
 The missing layer is not an ontology. It is a small number of **placement grammars**: functions that take a semantic intent plus a few parameters and emit SceneObjects with correct ground contact, variation and density.
 
@@ -304,17 +304,17 @@ Rocks, props, individual trees, fences, debris, the shrine's own pieces. They be
 
 ## 7. The beauty target, stated correctly
 
-Witcher 3 and Elden Ring are not beautiful because of feature count. Both shipped on hardware and techniques that WGE's contract can mostly express. What they share:
+Witcher 3 and Elden Ring are not beautiful because of feature count. Both shipped on hardware and techniques that Luxel's contract can mostly express. What they share:
 
 1. **Every frame has a sky worth looking at.** Strong, art-directed skies with a light source you can locate, colour temperature contrast between sun and shade, and weather/time-of-day as mood. The sky is the largest region and gets the most authoring attention.
 2. **Atmosphere carries scale.** Aerial perspective pushes distant layers toward the sky colour, so the eye reads depth in planes: foreground, midground, background, sky. Elden Ring's Erdtree and Witcher's Skellige mountains are legible because of fog, not geometry detail.
-3. **Landmarks and sightlines.** Elden Ring is built around "see it, go there". A strong silhouette on the horizon, placed deliberately relative to the player's view. WGE has no concept of a sightline or a view-of-landmark.
+3. **Landmarks and sightlines.** Elden Ring is built around "see it, go there". A strong silhouette on the horizon, placed deliberately relative to the player's view. Luxel has no concept of a sightline or a view-of-landmark.
 4. **Density with hierarchy.** Witcher's ground is never empty: grass, flowers, rocks, debris. It is still organised: paths are clear, the landmark area is calmer. Density without hierarchy is noise.
 5. **Material credibility, not material complexity.** The surfaces are usually well-scanned or well-painted textures with consistent texel density and roughness that *contrasts between materials*. Wet stone reflects the sky. Metal reflects the environment. Nothing is cleverer than that.
 6. **Composition and value structure.** Dark foreground framing, a lit focal point, a recessive background. That is painterly organisation of light and dark, authored per vista.
 7. **Motion.** Wind in foliage, clouds, water, particles. A still Witcher frame is good; a moving one is alive.
 
-What WGE should **not** chase for this target: path tracing, virtual geometry, ray-traced GI, high-end SSS, hair systems, volumetric clouds with full multiple scattering. None of those is why those games are beautiful.
+What Luxel should **not** chase for this target: path tracing, virtual geometry, ray-traced GI, high-end SSS, hair systems, volumetric clouds with full multiple scattering. None of those is why those games are beautiful.
 
 The practical consequence: **beauty is an authoring problem on top of a modest, complete feature set**. The feature set is nearly complete: it lacks IBL, an analytic sky, aerial perspective, alpha masking and cascades. The authoring layer barely exists.
 
@@ -453,7 +453,7 @@ None of F is a renderer feature that doesn't already appear in E. **The differen
 
 1. **Reject `ab-hero3`.** In `artifacts/parity/REVIEW_SCORECARD.md`, mark B as **REJECTED**, answer Q-B1 "No", Q-B2 "broken specular (double-applied roughness), reads washed-out", Q-B3 "replaced by identity loss + UV smear; fix targeted the metric", and link this audit.
 2. **MD-1.** When `apply_hero_material_set` (or any absolute-value map) is applied, set the material's `roughness` factor to 1.0 and keep a hue-bearing albedo for coloured metals; or change the generator to emit multipliers. Add a test asserting effective roughness = authored map value ±0.02 for every remapped material.
-3. **MD-5.** Make `hero-materials` a content flag orthogonal to `WGE_PARITY_RENDER_POLICY`, so `full + hero` is renderable. Re-render only after items 2 and 4 land.
+3. **MD-5.** Make `hero-materials` a content flag orthogonal to `LUXEL_PARITY_RENDER_POLICY`, so `full + hero` is renderable. Re-render only after items 2 and 4 land.
 4. **MD-4.** Arc-length UVs for `append_band` (V proportional to band slant length, U proportional to circumference) and `torus_mesh`, scaled to a declared texels-per-metre target. Add a test computing texels/m along U and V per authored mesh, asserting ≤2:1.
 5. **MD-6.** Metallic values to 0.0 or 1.0 for all campaign2 materials (wet → 0.0).
 6. **World extent.** Extend the terrain (or add a skirt plus distant low-poly landforms) so that **no** campaign2 camera sees the terrain edge. Gate: `void_fraction = 0` per view (new measurement: pixels below the horizon that are not terrain or geometry).

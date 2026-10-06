@@ -19,7 +19,7 @@ pub const MAX_FRAME_BYTES: usize = 1_000_000;
 const STDERR_TAIL_BYTES: usize = 8_192;
 const EROSION_REQUEST_SCHEMA: &str = "codeweald.erosion-request/v1";
 const EROSION_RESULT_SCHEMA: &str = "codeweald.erosion-result/v1";
-pub const EROSION_WRAPPER_VERSION: &str = "wge.erosion-worker/v1";
+pub const EROSION_WRAPPER_VERSION: &str = "luxel.erosion-worker/v1";
 
 static TEMP_SCRIPT_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -339,7 +339,7 @@ pub fn run_erosion_supervisor<R: BufRead>(
             "request_sha256": request_sha256,
             "response_sha256": response_sha256,
             "result_sha256": result_sha256,
-            "schema": "wge.erosion-worker-receipt/v1",
+            "schema": "luxel.erosion-worker-receipt/v1",
             "script_sha256": current.script_sha256,
             "solver_image": current.solver_image,
             "worker_pid": current.pid
@@ -954,10 +954,10 @@ fn make_erosion_driver(
     let driver = format!(
         r#"
 
-const _WGE_SCRIPT_SHA256 = "{script_sha256}"
-const _WGE_PROJECT_SHA256 = "{project_sha256}"
+const _LUXEL_SCRIPT_SHA256 = "{script_sha256}"
+const _LUXEL_PROJECT_SHA256 = "{project_sha256}"
 
-function _wge_read_frame(io::IO)
+function _luxel_read_frame(io::IO)
     header = read(io, 4)
     isempty(header) && return nothing
     length(header) == 4 || error("truncated frame header")
@@ -968,7 +968,7 @@ function _wge_read_frame(io::IO)
     return payload
 end
 
-function _wge_write_frame(io::IO, payload::AbstractString)
+function _luxel_write_frame(io::IO, payload::AbstractString)
     bytes = Vector{{UInt8}}(codeunits(payload))
     n = length(bytes)
     header = UInt8[UInt8((n >> 24) & 0xff), UInt8((n >> 16) & 0xff), UInt8((n >> 8) & 0xff), UInt8(n & 0xff)]
@@ -978,10 +978,10 @@ function _wge_write_frame(io::IO, payload::AbstractString)
     return nothing
 end
 
-_wge_write_frame(stdout, JSON3.write(Dict("op" => "ready", "script_sha256" => _WGE_SCRIPT_SHA256, "project_sha256" => _WGE_PROJECT_SHA256)))
+_luxel_write_frame(stdout, JSON3.write(Dict("op" => "ready", "script_sha256" => _LUXEL_SCRIPT_SHA256, "project_sha256" => _LUXEL_PROJECT_SHA256)))
 while true
     payload = try
-        _wge_read_frame(stdin)
+        _luxel_read_frame(stdin)
     catch error
         println(stderr, "worker frame rejected: ", sprint(showerror, error))
         break
@@ -993,13 +993,13 @@ while true
         code = error isa ErosionWorkerError ? error.code : "invalid_request"
         Dict("schema" => EROSION_RESULT_SCHEMA, "status" => "error", "error" => Dict("code" => code, "message" => sprint(showerror, error)))
     end
-    _wge_write_frame(stdout, JSON3.write(response))
+    _luxel_write_frame(stdout, JSON3.write(response))
 end
 "#
     );
     let body = body.trim_end();
     let driver_path = std::env::temp_dir().join(format!(
-        "wge-erosion-worker-{}-{}-{}.jl",
+        "luxel-erosion-worker-{}-{}-{}.jl",
         std::process::id(),
         TEMP_SCRIPT_COUNTER.fetch_add(1, Ordering::Relaxed),
         &script_sha256[..16]
@@ -1038,7 +1038,7 @@ fn file_digest(path: &Path, code: &str) -> Result<String, KernelFailure> {
 pub fn project_digest(project: &Path, manifest: &Path) -> Result<String, KernelFailure> {
     let mut hasher = sha2::Sha256::new();
     use sha2::Digest;
-    hasher.update(b"wge.julia-project/v0\0");
+    hasher.update(b"luxel.julia-project/v0\0");
     for path in [project, manifest] {
         let bytes = fs::read(path).map_err(|error| {
             KernelFailure::provenance(
@@ -1086,7 +1086,7 @@ pub fn solver_image(
         project,
         manifest,
         julia_version,
-        b"wge.worker-protocol/v0",
+        b"luxel.worker-protocol/v0",
     )
 }
 

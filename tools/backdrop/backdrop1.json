@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.backdrop-spec/v1",
+  "schema_version": "luxel.backdrop-spec/v1",
   "set_id": "backdrop1",
   "gaea": {
     "graph": "tools/backdrop/backdrop1.terrain",

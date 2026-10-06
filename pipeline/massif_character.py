@@ -1,6 +1,6 @@
 """What *kind* of mountains a world has (systems roadmap S18).
 
-Every landform in WGE has been the same shape at different scales: smooth
+Every landform in Luxel has been the same shape at different scales: smooth
 fractal noise, jittered. That produces hills. It does not produce the Alps,
 because Alpine form is not a noise function -- it is the signature of a
 particular erosion history, and so is every other range worth naming.

@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.collision-plan/v1",
+  "schema_version": "luxel.collision-plan/v1",
   "world_id": "gate-run",
   "terrain_collision": {"kind": "heightfield", "source": "terrain"},
   "colliders": [

@@ -1,14 +1,14 @@
-# WGE Authority Reclamation Audit
+# Luxel Authority Reclamation Audit
 
 Status: complete audit baseline
 
 Date: 2026-09-27
 
-Scope: Python authority in the WGE runtime and development pipeline
+Scope: Python authority in the Luxel runtime and development pipeline
 
 ## Executive finding
 
-Python is load-bearing in WGE today. That is not because Python is present, or
+Python is load-bearing in Luxel today. That is not because Python is present, or
 because a Python file happens to be large. It is because Python currently owns
 several decisions that must become durable, typed, deterministic engine
 authority:
@@ -35,7 +35,7 @@ define canonical semantics, acceptance, identity, or numerical world state.
 
 ## Ground truth used
 
-This inventory is based on the current WGE checkout, not on the roadmap alone.
+This inventory is based on the current Luxel checkout, not on the roadmap alone.
 The relevant architectural statements are in README.md:
 
 - Authoring DSL: Python-shaped, parsed and never executed.
@@ -43,7 +43,7 @@ The relevant architectural statements are in README.md:
 - Contracts and identity: Rust.
 - Solvers: Julia.
 - Legacy external-engine adapters and Bevy inspection remain compatibility
-  surfaces; the native WGE runtime is the current delivery path.
+  surfaces; the native Luxel runtime is the current delivery path.
 
 The production choke point is pipeline/build_zone.py. It imports and orders
 most of the pipeline, invokes Julia workers, invokes the Rust worldspec
@@ -145,16 +145,16 @@ written by Blender.
 | Module | LOC | Current authority | Disposition | Target | Priority |
 | --- | ---: | --- | --- | --- | --- |
 | pipeline/worldbuilder_dsl.py | 786 | Defines the Python-shaped authoring surface and its lowering behavior | Reclaim with compatibility facade | Rust parser/AST/lowering; Python surface may emit the same wire format | P0 |
-| pipeline/wge_language_kernel.py | 494 | Parses source and exposes language-kernel semantics | Reclaim | Rust language kernel | P0 |
-| pipeline/wge_semantic_ir.py | 195 | Defines canonical intermediate representation and normalization | Reclaim | Rust semantic IR and canonicalization | P0 |
+| pipeline/luxel_language_kernel.py | 494 | Parses source and exposes language-kernel semantics | Reclaim | Rust language kernel | P0 |
+| pipeline/luxel_semantic_ir.py | 195 | Defines canonical intermediate representation and normalization | Reclaim | Rust semantic IR and canonicalization | P0 |
 | pipeline/zone_compiler.py | 1334 | Converts reviewed annotations and inputs into ZoneSpec | Reclaim | Rust semantic compiler | P0 |
 | pipeline/zone_acceptance.py | 629 | Composes acceptance gates and decides whether a zone is promotable | Reclaim | Rust gate graph and promotion policy | P0 |
 | pipeline/concept_batch_intake.py | 290 | Ingests concept batches, source roles, and annotation inputs | Split | Python file/provider IO; Rust source records and intake semantics | P1 |
 | pipeline/image_reconciliation.py | 153 | Assigns image roles and reconciles concept evidence | Reclaim | Rust evidence graph and reconciliation policy; Python codec/provider glue | P1 |
 | pipeline/derive_arena_annotations.py | 407 | Derives semantic annotations from image and authored evidence | Reclaim | Rust typed annotation derivation; provider output remains external evidence | P1 |
-| pipeline/vision_annotation_adapter.py | 199 | Adapts vision-provider output into WGE annotations | Split | Python provider protocol; Rust claim validation and promotion | P1 |
+| pipeline/vision_annotation_adapter.py | 199 | Adapts vision-provider output into Luxel annotations | Split | Python provider protocol; Rust claim validation and promotion | P1 |
 | pipeline/zone_runtime_effects.py | 83 | Defines runtime effect intent for a compiled zone | Reclaim | Rust runtime-effect contract | P1 |
-| pipeline/wge_critic.py | 624 | Audits metrics and emits repair suggestions | Fence as tooling | Rust registered repair classes consume the suggestions; Python remains an audit UI/tool | P2 |
+| pipeline/luxel_critic.py | 624 | Audits metrics and emits repair suggestions | Fence as tooling | Rust registered repair classes consume the suggestions; Python remains an audit UI/tool | P2 |
 
 The Python-shaped DSL is not itself a mistake. It is the model ergonomics
 layer. The mistake would be allowing the convenience frontend to be the only
@@ -224,7 +224,7 @@ threshold, gate identity, and final receipt.
 | pipeline/zone_to_unreal.py | 129 | Emits Unreal import/manifest artifacts | Fence as adapter | Unreal adapter; Rust supplies canonical manifest | P3 |
 | pipeline/unreal_artifacts.py | 62 | Packages Unreal artifacts | Fence as adapter | Unreal packaging adapter | P3 |
 | pipeline/tool_provenance.py | 43 | Records tool versions and hashes | Reclaim | Rust provenance/receipt records; Python may collect raw versions | P1 |
-| pipeline/wge_kernel_demo.py | 96 | Demonstrates the semantic kernel through a Python CLI | Fence or retire | Rust CLI demo; retain Python only as an example harness | P3 |
+| pipeline/luxel_kernel_demo.py | 96 | Demonstrates the semantic kernel through a Python CLI | Fence or retire | Rust CLI demo; retain Python only as an example harness | P3 |
 
 The orchestrator is P0 because it is the current authority boundary, but it
 should be migrated last among the P0 items. Replacing it before the contracts
@@ -277,7 +277,7 @@ it is a semantic owner, a numerical worker, or an adapter.
 
 ### Slice 1: semantic kernel and DSL compatibility
 
-Move wge_semantic_ir.py, wge_language_kernel.py, and the semantic core of
+Move luxel_semantic_ir.py, luxel_language_kernel.py, and the semantic core of
 worldbuilder_dsl.py into Rust. Keep a Python-shaped compatibility facade that
 serializes the same requests. Then move the semantic portion of
 zone_compiler.py.
@@ -369,7 +369,7 @@ beautiful Rust/Julia shell around still-implicit Python semantics.
 
 ## Audit conclusion
 
-The diagnosis is confirmed: Python has become partially load-bearing in WGE,
+The diagnosis is confirmed: Python has become partially load-bearing in Luxel,
 but it is not universally a tumor. Thirty-two P0/P1 modules are direct
 authority that should be reclaimed by Rust or Julia, nineteen P2 modules need a
 contract split, and twenty-seven P3 modules are valuable integration surface

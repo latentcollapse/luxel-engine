@@ -1,4 +1,4 @@
-# WGE CONVERGE-1 Contracts
+# Luxel CONVERGE-1 Contracts
 
 Status: **CONVERGE-1 CLOSED, 2026-10-04.** N-1, CALIBRATION-1 and N-2 implemented,
 human acceptance met for all three; measured shortfalls and carried items in
@@ -21,7 +21,7 @@ CONVERGE-0 human review has answered "what does your eye hit first?"
 ## 1. N-1 — Sky and atmosphere (remainder)
 
 > **Status: IMPLEMENTED (2026-10-04), human acceptance open.** Arm `converge1`
-> (`WGE_PARITY_RENDER_POLICY=converge1`, converge0 content). Measured: sun-side
+> (`LUXEL_PARITY_RENDER_POLICY=converge1`, converge0 content). Measured: sun-side
 > horizon 2.72x the anti-sun horizon (target >= 1.15x, met); backdrop/foreground
 > contrast ratio 0.65 (target <= 0.40, NOT met; converge0 measures 1.21). Null,
 > `full` and converge0 render byte-identical to before (9/9 views). Edge
@@ -61,14 +61,14 @@ CONVERGE-0 human review has answered "what does your eye hit first?"
 - **Policy axis:** `render_policy.atmosphere { height_falloff_milli_per_m,
   density_at_ground_bp, sun_scatter_gain_bp }`. Absent = linear fog, byte-identical.
   Bounds stated in `render_policy.rs`, mirrored and `_exact_keys`-checked in
-  `WGEGraphics.jl`.
+  `LuxelGraphics.jl`.
 - **Sky model:** extend `SkyPolicy` with `model: gradient | analytic { turbidity_milli }`.
   `gradient` stays the default so CONVERGE-0 packets keep their bytes.
 - **One function:** the analytic sky must also drive ambient
   (`_environment_color`), or the sky the eye sees and the light the materials get
   diverge again.
 - **Permitted files:** `render_policy.rs`, `lib.rs` (candidate arms only),
-  `WGEGraphics.jl`, `LavaAdapter.jl`, `tests/render_policy.rs`,
+  `LuxelGraphics.jl`, `LavaAdapter.jl`, `tests/render_policy.rs`,
   `tests/converge0.rs` (or a new `tests/converge1.rs`), `graphics_lab/test/render_policy.jl`.
 - **Tests:** absent axes byte-identical (null and `full` renders vs frozen /
   HEAD renderer, as CONVERGE-0 did); bounds; Julia unknown-key refusal.
@@ -85,7 +85,7 @@ CONVERGE-0 human review has answered "what does your eye hit first?"
   { turbidity_milli in [2000, 10000] }`, absent = gradient, key omitted) and
   `RenderPolicy.atmosphere: Option<AtmospherePolicy>` (k in [0, 1000] milli/m,
   σ₀ in [0, 1000] bp/m, sun gain in [0, 20000] bp). Atmosphere requires `sky`.
-  Mirrored and `_exact_keys`-checked in `WGEGraphics.jl`. `Gradient` is an
+  Mirrored and `_exact_keys`-checked in `LuxelGraphics.jl`. `Gradient` is an
   empty struct variant because serde ignores `deny_unknown_fields` on unit
   variants of internally tagged enums (a test caught `{"kind":"gradient",
   "turbidity_milli":3000}` being accepted).
@@ -190,7 +190,7 @@ gradient at different brightness.
   `irradiance(n) × albedo × (1 − F)·(1 − metal)` and
   `prefiltered(r, roughness) × (F0 × A + B)`, multiplied by AO.
 - **Permitted files:** a new `ibl.rs` in `native_graphics_contract`,
-  `render_policy.rs`, `lib.rs`, `WGEGraphics.jl`, `LavaAdapter.jl`, tests.
+  `render_policy.rs`, `lib.rs`, `LuxelGraphics.jl`, `LavaAdapter.jl`, tests.
 - **Tests:** bake determinism (bit-identical across runs); white-furnace test
   (a white environment on a white rough dielectric sphere returns ≈ albedo,
   ±3%); energy test (metal sphere reflectance never exceeds F0 × environment);
@@ -272,7 +272,7 @@ normal incidence.
    equal fix-only, 9/9 IBL calibration frames reproduce run3.
 
 **Recorded, not changed:** the supervisor's authorized-projection check reads
-`WGE_PARITY_RENDER_POLICY` / `WGE_PARITY_CONTENT` from the process
+`LUXEL_PARITY_RENDER_POLICY` / `LUXEL_PARITY_CONTENT` from the process
 environment, so a leftover export makes an unrelated `render-calibration`
 fail authorization (seen once in a test script). Authorization should take
 the parity arm as an explicit input, as lowering already does.
@@ -343,7 +343,7 @@ all four maps (≈ 213 MB) does not.
 
 ### Contract
 
-- **Owner layer:** WGE. **Permitted files:** a new `tools/fetch_calibration_materials.py`
+- **Owner layer:** Luxel. **Permitted files:** a new `tools/fetch_calibration_materials.py`
   (download + manifest + resize), a new `tools/build_calibration_glb.py`
   (geometry + glTF PBR materials; arc-length/metric UVs at 1 repeat / 1 m),
   a calibration-rig seam in `scene_composition.rs` (typed `CalibrationRig`
@@ -537,7 +537,7 @@ Findings:
   LOD, which would have stripped the layers' mips (the layered path builds its
   own sampler; the latent cache issue is recorded, not changed); a converge0
   render took 15 min in the debug binary (authorization now re-lowers only the
-  named view; `WGE_PARITY_BIN` selects a release binary, proven byte-identical
+  named view; `LUXEL_PARITY_BIN` selects a release binary, proven byte-identical
   on the null arm: 190 s).
 
 ### Residuals (not blocking, for review)

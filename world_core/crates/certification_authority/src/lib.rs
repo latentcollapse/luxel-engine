@@ -1,4 +1,4 @@
-//! Independent Rust authority for WGE certification receipts.
+//! Independent Rust authority for Luxel certification receipts.
 //!
 //! A producer name and a `pass` string never grant authority. Each receipt is
 //! checked against a closed native validator registration, the pinned
@@ -13,12 +13,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-pub use wge_intake_repair_contract as repair_contract;
+pub use luxel_intake_repair_contract as repair_contract;
 
-pub const REQUEST_SCHEMA: &str = "wge.certification-request/v1";
-pub const ENVELOPE_SCHEMA: &str = "wge.certification-receipt-envelope/v1";
-pub const REPORT_SCHEMA: &str = "wge.certification-report/v1";
-pub const NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA: &str = "wge.visual-quality-receipt/v1";
+pub const REQUEST_SCHEMA: &str = "luxel.certification-request/v1";
+pub const ENVELOPE_SCHEMA: &str = "luxel.certification-receipt-envelope/v1";
+pub const REPORT_SCHEMA: &str = "luxel.certification-report/v1";
+pub const NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA: &str = "luxel.visual-quality-receipt/v1";
 pub const NATIVE_GRAPHICS_PACKET_KIND: &str = "native_graphics_scene_packet";
 pub const NATIVE_GRAPHICS_FRAME_RECEIPT_KIND: &str = "native_graphics_frame_receipt";
 pub const NATIVE_GRAPHICS_RENDERER_ATTESTATION_KIND: &str = "native_graphics_renderer_attestation";
@@ -165,7 +165,7 @@ pub fn candidate_identity_bytes(candidate: &CandidateContext) -> Result<Vec<u8>,
         })
         .collect::<Vec<_>>();
     let manifest = serde_json::json!({
-        "schema_version": "wge.candidate-identity/v1",
+        "schema_version": "luxel.candidate-identity/v1",
         "project_id": candidate.project_id,
         "snapshot_id": candidate.snapshot_id,
         "artifacts": artifacts,
@@ -285,33 +285,33 @@ pub struct ValidatorRegistry {
 }
 
 impl ValidatorRegistry {
-    pub fn wge_engine_neutral_v1() -> Self {
+    pub fn luxel_engine_neutral_v1() -> Self {
         let definitions = [
             (
-                "wge.validator.semantic-spec/v1",
+                "luxel.validator.semantic-spec/v1",
                 "semantic",
-                "wge.semantic-receipt/v1",
+                "luxel.semantic-receipt/v1",
                 ValidatorKind::Semantic,
                 vec![ReceiptStatus::Pass, ReceiptStatus::Fail],
             ),
             (
-                "wge.validator.world-traversal/v1",
+                "luxel.validator.world-traversal/v1",
                 "world",
-                "wge.world-receipt/v1",
+                "luxel.world-receipt/v1",
                 ValidatorKind::World,
                 vec![ReceiptStatus::Pass, ReceiptStatus::Fail],
             ),
             (
-                "wge.validator.gameplay-replay/v1",
+                "luxel.validator.gameplay-replay/v1",
                 "gameplay",
-                "wge.gameplay-receipt/v1",
+                "luxel.gameplay-receipt/v1",
                 ValidatorKind::Gameplay,
                 vec![ReceiptStatus::Pass, ReceiptStatus::Fail],
             ),
             (
-                "wge.validator.asset-preparation/v1",
+                "luxel.validator.asset-preparation/v1",
                 "asset",
-                "wge.asset-receipt/v1",
+                "luxel.asset-receipt/v1",
                 ValidatorKind::Asset,
                 vec![
                     ReceiptStatus::Pass,
@@ -320,16 +320,16 @@ impl ValidatorRegistry {
                 ],
             ),
             (
-                "wge.validator.visual-reference/v1",
+                "luxel.validator.visual-reference/v1",
                 "visual",
-                "wge.visual-receipt/v1",
+                "luxel.visual-receipt/v1",
                 ValidatorKind::Visual,
                 vec![ReceiptStatus::Pass, ReceiptStatus::Fail],
             ),
             (
-                "wge.validator.visual-quality/v1",
+                "luxel.validator.visual-quality/v1",
                 "visual_quality",
-                "wge.visual-quality-receipt/v1",
+                "luxel.visual-quality-receipt/v1",
                 ValidatorKind::VisualQuality,
                 vec![
                     ReceiptStatus::Pass,
@@ -338,16 +338,16 @@ impl ValidatorRegistry {
                 ],
             ),
             (
-                "wge.validator.evidence-repair/v1",
+                "luxel.validator.evidence-repair/v1",
                 "repair",
-                "wge.repair-receipt/v1",
+                "luxel.repair-receipt/v1",
                 ValidatorKind::Repair,
                 vec![ReceiptStatus::Pass, ReceiptStatus::Fail],
             ),
             (
-                "wge.validator.rigging-deferred/v1",
+                "luxel.validator.rigging-deferred/v1",
                 "rigging",
-                "wge.deferred-receipt/v1",
+                "luxel.deferred-receipt/v1",
                 ValidatorKind::Deferred,
                 vec![ReceiptStatus::Indeterminate],
             ),
@@ -374,12 +374,12 @@ impl ValidatorRegistry {
         Self { entries, digest }
     }
 
-    pub fn wge_native_mvp_v1() -> Self {
-        let mut registry = Self::wge_engine_neutral_v1();
+    pub fn luxel_native_mvp_v1() -> Self {
+        let mut registry = Self::luxel_engine_neutral_v1();
         let descriptor = ValidatorDescriptor {
-            validator_id: "wge.validator.rigging-runtime-preparation/v1".into(),
+            validator_id: "luxel.validator.rigging-runtime-preparation/v1".into(),
             gate_id: "rigging".into(),
-            receipt_schema: "wge.rigging-receipt/v1".into(),
+            receipt_schema: "luxel.rigging-receipt/v1".into(),
             revision: 1,
             accepted_statuses: vec![ReceiptStatus::Pass, ReceiptStatus::Fail],
         };
@@ -413,7 +413,7 @@ impl ValidatorRegistry {
 }
 
 pub fn engine_neutral_gate_profile() -> Vec<GateRequirement> {
-    ValidatorRegistry::wge_engine_neutral_v1()
+    ValidatorRegistry::luxel_engine_neutral_v1()
         .descriptors()
         .into_iter()
         .map(|descriptor| GateRequirement {
@@ -432,10 +432,10 @@ pub fn engine_neutral_gate_profile() -> Vec<GateRequirement> {
 /// Strict native MVP profile. The prior engine-neutral profile remains
 /// unchanged and continues to leave rigging indeterminate.
 pub fn native_mvp_gate_profile() -> Vec<GateRequirement> {
-    let registry = ValidatorRegistry::wge_native_mvp_v1();
+    let registry = ValidatorRegistry::luxel_native_mvp_v1();
     let mut gates = engine_neutral_gate_profile();
     let rigging = registry
-        .descriptor("wge.validator.rigging-runtime-preparation/v1")
+        .descriptor("luxel.validator.rigging-runtime-preparation/v1")
         .expect("native rigging validator is registered");
     let requirement = gates
         .iter_mut()
@@ -459,7 +459,7 @@ fn registry_digest(entries: &BTreeMap<String, RegisteredValidator>) -> String {
         })
         .collect::<Vec<_>>();
     let manifest = serde_json::json!({
-        "schema_version": "wge.certification-validator-registry/v2",
+        "schema_version": "luxel.certification-validator-registry/v2",
         "validators": validators,
     });
     sha256_prefixed(canonical_json(&manifest).as_bytes())
@@ -499,7 +499,7 @@ pub fn validate_repair_bridge(
     bytes: &[u8],
 ) -> Result<repair_contract::ValidatedNativeReceipt, repair_contract::ContractError> {
     let bridge: RepairReceiptBridge = repair_contract::parse_json(bytes)?;
-    if bridge.schema_version != "wge.certification-native-repair-bridge/v1"
+    if bridge.schema_version != "luxel.certification-native-repair-bridge/v1"
         || sha256_prefixed(&bridge.raw_receipt_bytes) != bridge.raw_receipt_sha256
     {
         return Err(repair_contract::ContractError::Provenance(
@@ -636,16 +636,16 @@ pub fn repair_validator_registry()
 -> Result<repair_contract::NativeValidatorRegistry, AuthorityError> {
     let mut registry = repair_contract::NativeValidatorRegistry::new();
     for (validator, schema) in [
-        ("wge.validator.semantic-spec/v1", "wge.semantic-receipt/v1"),
-        ("wge.validator.world-traversal/v1", "wge.world-receipt/v1"),
+        ("luxel.validator.semantic-spec/v1", "luxel.semantic-receipt/v1"),
+        ("luxel.validator.world-traversal/v1", "luxel.world-receipt/v1"),
         (
-            "wge.validator.gameplay-replay/v1",
-            "wge.gameplay-receipt/v1",
+            "luxel.validator.gameplay-replay/v1",
+            "luxel.gameplay-receipt/v1",
         ),
-        ("wge.validator.asset-preparation/v1", "wge.asset-receipt/v1"),
-        ("wge.validator.visual-reference/v1", "wge.visual-receipt/v1"),
+        ("luxel.validator.asset-preparation/v1", "luxel.asset-receipt/v1"),
+        ("luxel.validator.visual-reference/v1", "luxel.visual-receipt/v1"),
         (
-            "wge.validator.visual-quality/v1",
+            "luxel.validator.visual-quality/v1",
             NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA,
         ),
     ] {
@@ -706,7 +706,7 @@ fn native_bridge_bytes(
         }],
     };
     let bridge = RepairReceiptBridge {
-        schema_version: "wge.certification-native-repair-bridge/v1".into(),
+        schema_version: "luxel.certification-native-repair-bridge/v1".into(),
         raw_receipt_sha256: sha256_prefixed(&raw_receipt_bytes),
         raw_receipt_bytes,
         native,
@@ -751,7 +751,7 @@ pub fn validate_request(
     for envelope in request
         .receipts
         .iter()
-        .filter(|receipt| receipt.validator_id != "wge.validator.evidence-repair/v1")
+        .filter(|receipt| receipt.validator_id != "luxel.validator.evidence-repair/v1")
     {
         let candidate = find_candidate(envelope, &candidates)?;
         let registered = validate_envelope(envelope, candidate, registry)?;
@@ -783,7 +783,7 @@ pub fn validate_request(
     for envelope in request
         .receipts
         .iter()
-        .filter(|receipt| receipt.validator_id == "wge.validator.evidence-repair/v1")
+        .filter(|receipt| receipt.validator_id == "luxel.validator.evidence-repair/v1")
     {
         let candidate = find_candidate(envelope, &candidates)?;
         let registered = validate_envelope(envelope, candidate, registry)?;
@@ -1380,7 +1380,7 @@ pub fn receipt_id(envelope: &ReceiptEnvelope) -> Result<String, AuthorityError> 
         .ok_or_else(|| AuthorityError::new("malformed", "receipt envelope is not an object"))?
         .remove("receipt_id");
     Ok(format!(
-        "wge_receipt_{}",
+        "luxel_receipt_{}",
         sha256_hex(canonical_json(&value).as_bytes())
     ))
 }
@@ -1393,7 +1393,7 @@ fn report_id(report: &ValidationReport) -> Result<String, AuthorityError> {
         .ok_or_else(|| AuthorityError::new("malformed", "report is not an object"))?
         .remove("report_id");
     Ok(format!(
-        "wge_cert_{}",
+        "luxel_cert_{}",
         sha256_hex(canonical_json(&value).as_bytes())
     ))
 }
@@ -1464,14 +1464,14 @@ mod identity_tests {
 
     #[test]
     fn registry_and_envelope_ids_are_deterministic_and_content_sensitive() {
-        let registry = ValidatorRegistry::wge_engine_neutral_v1();
+        let registry = ValidatorRegistry::luxel_engine_neutral_v1();
         assert_eq!(
             registry.digest(),
-            ValidatorRegistry::wge_engine_neutral_v1().digest()
+            ValidatorRegistry::luxel_engine_neutral_v1().digest()
         );
         assert_ne!(
             registry.digest(),
-            ValidatorRegistry::wge_native_mvp_v1().digest(),
+            ValidatorRegistry::luxel_native_mvp_v1().digest(),
             "the rigging-capable registry must have a distinct identity"
         );
         let mut envelope = ReceiptEnvelope {
@@ -1481,8 +1481,8 @@ mod identity_tests {
             snapshot_id: "s".into(),
             candidate_sha256: sha256_prefixed(b"candidate"),
             gate_id: "rigging".into(),
-            validator_id: "wge.validator.rigging-deferred/v1".into(),
-            receipt_schema: "wge.deferred-receipt/v1".into(),
+            validator_id: "luxel.validator.rigging-deferred/v1".into(),
+            receipt_schema: "luxel.deferred-receipt/v1".into(),
             status: ReceiptStatus::Indeterminate,
             producer: "test".into(),
             observed_input_sha256: String::new(),
@@ -1503,11 +1503,11 @@ mod identity_tests {
 
     #[test]
     fn registry_digest_commits_to_the_registered_validator_implementation_kind() {
-        let registry = ValidatorRegistry::wge_engine_neutral_v1();
+        let registry = ValidatorRegistry::luxel_engine_neutral_v1();
         let original = registry_digest(&registry.entries);
         let mut substituted = registry.entries.clone();
         substituted
-            .get_mut("wge.validator.world-traversal/v1")
+            .get_mut("luxel.validator.world-traversal/v1")
             .expect("world validator is registered")
             .kind = ValidatorKind::Visual;
 
@@ -1520,14 +1520,14 @@ mod identity_tests {
 
     #[test]
     fn registry_digest_commits_to_the_lookup_key() {
-        let registry = ValidatorRegistry::wge_engine_neutral_v1();
+        let registry = ValidatorRegistry::luxel_engine_neutral_v1();
         let original = registry_digest(&registry.entries);
         let mut rekeyed = registry.entries.clone();
         let registration = rekeyed
-            .remove("wge.validator.world-traversal/v1")
+            .remove("luxel.validator.world-traversal/v1")
             .expect("world validator is registered");
         rekeyed.insert(
-            "wge.validator.world-traversal-alias/v1".into(),
+            "luxel.validator.world-traversal-alias/v1".into(),
             registration,
         );
 
@@ -1540,12 +1540,12 @@ mod identity_tests {
 
     #[test]
     fn validator_lookup_key_must_match_the_registered_descriptor_id() {
-        let mut registry = ValidatorRegistry::wge_engine_neutral_v1();
+        let mut registry = ValidatorRegistry::luxel_engine_neutral_v1();
         let registration = registry
             .entries
-            .remove("wge.validator.world-traversal/v1")
+            .remove("luxel.validator.world-traversal/v1")
             .expect("world validator is registered");
-        let alias = "wge.validator.world-traversal-alias/v1";
+        let alias = "luxel.validator.world-traversal-alias/v1";
         registry.entries.insert(alias.into(), registration);
         registry.digest = registry_digest(&registry.entries);
 
@@ -1571,7 +1571,7 @@ mod identity_tests {
             candidate_sha256: candidate.candidate_sha256.clone(),
             gate_id: "world".into(),
             validator_id: alias.into(),
-            receipt_schema: "wge.world-receipt/v1".into(),
+            receipt_schema: "luxel.world-receipt/v1".into(),
             status: ReceiptStatus::Pass,
             producer: "untrusted".into(),
             observed_input_sha256: String::new(),
@@ -1602,8 +1602,8 @@ mod identity_tests {
             snapshot_id: "snapshot".into(),
             candidate_sha256: sha256_prefixed(b"candidate"),
             gate_id: "world".into(),
-            validator_id: "wge.validator.world-traversal/v1".into(),
-            receipt_schema: "wge.world-receipt/v1".into(),
+            validator_id: "luxel.validator.world-traversal/v1".into(),
+            receipt_schema: "luxel.world-receipt/v1".into(),
             status: ReceiptStatus::Pass,
             producer: "test".into(),
             observed_input_sha256: sha256_prefixed(b"input"),
@@ -1633,7 +1633,7 @@ mod identity_tests {
             snapshot_id: "snapshot".into(),
             candidate_sha256: sha256_prefixed(b"candidate"),
             gate_id: "visual_quality".into(),
-            validator_id: "wge.validator.visual-quality/v1".into(),
+            validator_id: "luxel.validator.visual-quality/v1".into(),
             receipt_schema: NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA.into(),
             status: ReceiptStatus::Pass,
             producer: "test".into(),

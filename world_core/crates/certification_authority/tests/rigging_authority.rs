@@ -3,9 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
-use wge_asset_contract::{AssetPreparationRequest, inspect_glb, prepare_asset};
-use wge_certification_authority::schema::RiggingReceiptPayload;
-use wge_certification_authority::{
+use luxel_asset_contract::{AssetPreparationRequest, inspect_glb, prepare_asset};
+use luxel_certification_authority::schema::RiggingReceiptPayload;
+use luxel_certification_authority::{
     ArtifactBytes, CandidateContext, EvidenceBinding, ReceiptEnvelope, ReceiptStatus,
     ValidatorRegistry, candidate_identity, native_mvp_gate_profile, sha256_prefixed,
     validate_receipt,
@@ -80,10 +80,10 @@ fn good_glb() -> Vec<u8> {
     let primitive =
         json!({"attributes":{"POSITION":0,"JOINTS_0":2,"WEIGHTS_0":3},"indices":1,"mode":4});
     let document = json!({
-        "asset":{"version":"2.0","generator":"wge-certification-control"},"scene":0,
+        "asset":{"version":"2.0","generator":"luxel-certification-control"},"scene":0,
         "scenes":[{"nodes":[0,3,4]}],
         "nodes":[{"name":"root","children":[1]},{"name":"hand_r","children":[2]},
-          {"name":"weapon_mount","extras":{"wge_socket":true}},
+          {"name":"weapon_mount","extras":{"luxel_socket":true}},
           {"name":"body_lod0_node","mesh":0,"skin":0},{"name":"body_lod1_node","mesh":1,"skin":0}],
         "meshes":[{"name":"body_lod0","primitives":[primitive]},{"name":"body_lod1","primitives":[primitive]}],
         "skins":[{"name":"humanoid","inverseBindMatrices":4,"skeleton":0,"joints":[0,1]}],
@@ -161,8 +161,8 @@ fn envelope(
     payload: Value,
     status: ReceiptStatus,
 ) -> ReceiptEnvelope {
-    let registry = ValidatorRegistry::wge_native_mvp_v1();
-    let descriptor = registry.descriptor("wge.validator.rigging-runtime-preparation/v1");
+    let registry = ValidatorRegistry::luxel_native_mvp_v1();
+    let descriptor = registry.descriptor("luxel.validator.rigging-runtime-preparation/v1");
     let descriptor = descriptor.unwrap().clone();
     let evidence = ["hero-glb", "hero-request", "hero-preparation"]
         .into_iter()
@@ -176,7 +176,7 @@ fn envelope(
         })
         .collect();
     let mut receipt = ReceiptEnvelope {
-        schema_version: "wge.certification-receipt-envelope/v1".into(),
+        schema_version: "luxel.certification-receipt-envelope/v1".into(),
         receipt_id: String::new(),
         project_id: candidate.project_id.clone(),
         snapshot_id: candidate.snapshot_id.clone(),
@@ -205,7 +205,7 @@ fn payload() -> Value {
 
 #[test]
 fn native_mvp_profile_promotes_rigging_while_engine_neutral_keeps_it_deferred() {
-    use wge_certification_authority::{DEFERRED_GATES, engine_neutral_gate_profile};
+    use luxel_certification_authority::{DEFERRED_GATES, engine_neutral_gate_profile};
     let engine_neutral = engine_neutral_gate_profile();
     let old_rigging = engine_neutral
         .iter()
@@ -213,7 +213,7 @@ fn native_mvp_profile_promotes_rigging_while_engine_neutral_keeps_it_deferred() 
         .unwrap();
     assert_eq!(
         old_rigging.disposition,
-        wge_certification_authority::GateDisposition::DeferredIndeterminate
+        luxel_certification_authority::GateDisposition::DeferredIndeterminate
     );
     assert!(DEFERRED_GATES.contains(&"rigging"));
     let native = native_mvp_gate_profile();
@@ -223,11 +223,11 @@ fn native_mvp_profile_promotes_rigging_while_engine_neutral_keeps_it_deferred() 
         .unwrap();
     assert_eq!(
         rigging.disposition,
-        wge_certification_authority::GateDisposition::RequiredPass
+        luxel_certification_authority::GateDisposition::RequiredPass
     );
     assert_eq!(
         rigging.validator_id,
-        "wge.validator.rigging-runtime-preparation/v1"
+        "luxel.validator.rigging-runtime-preparation/v1"
     );
 }
 
@@ -240,7 +240,7 @@ fn native_rigging_validator_recomputes_candidate_bound_preparation() {
     let result = validate_receipt(
         &receipt,
         &candidate,
-        &ValidatorRegistry::wge_native_mvp_v1(),
+        &ValidatorRegistry::luxel_native_mvp_v1(),
     )
     .unwrap();
     assert_eq!(result.status, ReceiptStatus::Pass);
@@ -259,7 +259,7 @@ fn native_rigging_gate_derives_failure_from_a_known_bad_joint_index_control() {
     let verdict = validate_receipt(
         &receipt,
         &candidate,
-        &ValidatorRegistry::wge_native_mvp_v1(),
+        &ValidatorRegistry::luxel_native_mvp_v1(),
     )
     .unwrap();
     assert_eq!(verdict.status, ReceiptStatus::Fail);
@@ -274,7 +274,7 @@ fn native_rigging_gate_derives_failure_from_a_known_bad_joint_index_control() {
 fn native_rigging_rejects_status_only_forged_and_stale_preparation_receipts() {
     let request = good_request();
     let glb = good_glb();
-    let registry = ValidatorRegistry::wge_native_mvp_v1();
+    let registry = ValidatorRegistry::luxel_native_mvp_v1();
 
     let mut status_only = candidate(glb.clone(), &request, None);
     status_only

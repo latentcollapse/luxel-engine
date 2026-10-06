@@ -8,6 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <Compile Include="../../com.codeweald.zone-importer/Runtime/WgeMvpContract.cs" Link="WgeMvpContract.cs" />
+    <Compile Include="../../com.codeweald.zone-importer/Runtime/LuxelMvpContract.cs" Link="LuxelMvpContract.cs" />
   </ItemGroup>
 </Project>

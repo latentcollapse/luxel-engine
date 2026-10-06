@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fetch the scanned CC0 texture files a terrain layer-set manifest pins.
 
-WGE is source only (see .gitignore): it does not carry art. A terrain layer
+Luxel is source only (see .gitignore): it does not carry art. A terrain layer
 set is therefore committed as a MANIFEST (source URL, byte size, sha256,
 licence, physical size) and the files land in the ignored artifacts tree. The
 Rust loader re-verifies every digest before a byte reaches a packet, so this

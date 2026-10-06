@@ -1,6 +1,6 @@
-# Red team 05 — WGE model-native language specification
+# Red team 05 — Luxel model-native language specification
 
-**Reviewed document:** `WGE_LANGUAGE_SPEC.md`, draft 0.5, 2026-08-03  
+**Reviewed document:** `LUXEL_LANGUAGE_SPEC.md`, draft 0.5, 2026-08-03  
 **Reviewer:** Codex  
 **Date:** 2026-08-03  
 **Ticket:** `REVIEW-1`  
@@ -155,7 +155,7 @@ preserve.
 **Normative repair:** revise §23 to distinguish *characterization fixtures*
 from *must-preserve conformance fixtures*. The migration manifest MUST list
 each prototype test with one of: `preserve`, `replace-with-strict-promotion`,
-or `retire`, together with rationale and a new WGE conformance fixture. Mark
+or `retire`, together with rationale and a new Luxel conformance fixture. Mark
 the lenient direct-application test as `replace-with-strict-promotion`:
 lenient output may be previewed only in a clearly non-certifiable sandbox;
 application/certification must consume the acknowledged strict recompilation.
@@ -197,4 +197,4 @@ through profile selection, module resolution, migration, and certification.
   `tests/test_worldbuilder_dsl.py` migration-relevant tests.
 - Compared against red-team 04 only to avoid duplicating already-known K4
   blockers.
-- Did not modify canonical WGE specification, compiler, registry, or tests.
+- Did not modify canonical Luxel specification, compiler, registry, or tests.

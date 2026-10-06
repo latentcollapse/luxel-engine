@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use wge_gameplay_contract::{FailureCode, GameOutcome, InputEvent, run_replay};
-use wge_reference_runtime::{
+use luxel_gameplay_contract::{FailureCode, GameOutcome, InputEvent, run_replay};
+use luxel_reference_runtime::{
     AuthoredLayout, BevyRendererIdentity, GameplayWorldBinding, REFERENCE_TICK_RATE_HZ,
     RuntimeCapturePhase, TraversalEvidence, TraversalOutcome, VisualEvidence, VisualGateStatus,
     WorldArtifact, build_bevy_capture_provenance, build_from_layout_path,
@@ -28,7 +28,7 @@ fn second_example_layout() -> AuthoredLayout {
 
 fn temp_dir(label: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
-        "wge-reference-runtime-{label}-{}-{}",
+        "luxel-reference-runtime-{label}-{}-{}",
         std::process::id(),
         TEMP_ID.fetch_add(1, Ordering::Relaxed)
     ));
@@ -37,7 +37,7 @@ fn temp_dir(label: &str) -> PathBuf {
 }
 
 fn julia_executable() -> PathBuf {
-    std::env::var_os("WGE_JULIA")
+    std::env::var_os("LUXEL_JULIA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("julia"))
 }
@@ -53,7 +53,7 @@ fn terrain_lab_root() -> PathBuf {
 fn build_layout(
     layout: &AuthoredLayout,
     label: &str,
-) -> Result<wge_reference_runtime::WorldBuild, wge_reference_runtime::ReferenceRuntimeError> {
+) -> Result<luxel_reference_runtime::WorldBuild, luxel_reference_runtime::ReferenceRuntimeError> {
     validate_layout(layout)?;
     let directory = temp_dir(label);
     let input = directory.join("authored.layout.json");
@@ -132,7 +132,7 @@ fn bevy_capture_provenance_binds_world_renderer_and_final_png_bytes() {
 fn fresh_cli_build_replays_gameplay_and_verifies_the_saved_candidate() {
     let first_dir = temp_dir("cli-first");
     let example = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/riverwatch.layout.json");
-    let binary = env!("CARGO_BIN_EXE_wge-reference-runtime");
+    let binary = env!("CARGO_BIN_EXE_luxel-reference-runtime");
     let first = Command::new(binary)
         .arg("build")
         .arg("--layout")
@@ -280,7 +280,7 @@ fn world_bound_gameplay_ticks_cover_the_real_route_and_bind_capture_metadata() {
         .telemetry
         .iter()
         .filter_map(|frame| match &frame.transition {
-            wge_gameplay_contract::Transition::EntityMoved { to, .. } => Some(
+            luxel_gameplay_contract::Transition::EntityMoved { to, .. } => Some(
                 to.as_str()
                     .strip_prefix("cell_")
                     .unwrap()
@@ -299,11 +299,11 @@ fn world_bound_gameplay_ticks_cover_the_real_route_and_bind_capture_metadata() {
     assert_eq!(final_tick.outcome, GameOutcome::Won);
     assert_eq!(
         final_tick.objective_state,
-        wge_gameplay_contract::ObjectiveState::Secured
+        luxel_gameplay_contract::ObjectiveState::Secured
     );
     assert!(matches!(
         final_tick.transition,
-        wge_gameplay_contract::Transition::ObjectiveSecured { .. }
+        luxel_gameplay_contract::Transition::ObjectiveSecured { .. }
     ));
 
     let capture = &binding.capture;
@@ -401,7 +401,7 @@ fn actual_world_gameplay_path_rejects_early_objective_and_resealed_telemetry_fau
 #[test]
 fn full_width_blocked_region_is_a_known_bad_traversal_control() {
     let mut layout = example_layout();
-    layout.regions.push(wge_reference_runtime::SemanticRegion {
+    layout.regions.push(luxel_reference_runtime::SemanticRegion {
         region_id: "cross_map_scree_barrier".into(),
         code: 2,
         priority: 1,
@@ -428,7 +428,7 @@ fn flat_visual_failure_is_a_failed_cli_gate_with_nonzero_exit() {
     layout.terrain.noise_amplitude_m = 0.0;
     fs::write(&layout_path, serde_json::to_vec(&layout).unwrap()).unwrap();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_wge-reference-runtime"))
+    let output = Command::new(env!("CARGO_BIN_EXE_luxel-reference-runtime"))
         .arg("build")
         .arg("--layout")
         .arg(&layout_path)
@@ -450,7 +450,7 @@ fn flat_visual_failure_is_a_failed_cli_gate_with_nonzero_exit() {
     assert!(output_dir.join("visual_evidence.json").is_file());
     assert!(output_dir.join("candidate_report.json").is_file());
 
-    let verification = Command::new(env!("CARGO_BIN_EXE_wge-reference-runtime"))
+    let verification = Command::new(env!("CARGO_BIN_EXE_luxel-reference-runtime"))
         .arg("verify")
         .arg("--bundle")
         .arg(&output_dir)

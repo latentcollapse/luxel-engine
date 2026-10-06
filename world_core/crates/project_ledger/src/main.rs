@@ -2,7 +2,7 @@ use std::env;
 use std::process::ExitCode;
 
 use serde_json::json;
-use wge_project_ledger::{
+use luxel_project_ledger::{
     EvidenceBundle, ProjectSnapshot, ProjectSpec, ProjectTemplate, build_unity_import_manifest,
     canonical_json, commit_snapshot, compile_project_spec, load_json, spec_digest,
     validate_snapshot, validate_spec, validate_world_bundle, write_json,
@@ -33,7 +33,7 @@ fn dispatch() -> Result<(), String> {
             if args.next().is_some() {
                 return Err(usage());
             }
-            let intake: wge_intake_repair_contract::SemanticIntake =
+            let intake: luxel_intake_repair_contract::SemanticIntake =
                 load_json(&intake_path).map_err(|error| error.to_string())?;
             let template: ProjectTemplate =
                 load_json(&template_path).map_err(|error| error.to_string())?;
@@ -150,5 +150,5 @@ fn dispatch() -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: wge-project-ledger compile-spec INTAKE.json TEMPLATE.json --output SPEC.json | validate-spec SPEC.json | commit SPEC.json --evidence EVIDENCE.json --output SNAPSHOT.json | validate-snapshot SNAPSHOT.json | unity-manifest SPEC.json --snapshot SNAPSHOT.json --output MANIFEST.json".into()
+    "usage: luxel-project-ledger compile-spec INTAKE.json TEMPLATE.json --output SPEC.json | validate-spec SPEC.json | commit SPEC.json --evidence EVIDENCE.json --output SNAPSHOT.json | validate-snapshot SNAPSHOT.json | unity-manifest SPEC.json --snapshot SNAPSHOT.json --output MANIFEST.json".into()
 }

@@ -1,6 +1,6 @@
-# WGE — the engine. Source only.
+# Luxel — the engine. Source only.
 #
-# WGE compiles worlds; it does not own the art it places or the batches it
+# Luxel compiles worlds; it does not own the art it places or the batches it
 # compiles. Those belong to whichever game is using it (Codeweald today), which
 # is why nothing asset-shaped is expected in this tree at all.
 

@@ -1,10 +1,10 @@
-# Migrating WGE out of `Codeweald/godot_renderer/`
+# Migrating Luxel out of `Codeweald/godot_renderer/`
 
 > **Historical migration record.** This document describes an earlier
 > multi-target layout and is retained for archaeology and salvage only. It is
 > not the current product doctrine or execution plan. Use
 > [`../ACTIVE_ARCHITECTURE.md`](../../platform/active-architecture.md) and
-> [`../WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md`](../2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md)
+> [`../LUXEL_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md`](../2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md)
 > for the native Rust/Julia/Lava path. Godot, Unity, and Unreal references
 > below must not be interpreted as current runtime gates.
 
@@ -13,18 +13,18 @@
 `godot_renderer/` is a historical name that no longer describes its contents. Of the code in there,
 45 modules are engine-agnostic Python and 16 are Godot `.gd` scripts. Unity and Unreal adapters
 already live alongside them. The directory name asserts a dependency that mostly does not exist, and
-it makes WGE look like a Godot subsystem rather than a general-purpose world compiler.
+it makes Luxel look like a Godot subsystem rather than a general-purpose world compiler.
 
 ## Target layout
 
-WGE now lives at the workspace root (`Code Projects/WGE/`), deliberately outside `Game Projects/` —
+Luxel now lives at the workspace root (`Code Projects/luxel-engine/`), deliberately outside `Game Projects/` —
 it is a tool that games consume, not a game.
 
 ```
-WGE/
+Luxel/
   README.md
   docs/
-  wge/                  compiler, DSL, pipeline  (from godot_renderer/pipeline/*.py)
+  luxel/                  compiler, DSL, pipeline  (from godot_renderer/pipeline/*.py)
   world_core/           Rust WorldSpec  (moved wholesale)
   terrain_lab/          Julia solvers  (moved wholesale)
   viewer/               Bevy reference renderer -- first-party, NOT a backend
@@ -43,8 +43,8 @@ produces the wrong layout. There are three distinct roles:
 
 1. **Core** — produces and certifies world data. Would still be needed if the world were never
    rendered at all, only inspected as data.
-2. **Reference renderer** — Bevy. This is WGE's *own instrument*: the eye it uses to check its own
-   work, and the surface for lightweight inspection and editing commands. It ships **with** WGE and
+2. **Reference renderer** — Bevy. This is Luxel's *own instrument*: the eye it uses to check its own
+   work, and the surface for lightweight inspection and editing commands. It ships **with** Luxel and
    is not optional or swappable. Audit captures route through it precisely so that no target
    engine's quirks contaminate the measurement.
 3. **Target backends** — Godot, Unreal, Unity. Consumers of finished world data, reached through
@@ -59,26 +59,26 @@ backends would silently move the acceptance thresholds.
 Ask: **would this module still be needed if the world were never rendered by any target engine —
 only compiled, certified, and inspected?**
 
-- Yes → `wge/` (or `world_core/`, `terrain_lab/` by language)
+- Yes → `luxel/` (or `world_core/`, `terrain_lab/` by language)
 - Yes, but only to *look at* the world for verification → `viewer/`
 - No, it exists to hand the world to a named third-party engine → `backends/<engine>/`
 
 Note that 18 pipeline modules mention "godot", but most only do so to *emit* a Godot adapter
-manifest — that is WGE producing backend output, not WGE depending on Godot. Classify by what the
+manifest — that is Luxel producing backend output, not Luxel depending on Godot. Classify by what the
 module would do if Godot were deleted, not by grep hits.
 
 ## Order of operations
 
 Do these as separate, individually verifiable steps. Do not batch them.
 
-1. **`terrain_lab/` → `WGE/terrain_lab/`.** Lowest risk: self-contained Julia project, referenced by
+1. **`terrain_lab/` → `Luxel/terrain_lab/`.** Lowest risk: self-contained Julia project, referenced by
    path from the pipeline in a small number of places. Verify with `julia --project=. test/runtests.jl`.
-2. **`world_core/` → `WGE/world_core/`.** Self-contained Cargo workspace. Verify with
+2. **`world_core/` → `Luxel/world_core/`.** Self-contained Cargo workspace. Verify with
    `cargo test --workspace`.
-3. **`concept_batches/` → `WGE/worlds/`.** Data, but heavily path-referenced by reports and tests.
+3. **`concept_batches/` → `Luxel/worlds/`.** Data, but heavily path-referenced by reports and tests.
    The production zone spec is referenced by an absolute-ish path in the scaffold round-trip test.
-4. **`pipeline/*.py` → `WGE/wge/`.** The big one. Leave the `.gd` files behind.
-5. **`tests/` → `WGE/tests/`.** Update the `parents[1] / "pipeline"` sys.path insert.
+4. **`pipeline/*.py` → `Luxel/luxel/`.** The big one. Leave the `.gd` files behind.
+5. **`tests/` → `Luxel/tests/`.** Update the `parents[1] / "pipeline"` sys.path insert.
 6. **Godot leftovers stay** in Codeweald and become `backends/godot/` by reference, or move if the
    Godot project can tolerate it.
 

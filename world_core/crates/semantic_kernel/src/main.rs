@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use serde_json::Value;
-use wge_semantic_kernel::{
+use luxel_semantic_kernel::{
     ErosionSupervisorOptions, KernelFailure, RunOptions, Worker, accept_receipt, bind_evidence,
     canonical_json, certify_source, check_solver_image, create_store, current_generation, load_ir,
     normalize_semantic_ir, registry_digest, reject_author_effect, run_erosion_supervisor,
@@ -94,7 +94,7 @@ fn dispatch() -> Result<(), KernelFailure> {
             solver_image_override: flags.raw("solver-image"),
             stop_after: Some("repair".into()),
         }),
-        "apply-repair" => wge_semantic_kernel::apply_persisted_repair(&RunOptions {
+        "apply-repair" => luxel_semantic_kernel::apply_persisted_repair(&RunOptions {
             store: flags.require("store")?,
             invalid_source: flags.require("invalid-source")?,
             invalid_ir: flags.require("invalid-ir")?,
@@ -110,7 +110,7 @@ fn dispatch() -> Result<(), KernelFailure> {
             solver_image_override: None,
             stop_after: None,
         }),
-        "submit-equivalent" => wge_semantic_kernel::submit_equivalent(&RunOptions {
+        "submit-equivalent" => luxel_semantic_kernel::submit_equivalent(&RunOptions {
             store: flags.require("store")?,
             invalid_source: flags.require("invalid-source")?,
             invalid_ir: flags.require("invalid-ir")?,
@@ -126,7 +126,7 @@ fn dispatch() -> Result<(), KernelFailure> {
             solver_image_override: None,
             stop_after: None,
         }),
-        "inspect" => wge_semantic_kernel::inspect_store(&flags.require("store")?),
+        "inspect" => luxel_semantic_kernel::inspect_store(&flags.require("store")?),
         "certify" => {
             let source = flags.require("source")?;
             let ir = flags.require("ir")?;
@@ -210,7 +210,7 @@ fn dispatch() -> Result<(), KernelFailure> {
             let project = flags.require("project")?;
             let manifest = flags.require("manifest")?;
             let julia = flags.get("julia").unwrap_or_else(|| PathBuf::from("julia"));
-            let version = wge_semantic_kernel::julia_version(&julia)?;
+            let version = luxel_semantic_kernel::julia_version(&julia)?;
             let image = solver_image(&script, &project.join("Project.toml"), &manifest, &version)?;
             let expected = script_digest(&script)?;
             let worker = Worker::spawn(&julia, &project, &script)?;

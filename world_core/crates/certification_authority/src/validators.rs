@@ -8,10 +8,10 @@ use crate::{
     NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA, ReceiptEnvelope, ReceiptStatus, ValidatedReceipt,
     ValidatorKind, parse_artifact, sha256_prefixed,
 };
-use wge_asset_contract::runtime as asset_runtime;
-use wge_intake_repair_contract as intake;
-use wge_native_graphics_contract as native_graphics;
-use wge_reference_runtime as runtime;
+use luxel_asset_contract::runtime as asset_runtime;
+use luxel_intake_repair_contract as intake;
+use luxel_native_graphics_contract as native_graphics;
+use luxel_reference_runtime as runtime;
 
 const WORLD_KIND: &str = "world_artifact";
 const TRAVERSAL_KIND: &str = "traversal_evidence";
@@ -104,11 +104,11 @@ fn validate_semantic(
         let spec_bytes = bound_artifact(envelope, candidate, spec_id, PROJECT_SPEC_KIND)?;
         let template_bytes =
             bound_artifact(envelope, candidate, template_id, PROJECT_TEMPLATE_KIND)?;
-        let spec: wge_project_ledger::ProjectSpec =
+        let spec: luxel_project_ledger::ProjectSpec =
             parse_artifact(spec_bytes, "compiled project spec")?;
-        let template: wge_project_ledger::ProjectTemplate =
+        let template: luxel_project_ledger::ProjectTemplate =
             parse_artifact(template_bytes, "typed project template")?;
-        wge_project_ledger::validate_spec(&spec).map_err(|error| {
+        luxel_project_ledger::validate_spec(&spec).map_err(|error| {
             AuthorityError::new("contract", format!("compiled project spec failed: {error}"))
         })?;
         if spec.project_id != candidate.project_id {
@@ -118,7 +118,7 @@ fn validate_semantic(
             ));
         }
         let compiled =
-            wge_project_ledger::compile_project_spec(&semantic, template).map_err(|error| {
+            luxel_project_ledger::compile_project_spec(&semantic, template).map_err(|error| {
                 AuthorityError::new(
                     "provenance",
                     format!("project template does not compile against canonical intake: {error}"),
@@ -128,8 +128,8 @@ fn validate_semantic(
             .map_err(|error| AuthorityError::new("malformed", error.to_string()))?;
         let compiled_value = serde_json::to_value(&compiled)
             .map_err(|error| AuthorityError::new("malformed", error.to_string()))?;
-        if wge_project_ledger::canonical_json(&supplied_value)
-            != wge_project_ledger::canonical_json(&compiled_value)
+        if luxel_project_ledger::canonical_json(&supplied_value)
+            != luxel_project_ledger::canonical_json(&compiled_value)
         {
             return Err(AuthorityError::new(
                 "provenance",
@@ -335,7 +335,7 @@ fn validate_gameplay(
         &payload.gameplay_kit_artifact_id,
         GAMEPLAY_KIT_KIND,
     )?;
-    let gameplay_kit: wge_gameplay_contract::ResolvedKit =
+    let gameplay_kit: luxel_gameplay_contract::ResolvedKit =
         parse_artifact(gameplay_kit_bytes, "resolved gameplay kit")?;
     runtime::validate_gameplay_world_binding(&world, &traversal, capture, &visual, &binding)
         .map_err(runtime_error)?;
@@ -646,8 +646,8 @@ fn validate_asset(
     }
     let source: StaticMeshSource = parse_artifact(source_bytes, "static mesh source")?;
     let package: StaticAssetPackage = parse_artifact(package_bytes, "prepared asset package")?;
-    if source.schema_version != "wge.static-mesh-source/v1"
-        || package.schema_version != "wge.asset-package/v1"
+    if source.schema_version != "luxel.static-mesh-source/v1"
+        || package.schema_version != "luxel.asset-package/v1"
         || source.asset_id != package.asset_id
         || package.source_sha256 != source_digest
         || package.asset_use != payload.asset_use
@@ -752,7 +752,7 @@ fn validate_rigging(
             "rigging request contains fields outside the registered typed schema",
         ));
     }
-    if request.asset_use != wge_asset_contract::AssetUse::Character || request.rig.is_none() {
+    if request.asset_use != luxel_asset_contract::AssetUse::Character || request.rig.is_none() {
         return Err(AuthorityError::new(
             "contract",
             "native rigging evidence requires a character request with a rig contract",

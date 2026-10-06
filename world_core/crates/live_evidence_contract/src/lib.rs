@@ -2,16 +2,16 @@
 //!
 //! This crate schedules and binds evidence. It does not render, inspect pixels,
 //! validate certification receipts, or grant certification authority. A future
-//! supervisor must independently validate Tier A receipts with WGE's registered
+//! supervisor must independently validate Tier A receipts with Luxel's registered
 //! native validators before submitting a [`TierAResult::Certified`].
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const SESSION_SCHEMA: &str = "wge.live-evidence-session/v1";
-pub const SNAPSHOT_REQUEST_SCHEMA: &str = "wge.live-snapshot-request/v1";
-pub const SNAPSHOT_RESULT_SCHEMA: &str = "wge.live-snapshot-result/v1";
-pub const LIVE_FRAME_SCHEMA: &str = "wge.live-frame-attestation/v1";
+pub const SESSION_SCHEMA: &str = "luxel.live-evidence-session/v1";
+pub const SNAPSHOT_REQUEST_SCHEMA: &str = "luxel.live-snapshot-request/v1";
+pub const SNAPSHOT_RESULT_SCHEMA: &str = "luxel.live-snapshot-result/v1";
+pub const LIVE_FRAME_SCHEMA: &str = "luxel.live-frame-attestation/v1";
 
 pub const MAX_SAMPLE_INTERVAL_MS: u64 = 24 * 60 * 60 * 1_000;
 pub const MAX_SAMPLE_WINDOW_MS: u64 = 120_000;
@@ -1004,8 +1004,8 @@ mod tests {
                 receipt_id: "receipt-1".to_owned(),
                 receipt_sha256: ONE.to_owned(),
                 validator_registry_sha256: ZERO.to_owned(),
-                validator_id: "wge.validator.visual-reference/v1".to_owned(),
-                receipt_schema: "wge.visual-receipt/v1".to_owned(),
+                validator_id: "luxel.validator.visual-reference/v1".to_owned(),
+                receipt_schema: "luxel.visual-receipt/v1".to_owned(),
             },
         }
     }
@@ -1226,8 +1226,8 @@ mod tests {
             receipt_id: "receipt-1".to_owned(),
             receipt_sha256: ONE.to_owned(),
             validator_registry_sha256: ZERO.to_owned(),
-            validator_id: "wge.validator.visual-reference/v1".to_owned(),
-            receipt_schema: "wge.visual-receipt/v1".to_owned(),
+            validator_id: "luxel.validator.visual-reference/v1".to_owned(),
+            receipt_schema: "luxel.visual-receipt/v1".to_owned(),
         };
         let states = [
             SessionState::Live,

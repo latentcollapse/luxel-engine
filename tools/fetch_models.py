@@ -2,7 +2,7 @@
 """Fetch scanned CC0 models (glTF + buffers + textures) against a pinned manifest.
 
 The model counterpart of tools/fetch_calibration_materials.py, for CONVERGE-2
-(docs/world/converge/converge2-contracts.md): WGE is source only, so a model set is committed
+(docs/world/converge/converge2-contracts.md): Luxel is source only, so a model set is committed
 as a MANIFEST (URL, byte size, sha256, provider md5 per file, licence,
 authors, physical size) and the files land in the ignored artifacts tree under
 `<cache_dir>/<asset>/`, keeping the glTF's relative paths. Builders read only
@@ -31,7 +31,7 @@ import urllib.request
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 API = "https://api.polyhaven.com"
-USER_AGENT = "wge-model-fetch"
+USER_AGENT = "luxel-model-fetch"
 
 
 def sha256_of(path):

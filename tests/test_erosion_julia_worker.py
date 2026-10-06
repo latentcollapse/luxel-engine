@@ -49,12 +49,12 @@ class JuliaErosionWorkerTests(unittest.TestCase):
             cirque_strength=0.4,
             planation=0.2,
         )
-        previous = os.environ.get("WGE_EROSION_BACKEND")
-        os.environ["WGE_EROSION_BACKEND"] = "julia"
+        previous = os.environ.get("LUXEL_EROSION_BACKEND")
+        os.environ["LUXEL_EROSION_BACKEND"] = "julia"
         try:
             eroded, report = erode(height, profile, cell_m=2.0)
             receipt = report["worker_receipt"]
-            self.assertEqual(receipt["schema"], "wge.erosion-worker-receipt/v1")
+            self.assertEqual(receipt["schema"], "luxel.erosion-worker-receipt/v1")
             self.assertEqual(receipt["operation"], "erode")
             self.assertEqual(receipt["job_index"], 1)
             self.assertEqual(report["worker_receipt_sha256"], canonical_digest(receipt))
@@ -71,9 +71,9 @@ class JuliaErosionWorkerTests(unittest.TestCase):
         finally:
             erosion._shutdown_erosion_supervisor()
             if previous is None:
-                os.environ.pop("WGE_EROSION_BACKEND", None)
+                os.environ.pop("LUXEL_EROSION_BACKEND", None)
             else:
-                os.environ["WGE_EROSION_BACKEND"] = previous
+                os.environ["LUXEL_EROSION_BACKEND"] = previous
 
         self.assertEqual(eroded.shape, height.shape)
         self.assertTrue(np.isfinite(eroded).all())
@@ -83,7 +83,7 @@ class JuliaErosionWorkerTests(unittest.TestCase):
         self.assertGreaterEqual(section["relief_m"], 0.0)
 
     def test_forged_supervisor_receipt_fails_closed(self) -> None:
-        with tempfile.TemporaryDirectory(prefix="wge-forged-erosion-receipt-") as temporary:
+        with tempfile.TemporaryDirectory(prefix="luxel-forged-erosion-receipt-") as temporary:
             script = Path(temporary) / "fake-supervisor.py"
             script.write_text(
                 """#!/usr/bin/env python3
@@ -99,7 +99,7 @@ project_sha = "2" * 64
 solver_image = "sha256:" + "3" * 64
 print(json.dumps({"cold_ms": 1, "event": "worker_ready", "manifest_sha256": "4" * 64,
                   "pid": pid, "project_sha256": project_sha, "script_sha256": script_sha,
-                  "solver_image": solver_image, "wrapper_version": "wge.erosion-worker/v1"}), flush=True)
+                  "solver_image": solver_image, "wrapper_version": "luxel.erosion-worker/v1"}), flush=True)
 request = json.loads(sys.stdin.readline())
 response = {"schema": "codeweald.erosion-result/v1", "status": "ok",
             "operation": request["operation"], "shape": request["shape"],
@@ -107,7 +107,7 @@ response = {"schema": "codeweald.erosion-result/v1", "status": "ok",
 receipt = {"job_index": 1, "operation": request["operation"], "project_sha256": project_sha,
            "request_sha256": digest(request), "response_sha256": digest(response),
            "result_sha256": response["result_sha256"],
-           "schema": "wge.erosion-worker-receipt/v1", "script_sha256": script_sha,
+           "schema": "luxel.erosion-worker-receipt/v1", "script_sha256": script_sha,
            "solver_image": solver_image, "worker_pid": pid}
 print(json.dumps({"event": "worker_result", "job_index": 1, "job_us": 1,
                   "phase": "first_job", "pid": pid, "receipt": receipt,
@@ -116,10 +116,10 @@ print(json.dumps({"event": "worker_result", "job_index": 1, "job_us": 1,
                 encoding="utf-8",
             )
             script.chmod(0o755)
-            previous_backend = os.environ.get("WGE_EROSION_BACKEND")
-            previous_kernel = os.environ.get("WGE_SEMANTIC_KERNEL")
-            os.environ["WGE_EROSION_BACKEND"] = "julia"
-            os.environ["WGE_SEMANTIC_KERNEL"] = shlex.quote(sys.executable) + " " + shlex.quote(str(script))
+            previous_backend = os.environ.get("LUXEL_EROSION_BACKEND")
+            previous_kernel = os.environ.get("LUXEL_SEMANTIC_KERNEL")
+            os.environ["LUXEL_EROSION_BACKEND"] = "julia"
+            os.environ["LUXEL_SEMANTIC_KERNEL"] = shlex.quote(sys.executable) + " " + shlex.quote(str(script))
             try:
                 with self.assertRaises(erosion.ErosionWorkerError) as raised:
                     flux_field(np.arange(9, dtype=np.float64).reshape(3, 3))
@@ -127,13 +127,13 @@ print(json.dumps({"event": "worker_result", "job_index": 1, "job_us": 1,
             finally:
                 erosion._shutdown_erosion_supervisor()
                 if previous_backend is None:
-                    os.environ.pop("WGE_EROSION_BACKEND", None)
+                    os.environ.pop("LUXEL_EROSION_BACKEND", None)
                 else:
-                    os.environ["WGE_EROSION_BACKEND"] = previous_backend
+                    os.environ["LUXEL_EROSION_BACKEND"] = previous_backend
                 if previous_kernel is None:
-                    os.environ.pop("WGE_SEMANTIC_KERNEL", None)
+                    os.environ.pop("LUXEL_SEMANTIC_KERNEL", None)
                 else:
-                    os.environ["WGE_SEMANTIC_KERNEL"] = previous_kernel
+                    os.environ["LUXEL_SEMANTIC_KERNEL"] = previous_kernel
 
 
 if __name__ == "__main__":

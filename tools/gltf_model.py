@@ -91,7 +91,7 @@ def node_transform(node):
 def material_uv_set(material):
     """(texCoord index, KHR_texture_transform) of a material's base colour.
 
-    WGE carries one UV set with one transform per primitive, so every texture
+    Luxel carries one UV set with one transform per primitive, so every texture
     of the material must agree; a material that mixes sets or transforms is
     refused rather than silently mis-mapped."""
     infos = [material.get("pbrMetallicRoughness", {}).get(key) for key in ("baseColorTexture", "metallicRoughnessTexture")]

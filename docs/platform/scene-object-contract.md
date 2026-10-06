@@ -1,4 +1,4 @@
-# WGE SceneObject and SceneArtifact Contract
+# Luxel SceneObject and SceneArtifact Contract
 
 Status: **C2.1–C2.4 implemented for the permanent static-asset slice; broader production asset work remains open**, 2026-09-30  
 Scope: bind validated runtime assets to semantic world objects without making a renderer packet canonical.
@@ -69,7 +69,7 @@ packet (including any inspection camera) from the authorized base projection,
 and only then sends it to Lava.
 The permanent assembled log-hut fixture now passes native capture, Rust
 promotion, worker restart, and deterministic replay. Keeping that boundary
-explicit prevents a graphics backend from quietly becoming WGE semantic state.
+explicit prevents a graphics backend from quietly becoming Luxel semantic state.
 
 ## Current API
 

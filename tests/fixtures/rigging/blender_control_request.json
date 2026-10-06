@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.asset-runtime-request/v1",
+  "schema_version": "luxel.asset-runtime-request/v1",
   "target": "unity",
   "asset_use": "character",
   "expected_source_sha256": null,

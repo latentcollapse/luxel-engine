@@ -1,23 +1,23 @@
 [package]
-name = "wge-certification-authority"
+name = "luxel-certification-authority"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 authors = ["Codeweald contributors"]
 rust-version = "1.95"
-description = "Independent Rust receipt registry and engine-neutral WGE certification authority"
+description = "Independent Rust receipt registry and engine-neutral Luxel certification authority"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
-wge-gameplay-contract = { path = "../gameplay_contract" }
-wge-asset-contract = { path = "../asset_contract" }
-wge-intake-repair-contract = { path = "../intake_repair_contract" }
-wge-project-ledger = { path = "../project_ledger" }
-wge-reference-runtime = { path = "../reference_runtime" }
-wge-native-graphics-contract = { path = "../native_graphics_contract" }
+luxel-gameplay-contract = { path = "../gameplay_contract" }
+luxel-asset-contract = { path = "../asset_contract" }
+luxel-intake-repair-contract = { path = "../intake_repair_contract" }
+luxel-project-ledger = { path = "../project_ledger" }
+luxel-reference-runtime = { path = "../reference_runtime" }
+luxel-native-graphics-contract = { path = "../native_graphics_contract" }
 
 [[bin]]
-name = "wge-certification-authority"
+name = "luxel-certification-authority"
 path = "src/main.rs"

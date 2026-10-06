@@ -30,7 +30,7 @@ because the mapping is a declared input: the same bytes under the two rules are
 two different worlds and the digest alone cannot tell them apart.
 
 Resolution is the other trap. The viewer meshes terrain on a fixed stride and
-rejects any grid where `(resolution - 1) % TERRAIN_STRIDE != 0`; WGE's own
+rejects any grid where `(resolution - 1) % TERRAIN_STRIDE != 0`; Luxel's own
 compiler emits 1025 for that reason. Gaea builds at powers of two, so **every**
 Gaea-native resolution fails that check. The importer resamples up to the next
 compatible grid and records both resolutions, rather than writing a file that

@@ -1,6 +1,6 @@
-# Red team 02 — WGE model-native language specification
+# Red team 02 — Luxel model-native language specification
 
-**Reviewing:** `docs/DSL docs/WGE_LANGUAGE_SPEC.md` draft 0.2, 2026-08-03
+**Reviewing:** `docs/DSL docs/LUXEL_LANGUAGE_SPEC.md` draft 0.2, 2026-08-03
 **Reviewer:** Claude (Opus), 2026-08-03
 **Requested by:** Matt
 **Follows:** `LANGUAGE_SPEC_REDTEAM_01.md` (15 findings, all accepted into 0.2)
@@ -10,7 +10,7 @@ Second pass over the specification, run against draft 0.2 rather than the
 original. Two purposes: verify that the round-one resolutions actually landed
 as claimed, and attack the new text they introduced.
 
-**Resolution:** accepted into `docs/DSL docs/WGE_LANGUAGE_SPEC.md` draft 0.3 on
+**Resolution:** accepted into `docs/DSL docs/LUXEL_LANGUAGE_SPEC.md` draft 0.3 on
 2026-08-03. All four findings were incorporated. Extension integrity was
 resolved with separate semantic, extension, and composed document digest
 domains; Grade-A artifacts now use closed, registry-owned canonicalization
@@ -122,7 +122,7 @@ As written, a backend defines its own normalization, and a backend that
 normalizes away exactly the bytes that differ can claim Grade A truthfully.
 The guarantee is unfalsifiable, which matters more here than elsewhere because
 Grade A is what round-one finding 3 was raised to protect: an existing,
-already-achieved WGE property.
+already-achieved Luxel property.
 
 **Resolution:** define a canonical artifact encoding for Grade A — what is
 excluded from the byte comparison (embedded timestamps, absolute path

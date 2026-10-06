@@ -1,4 +1,4 @@
-# WGE Pre-Demo Audit
+# Luxel Pre-Demo Audit
 
 Status: **audit complete; blockers identified; fix order frozen**
 Date: 2026-10-02
@@ -10,7 +10,7 @@ This audit answers one question: **can the first playable demo be built on the c
 
 | Gate | Result | Evidence |
 |---|---|---|
-| `cargo test -p wge-native-graphics-contract --test session -- --test-threads=1` | PASS 5/5 (4.90s) | deterministic camera walk, world divergence rejection, camera-extent/degenerate-state/request rejection |
+| `cargo test -p luxel-native-graphics-contract --test session -- --test-threads=1` | PASS 5/5 (4.90s) | deterministic camera walk, world divergence rejection, camera-extent/degenerate-state/request rejection |
 | Repo state | clean | HEAD `0f435f0`; only untracked path is quarantined `graphics_lab/tet-lab/` (by design) |
 | Julia `Pkg.test(test_args=["lava_adapter"])` | **FAIL → FIXED → PASS 26/26, exit 0** | FR-0014 below; test target was missing from `graphics_lab/Project.toml` on Julia 1.12.6 |
 | Blender availability | `/usr/bin/blender` 5.2.2 LTS | provider jobs feasible without any install |

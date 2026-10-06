@@ -106,7 +106,7 @@ Rust-owned native construction surface grows. It is not permission to move seman
 into Python; new demo-critical operations belong behind typed Rust contracts and the native control
 plane.
 
-The language-wide design baseline is [docs/DSL docs/WGE_LANGUAGE_SPEC.md](docs/DSL%20docs/WGE_LANGUAGE_SPEC.md). It defines the planned
+The language-wide design baseline is [docs/DSL docs/LUXEL_LANGUAGE_SPEC.md](docs/DSL%20docs/LUXEL_LANGUAGE_SPEC.md). It defines the planned
 typed IR, safety boundary, geometry/asset and policy domains, backend contracts, conformance suite, and unresolved
 decisions without treating unfinished proposals as language features.
 
@@ -158,7 +158,7 @@ the current campaign. Do not infer present status from the dated snapshot that f
 The first reproducible native command is:
 
 ```sh
-python3 pipeline/wge_native_gate.py
+python3 pipeline/luxel_native_gate.py
 ```
 
 ## Historical compatibility snapshot (not current status)
@@ -223,18 +223,18 @@ godot_adapter`.
 - **Art fidelity.** This is the live frontier. Settlement and objective kits still read as prototype,
   foliage density needs work, wetland rendering is weak, the ground palette is flat, and cliff faces
   still show heightmap-slab grammar.
-- **Gameplay/system DSL.** The `wge.game` vocabulary does not exist yet. When it does, it shares the
-  authoring kernel with `wge.world` — one sandbox, two vocabularies, never two dialects.
+- **Gameplay/system DSL.** The `luxel.game` vocabulary does not exist yet. When it does, it shares the
+  authoring kernel with `luxel.world` — one sandbox, two vocabularies, never two dialects.
 - **The critic→DSL loop.** Audit metrics are still numbers. Turning `foreground_edge_density: 0.044`
   into a concrete suggested patch is what closes the loop and is the next major piece of work.
 
 ## Historical layout snapshot (not current instructions)
 
 The engine and the game are separate git repositories as of 2026-08-02. Luxel lives at the **workspace
-root** (`Code Projects/WGE/`), not under `Game Projects/`. It is an engine that games consume, not a
+root** (`Code Projects/luxel-engine/`), not under `Game Projects/`. It is an engine that games consume, not a
 game.
 
-Engine paths, relative to `Code Projects/WGE/`:
+Engine paths, relative to `Code Projects/luxel-engine/`:
 
 | What | Where |
 |---|---|
@@ -292,7 +292,7 @@ julia --project=. test/runtests.jl           # from terrain_lab/
 ## Engine-neutral native MVP
 
 The current model-facing vertical slice is driven by the Rust-owned native
-contracts. `wge-control-plane` is the canonical project transaction, pointer,
+contracts. `luxel-control-plane` is the canonical project transaction, pointer,
 candidate, receipt, repair, and promotion authority. Python authoring/provider
 modules parse or stage caller-owned bytes and transport typed requests; they do
 not decide semantic identity, gate status, or promotion. The Rust project
@@ -309,13 +309,13 @@ bounded operation surface without moving semantics into MCP.
 Run the focused acceptance suite:
 
 ```sh
-python3 -m unittest tests.test_wge_native_mvp -v
+python3 -m unittest tests.test_luxel_native_mvp -v
 ```
 
 The model-facing command is:
 
 ```sh
-python3 pipeline/wge_native_mvp.py \
+python3 pipeline/luxel_native_mvp.py \
   --source-dir <brief-concept-and-layout> \
   --project-template <typed-project-template.json> \
   --rigging-glb <provider-output.glb> \
@@ -325,7 +325,7 @@ python3 pipeline/wge_native_mvp.py \
 
 That command remains the native-MVP regression oracle. The engine-neutral
 convergence path uses the same typed intake/world artifacts through
-`wge-control-plane` and deliberately leaves production rigging, skinning,
+`luxel-control-plane` and deliberately leaves production rigging, skinning,
 retargeting, and arbitrary mesh-to-character generation deferred. The
 supplied bad GLB remains a permanent negative control. This checkpoint is
 judged by Luxel's own semantic, mechanical, traversal, visual, repair,

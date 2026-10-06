@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use wge_gameplay_contract::{
+use luxel_gameplay_contract::{
     AbilityId, FailureCode, GameOutcome, GameSnapshot, GameplaySession, InputEvent, NpcAction,
     ObjectiveState, ReplayTrace, Transition, run_replay,
 };
@@ -29,7 +29,7 @@ fn run_session(snapshot: &GameSnapshot, trace: &ReplayTrace) -> GameplaySession 
 }
 
 fn failure_code<T: std::fmt::Debug>(
-    result: Result<T, wge_gameplay_contract::GameFailure>,
+    result: Result<T, luxel_gameplay_contract::GameFailure>,
 ) -> FailureCode {
     result.expect_err("adversarial operation must fail").code
 }
@@ -38,7 +38,7 @@ fn failure_code<T: std::fmt::Debug>(
 fn initialization_requires_a_validated_snapshot_and_failed_steps_are_atomic() {
     let data = fixture();
     let mut invalid_snapshot = data.snapshot.clone();
-    invalid_snapshot.schema_version = "wge.gameplay-snapshot/v99".to_owned();
+    invalid_snapshot.schema_version = "luxel.gameplay-snapshot/v99".to_owned();
     assert_eq!(
         failure_code(GameplaySession::new(&invalid_snapshot)),
         FailureCode::UnsupportedSchema

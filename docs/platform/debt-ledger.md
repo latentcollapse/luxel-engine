@@ -1,4 +1,4 @@
-# WGE debt ledger
+# Luxel debt ledger
 
 Written 2026-07-31, from an end-to-end audit of the compiler, its instrument,
 and the batch it produces. Every entry cites the evidence that found it, not a
@@ -118,7 +118,7 @@ carries 2 tests (`decodes_and_meshes_a_bounded_heightfield`,
 `rejects_truncated_heightfields`). The `worldspec` crate is better served at 15.
 
 **Why it matters.** Per [three-layer architecture](tooling-upgrades.md), the
-viewer is WGE's *instrument* — every visual acceptance number is measured
+viewer is Luxel's *instrument* — every visual acceptance number is measured
 through it. Instrument defects are measurement defects, and this session's
 tooling item 1 exists because the instrument silently went stale for a day.
 Mesh construction, the terrain sampler, camera framing, and the new marker
@@ -145,7 +145,7 @@ camera or from asynchronous asset loading changing the settle frame.
 
 ## D7. `detect_no_ops` only watches one artifact
 
-**Evidence.** `wge_critic.detect_no_ops` compares two `terrain_manifest.json`
+**Evidence.** `luxel_critic.detect_no_ops` compares two `terrain_manifest.json`
 files and reports composition scalars that changed while `heightfield_sha256`
 did not. It sees only the heightfield, and only scalars the manifest records.
 `elevation_bias` was authorable, reached the geometry, and was **absent from
@@ -160,7 +160,7 @@ covers composition scalars only.
 
 ## D8. `godot_renderer/` is now a misleading directory name
 
-**Evidence.** The directory holds the entire WGE Python pipeline, its tests,
+**Evidence.** The directory holds the entire Luxel Python pipeline, its tests,
 and all concept batches. It contains no live Godot integration; Godot was
 removed 2026-07-31. `project.godot` is still present and is load-bearing — the
 Bevy viewer's `ViewerConfig::from_args` refuses to start unless it finds one, as
@@ -175,7 +175,7 @@ apart from the `project.godot` sentinel.
 
 ### D8 update 2026-08-02: the functional half is RESOLVED; the rename is not
 
-The rename was only ever the visible half. The load-bearing half was that **WGE
+The rename was only ever the visible half. The load-bearing half was that **Luxel
 could not compile a batch that lived anywhere but inside its own tree**, which
 is what actually blocked pointing the engine at a scratch directory:
 
@@ -225,7 +225,7 @@ Two root causes, both provenance strings hashed into artifacts:
   its bytes are hashed into `render_plan.json`, cascading into the collision and
   navigation plans.
 
-**Why it matters.** WGE's README states the valuable artifact is the world, "a
+**Why it matters.** Luxel's README states the valuable artifact is the world, "a
 verified data structure with a stable identity hash", and that two engines
 pointed at the same world must produce the same place. An identity that moves
 when the directory moves is not an identity of the world — it is an identity of
@@ -300,7 +300,7 @@ single-view overview's `bevy_visual_acceptance_report.json`, closing the
 ambiguity at the writer rather than leaving every reader to disambiguate a
 shared name. `sensitivity.py`'s `metrics_from_report` keeps its dual-shape
 handling as harmless backward compatibility for any already-written files
-under the old collision; `wge_critic.py:load_reports`, which read
+under the old collision; `luxel_critic.py:load_reports`, which read
 `report.get("metrics", {})` with no defensive fallback at all, is now
 protected structurally rather than by luck. Regression test:
 `test_suite_report_does_not_collide_with_the_overview_report`
@@ -450,7 +450,7 @@ filtering. `detail_density` scores the point-sampled version **8×** higher than
 the correctly averaged one (0.624 vs 0.077); `edge_density` 2.5× higher (0.832
 vs 0.328).
 
-`wge_critic.diagnose` raises a fidelity finding when
+`luxel_critic.diagnose` raises a fidelity finding when
 `detail_density < 0.65 × source detail_density`, and the current render sits
 about 3× short of that target.
 
@@ -655,7 +655,7 @@ this is precisely the defect class that survives an overview gate.
 
 ---
 
-## D23. WGE's tests read Codeweald's content
+## D23. Luxel's tests read Codeweald's content
 
 **Evidence.** Ten test modules assert against a real compiled batch (the alpine
 arena, caledonia) and real generated kits. When the engine moved out of the game
@@ -663,17 +663,17 @@ arena, caledonia) and real generated kits. When the engine moved out of the game
 both "the engine" and "the art".
 
 `tests/reference_content.py` names the coupling in one place and makes it
-redirectable via `WGE_REFERENCE_CONTENT`, which restored the suite. That is a
+redirectable via `LUXEL_REFERENCE_CONTENT`, which restored the suite. That is a
 signpost, not a fix.
 
 **Why it matters.** Asserting against a real world is *good* testing -- it is
 what caught the sealed keeps and the bridges over nothing, and synthetic
-fixtures would not have. But WGE is supposed to compile any game's world, and a
+fixtures would not have. But Luxel is supposed to compile any game's world, and a
 test suite that cannot run without one specific game's concept batches is a
 suite that cannot certify the engine on its own. It also blocks the Gemini
-sandbox plan: a throwaway WGE checkout has no Codeweald beside it.
+sandbox plan: a throwaway Luxel checkout has no Codeweald beside it.
 
-**Fix direction.** WGE needs a small reference batch of its own -- a deliberately
+**Fix direction.** Luxel needs a small reference batch of its own -- a deliberately
 minimal world with one keep, one lane, one water feature -- committed as engine
 fixture data. Not a copy of Codeweald's: something small enough to version and
 boring enough that nobody is tempted to make it pretty. The Codeweald-facing
@@ -1459,6 +1459,27 @@ This is also the second time this shape of thing has cost a session: the
 **Not attempted here** — the build-order fix removes today's trigger, and this
 wants to be verified against a deliberately rejected world rather than bundled
 into the change that stopped producing one.
+
+---
+
+## D35. An ignored calibration test fails on main
+
+**Found:** 2026-10-06, during the Luxel rename, by running the kit- and
+asset-dependent `#[ignore]` tests that the default `cargo test` skips.
+
+`calibration_glb_prepares_with_zero_findings_and_frames_every_view`
+(`world_core/crates/native_graphics_contract/tests/calibration.rs:140`) fails:
+one calibration view's camera stands at z <= -36 m, outside the host world it
+asserts it stays in. It fails identically on `main` before the rename, so the
+rename did not cause it; the calibration references still render
+byte-identical, so the frames are fine and the assertion or a view's camera
+drifted. Nobody saw it because ignored tests only run with
+`--include-ignored`.
+
+**Fix direction:** find which view's camera crossed -36 m and when (the
+calibration placement or a view table edit), then fix the camera or the
+assertion, whichever is wrong. Separately, run `--include-ignored` in the
+routine pass so ignored tests cannot rot unseen.
 
 ---
 

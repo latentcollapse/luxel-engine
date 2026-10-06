@@ -1,4 +1,4 @@
-# WGE Graphics Campaign 2 — The Authored Frame
+# Luxel Graphics Campaign 2 — The Authored Frame
 
 Status: **green** for the Campaign 2 authored-frame checkpoint, 2026-09-29.
 
@@ -16,10 +16,10 @@ autonomous model-generated game pipeline.
 The final command was:
 
 ```text
-world_core/target/debug/wge-native-graphics-contract render-campaign2-layout \
+world_core/target/debug/luxel-native-graphics-contract render-campaign2-layout \
   world_core/crates/reference_runtime/examples/riverwatch.layout.json \
   /home/mattc/.juliaup/bin/julia terrain_lab graphics_lab \
-  graphics_lab/bin/wge_graphics_worker.jl artifacts/campaign2/live-twelfth
+  graphics_lab/bin/luxel_graphics_worker.jl artifacts/campaign2/live-twelfth
 ```
 
 The command produced three fixed inspection cuts over the certified Riverwatch
@@ -77,7 +77,7 @@ The Rust `campaign2-authored-frame` profile is closed and registered. It checks
 terrain/content coverage, sample count, luma/RGB structure, spatial edges,
 tile variation, overlay exclusion, and authored-frame dimensions.
 
-`wge.campaign2-visual-evidence/v1` adds a multidimensional vector with:
+`luxel.campaign2-visual-evidence/v1` adds a multidimensional vector with:
 
 - measured: silhouette/readability, material separation, composition, texture
   frequency, density, artifact rate, frame cost, GPU cost, upload/readback
@@ -147,12 +147,12 @@ between runs by design and is not used as deterministic certification identity.
 Green gates after the final source changes:
 
 - `cargo fmt --all` — pass;
-- `cargo clippy --offline -p wge-native-graphics-contract --all-targets -- -D warnings` — pass;
-- `cargo check --offline -p wge-native-graphics-contract` — pass;
-- full `cargo test --offline -p wge-native-graphics-contract --lib --tests` —
+- `cargo clippy --offline -p luxel-native-graphics-contract --all-targets -- -D warnings` — pass;
+- `cargo check --offline -p luxel-native-graphics-contract` — pass;
+- full `cargo test --offline -p luxel-native-graphics-contract --lib --tests` —
   pass: 18 unit, 2 main, 5 live, 7 native graphics, 9 visual quality, and 6
   window tests;
-- `cargo test --offline -p wge-certification-authority --test
+- `cargo test --offline -p luxel-certification-authority --test
   visual_quality_authority` — pass: 5/5;
 - `julia --project=graphics_lab --startup-file=no graphics_lab/test/runtests.jl`
   — pass, including the rotated-bound regression;
@@ -214,7 +214,7 @@ or broad post-campaign features from this report.
 - clean replay: `artifacts/campaign2/live-eleventh/`;
 - prior campaign iteration: `artifacts/campaign2/live-tenth/`;
 - screenshots and handoff copies:
-  `/home/mattc/Pictures/WGE/campaign2-2026-09-29/`;
+  `/home/mattc/Pictures/Luxel/campaign2-2026-09-29/`;
 - baseline freeze: `artifacts/campaign2/CAMPAIGN2_BASELINE.md`;
 - architecture: `docs/platform/native-graphics-architecture.md`;
 - benchmark: `docs/world/native-graphics-benchmark.md`;

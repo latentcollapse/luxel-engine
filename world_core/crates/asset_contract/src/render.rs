@@ -1,4 +1,4 @@
-//! Deterministic render-asset conditioning for the native WGE path.
+//! Deterministic render-asset conditioning for the native Luxel path.
 //!
 //! This module is deliberately downstream of GLB inspection and upstream of
 //! graphics packets. It extracts a bounded, backend-neutral mesh/material/
@@ -14,9 +14,9 @@ use super::{
     canonical_json, inspect_glb, parse_glb, read_indices, read_positions, sha256_hex,
 };
 
-pub const RENDER_ASSET_REQUEST_SCHEMA: &str = "wge.render-asset-request/v1";
-pub const RENDER_ASSET_PACKAGE_SCHEMA: &str = "wge.render-asset-package/v2";
-pub const RENDER_ASSET_RECEIPT_SCHEMA: &str = "wge.render-asset-receipt/v2";
+pub const RENDER_ASSET_REQUEST_SCHEMA: &str = "luxel.render-asset-request/v1";
+pub const RENDER_ASSET_PACKAGE_SCHEMA: &str = "luxel.render-asset-package/v2";
+pub const RENDER_ASSET_RECEIPT_SCHEMA: &str = "luxel.render-asset-receipt/v2";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -860,7 +860,7 @@ pub fn validate_render_conditioning_receipt(
 
 fn render_producer_identity() -> RenderProducerIdentity {
     RenderProducerIdentity {
-        name: "wge-asset-render-conditioning".into(),
+        name: "luxel-asset-render-conditioning".into(),
         version: env!("CARGO_PKG_VERSION").into(),
     }
 }
@@ -2208,7 +2208,7 @@ mod alpha_coverage_tests {
     #[test]
     fn normal_scale_and_occlusion_strength_are_carried_and_bounded() {
         let request = RenderConditioningRequest {
-            schema_version: "wge.render-asset-request/v1".into(),
+            schema_version: "luxel.render-asset-request/v1".into(),
             meters_per_unit: 1.0,
             vertical_axis: Axis::Y,
             require_uv0: true,

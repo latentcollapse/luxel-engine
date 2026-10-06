@@ -12,16 +12,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-pub const INTAKE_DRAFT_SCHEMA: &str = "wge.semantic-intake-draft/v1";
-pub const INTAKE_SCHEMA: &str = "wge.semantic-intake/v1";
-pub const SOURCE_BUNDLE_DRAFT_SCHEMA: &str = "wge.source-bundle-draft/v1";
-pub const SOURCE_BUNDLE_SCHEMA: &str = "wge.source-bundle/v1";
-pub const PROVIDER_INTERPRETATION_SCHEMA: &str = "wge.provider-interpretation/v1";
-pub const REPAIR_PROPOSAL_DRAFT_SCHEMA: &str = "wge.repair-proposal-draft/v1";
-pub const REPAIR_PROPOSAL_SCHEMA: &str = "wge.repair-proposal/v1";
-pub const REPAIR_DELTA_DRAFT_SCHEMA: &str = "wge.repair-evidence-delta-draft/v1";
-pub const REPAIR_DELTA_SCHEMA: &str = "wge.repair-evidence-delta/v1";
-pub const REPAIR_APPLICATION_SCHEMA: &str = "wge.repair-application/v1";
+pub const INTAKE_DRAFT_SCHEMA: &str = "luxel.semantic-intake-draft/v1";
+pub const INTAKE_SCHEMA: &str = "luxel.semantic-intake/v1";
+pub const SOURCE_BUNDLE_DRAFT_SCHEMA: &str = "luxel.source-bundle-draft/v1";
+pub const SOURCE_BUNDLE_SCHEMA: &str = "luxel.source-bundle/v1";
+pub const PROVIDER_INTERPRETATION_SCHEMA: &str = "luxel.provider-interpretation/v1";
+pub const REPAIR_PROPOSAL_DRAFT_SCHEMA: &str = "luxel.repair-proposal-draft/v1";
+pub const REPAIR_PROPOSAL_SCHEMA: &str = "luxel.repair-proposal/v1";
+pub const REPAIR_DELTA_DRAFT_SCHEMA: &str = "luxel.repair-evidence-delta-draft/v1";
+pub const REPAIR_DELTA_SCHEMA: &str = "luxel.repair-evidence-delta/v1";
+pub const REPAIR_APPLICATION_SCHEMA: &str = "luxel.repair-application/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ContractError {

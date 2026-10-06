@@ -1,24 +1,24 @@
-# WGE Chat Demo-Critical-Path Handoff
+# Luxel Chat Demo-Critical-Path Handoff
 
 Date: 2026-09-30  
-Purpose: provide Chat with the current WGE tree needed to derive a short, implementation-sensitive roadmap for an impressive self-sufficient AI-native game demo.
+Purpose: provide Chat with the current Luxel tree needed to derive a short, implementation-sensitive roadmap for an impressive self-sufficient AI-native game demo.
 
 ## Product boundary
 
-WGE is the game engine and the project-truth owner.
+Luxel is the game engine and the project-truth owner.
 
 The target flow is:
 
 ```text
 concept art + master brief
-    -> AI-native WGE semantic surface
+    -> AI-native Luxel semantic surface
     -> world / asset / style / gameplay construction
-    -> native WGE runtime and graphics
+    -> native Luxel runtime and graphics
     -> inspection and evidence-driven repair
     -> playable high-quality vertical slice
 ```
 
-The primary runtime path is Rust + Julia + Lava/Vulkan. External tools may prepare content, but they must not own WGE semantic identity, project truth, certification, or the finished game's runtime.
+The primary runtime path is Rust + Julia + Lava/Vulkan. External tools may prepare content, but they must not own Luxel semantic identity, project truth, certification, or the finished game's runtime.
 
 ## Blender boundary
 
@@ -31,11 +31,11 @@ Blender is an allowed optional heavy-machine-shop provider for the current demo 
 The intended boundary is:
 
 ```text
-WGE semantic character/asset intent
+Luxel semantic character/asset intent
     -> bounded provider job
     -> mesh / skeleton / skin / animation artifact
-    -> WGE import and independent validation
-    -> native WGE runtime and rendering
+    -> Luxel import and independent validation
+    -> native Luxel runtime and rendering
 ```
 
 Blender is not the runtime, semantic authority, or required player-facing dependency. Native replacement is a later dependency-elimination campaign unless repeated benchmark evidence shows it is immediately critical.
@@ -83,7 +83,7 @@ Start with:
 6. `docs/world/native-quality-gaps.md`;
 7. `docs/gameplay/gameplay-kit-architecture.md` and `docs/gameplay/gcs-foundation-design.md`;
 8. `world_core/README.md`, `world_core/Cargo.toml`, and the crate manifests;
-9. `pipeline/wge_agent_surface.py`, `pipeline/wge_engine_neutral.py`, and `pipeline/wge_native_mvp.py`;
+9. `pipeline/luxel_agent_surface.py`, `pipeline/luxel_engine_neutral.py`, and `pipeline/luxel_native_mvp.py`;
 10. the final Campaign 2 capture/evidence manifest.
 
 Then inspect the actual Rust, Julia, and provider code at the boundaries described by those documents. Do not infer implementation maturity from a roadmap claim alone.

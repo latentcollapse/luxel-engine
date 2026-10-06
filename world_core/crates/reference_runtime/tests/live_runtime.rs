@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use wge_reference_runtime::{
+use luxel_reference_runtime::{
     AuthoredLayout, TraversalOutcome, TraversalSession, TraversalSessionInput, WorldArtifact,
     build_from_layout_path, run_playthrough, validate_traversal_session_completion,
 };
@@ -32,7 +32,7 @@ fn example_layout() -> AuthoredLayout {
 
 fn build_fixture_world(layout: AuthoredLayout, label: &str) -> WorldArtifact {
     let directory = std::env::temp_dir().join(format!(
-        "wge-live-runtime-{label}-{}-{}",
+        "luxel-live-runtime-{label}-{}-{}",
         std::process::id(),
         TEMP_ID.fetch_add(1, Ordering::Relaxed)
     ));
@@ -43,13 +43,13 @@ fn build_fixture_world(layout: AuthoredLayout, label: &str) -> WorldArtifact {
         serde_json::to_vec(&layout).expect("layout serializes"),
     )
     .expect("test layout is written");
-    let julia = std::env::var_os("WGE_JULIA")
+    let julia = std::env::var_os("LUXEL_JULIA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("julia"));
     let project_root = Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)
-        .expect("WGE root is an ancestor");
+        .expect("Luxel root is an ancestor");
     let result = build_from_layout_path(&input, &julia, &project_root.join("terrain_lab"))
         .expect("Julia/Rust world fixture builds");
     fs::remove_dir_all(&directory).expect("test directory is removed");
@@ -76,9 +76,9 @@ fn drive_authored_route(session: &mut TraversalSession, world: &WorldArtifact, f
 }
 
 fn deterministic_result() -> (
-    wge_reference_runtime::TraversalSessionSnapshot,
-    wge_reference_runtime::TraversalSessionCompletion,
-    Vec<wge_reference_runtime::TraversalStep>,
+    luxel_reference_runtime::TraversalSessionSnapshot,
+    luxel_reference_runtime::TraversalSessionCompletion,
+    Vec<luxel_reference_runtime::TraversalStep>,
 ) {
     let world = world();
     let mut session = TraversalSession::initialize(world).expect("session initializes");

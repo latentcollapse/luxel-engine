@@ -1,6 +1,6 @@
 # C2.8 GPU Mip Residency and Sampler LOD — Handoff
 
-Status: **implemented and green**, adapter seam bumped to `wge.lava-adapter/v7`
+Status: **implemented and green**, adapter seam bumped to `luxel.lava-adapter/v7`
 on both sides.
 
 Predecessor: [`docs/archive/2026-09_native-graphics-checkpoints/c2-7-mip-chain-handoff.md`](c2-7-mip-chain-handoff.md).
@@ -68,7 +68,7 @@ checks.
   as one process). `rust_supervisor_promotes_a_bound_lava_frame` passed in
   258 s, including residency-telemetry validation against the Rust
   expectation and the deterministic replay comparison.
-- `cargo fmt --check` green; strict clippy on `wge-native-graphics-contract`
+- `cargo fmt --check` green; strict clippy on `luxel-native-graphics-contract`
   clean; contract lib tests 19/19.
 
 ## Defects registered during C2.8

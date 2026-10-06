@@ -1,4 +1,4 @@
-# WGE Native Graphics Showcase Evidence
+# Luxel Native Graphics Showcase Evidence
 
 Status: deterministic native visual-quality probe; adapter-v6 evidence closed,
 with the v5 receipt retained as a historical control, 2026-09-29
@@ -66,7 +66,7 @@ The accepted v5-adapter replay used:
 - packet: `sha256:dac4f498b67e09239c9c2b34c794dc40c8d8d32832fe4f23cc9fee27cf96a983`;
 - capture: `sha256:e8f960e61145f44c5803a24cfe5e3c2d9b19ac6d4df0dc59c04a2e1dd2172b27`;
 - capture size: 640x480 RGBA8 sRGB;
-- adapter identity: `wge.lava-adapter/v5`;
+- adapter identity: `luxel.lava-adapter/v5`;
 - Rust measurements: luminance standard deviation `0.1382377132`,
   `12,636` distinct RGB colors;
 - promoted telemetry: 24 draw calls, 9 visible landmark instances, 4,608

@@ -1,6 +1,6 @@
-# WGE Terrain Lab
+# Luxel Terrain Lab
 
-`terrain_lab/` is the Julia numerical/spatial package in the active WGE path.
+`terrain_lab/` is the Julia numerical/spatial package in the active Luxel path.
 Julia owns terrain analysis, hydrology, placement fields, and related numerical
 experiments. It does not own world identity, semantic authority, receipt
 promotion, or engine rendering. Typed packets and provenance cross back to the

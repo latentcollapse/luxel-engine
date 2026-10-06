@@ -87,7 +87,7 @@ exactly and every calibrated amplitude in the rasterizer keeps its meaning.
 
 `terrain_manifest.json` records `heightfield_sha256` and the resolved
 `composition_scalars` per landform, and each build rotates the manifest it
-replaces to `terrain_manifest.previous.json`. `wge_critic.detect_no_ops`
+replaces to `terrain_manifest.previous.json`. `luxel_critic.detect_no_ops`
 compares the two: authoring that changed while the heightfield hash did not is
 reported as a non-actionable finding owned by the rasterizer. This is a general
 check, not a guard against one bug -- any advertised knob can quietly stop
@@ -272,7 +272,7 @@ measured shortfall *worse* — 6.9x became 15.3x.
 Landform composition therefore cannot move it: rebuilding
 `codeweald_alpine_arena_v1` with every composition scalar at its bound changed it
 by under one percent, while pushing the jitters further broke the traversability
-gate. `wge_critic` reports the shortfall against terrain materials and renderer
+gate. `luxel_critic` reports the shortfall against terrain materials and renderer
 shading, and emits no DSL patches for it. Silhouette complexity is a real and
 separate property that nothing currently measures; a skyline metric could drive
 composition honestly, which this never could.

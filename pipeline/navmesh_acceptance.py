@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
         help="fail if lanes/keeps/biomes are not all connected (turn this on, "
         "and wire it into build_zone.py's exit path, once D13 -- settlements "
         "placed on lane centrelines -- is fixed; that is the named owner of "
-        "the current failures, see WGE/docs/platform/debt-ledger.md)",
+        "the current failures, see Luxel/docs/platform/debt-ledger.md)",
     )
     arguments = parser.parse_args(argv)
 

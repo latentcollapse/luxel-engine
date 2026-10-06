@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use wge_gameplay_contract::{
+use luxel_gameplay_contract::{
     AbilityId, AbilitySpec, Control, EntityAttributes, EntityId, EntitySpec,
     GAMEPLAY_SNAPSHOT_SCHEMA, GAMEPLAY_TRACE_SCHEMA, GameOutcome, GameSnapshot, GameplayEffect,
     GameplayReceipt, GameplayTag, InputEvent, LocationId, MAX_REPLAY_EVENTS, NavigationGraph,
@@ -90,7 +90,7 @@ pub struct GameplayWorldBinding {
 
 pub fn validate_gameplay_kit(kit: &ResolvedKit) -> Result<(), ReferenceRuntimeError> {
     let expected =
-        wge_gameplay_contract::reference_vertical_slice_kit().map_err(|diagnostics| {
+        luxel_gameplay_contract::reference_vertical_slice_kit().map_err(|diagnostics| {
             ReferenceRuntimeError::contract(format!(
                 "reference gameplay kit registry is invalid: {diagnostics:?}"
             ))

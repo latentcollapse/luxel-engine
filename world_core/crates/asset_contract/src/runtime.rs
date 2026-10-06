@@ -21,7 +21,7 @@ use super::{
 pub enum RuntimeTarget {
     Native,
     /// Compatibility-only target retained for historical fixtures. The active
-    /// WGE path uses `native`; it is never a runtime dependency of WGE.
+    /// Luxel path uses `native`; it is never a runtime dependency of Luxel.
     Unity,
 }
 
@@ -320,7 +320,7 @@ pub fn prepare_asset(
         let mesh_ids = runtime_mesh_ids(&document)?;
         let mut package = RuntimeAssetPackage {
             package_id: String::new(),
-            schema_version: "wge.runtime-asset-package/v1".into(),
+            schema_version: "luxel.runtime-asset-package/v1".into(),
             target: request.target,
             asset_use: request.asset_use,
             source_identity: report.identity.clone(),
@@ -381,7 +381,7 @@ pub fn prepare_asset(
 
 fn producer_identity() -> ProducerIdentity {
     ProducerIdentity {
-        name: "wge-asset-contract".into(),
+        name: "luxel-asset-contract".into(),
         version: env!("CARGO_PKG_VERSION").into(),
     }
 }
@@ -1644,7 +1644,7 @@ fn validate_sockets(
             || !socket_and_parent_are_active
             || node
                 .get("extras")
-                .and_then(|extras| extras.get("wge_socket"))
+                .and_then(|extras| extras.get("luxel_socket"))
                 .and_then(Value::as_bool)
                 != Some(true)
         {
@@ -1652,7 +1652,7 @@ fn validate_sockets(
                 findings,
                 RuntimeFindingCode::InvalidSocketHierarchy,
                 &required.node_name,
-                "socket must be tagged extras.wge_socket=true and be a direct child of its declared joint",
+                "socket must be tagged extras.luxel_socket=true and be a direct child of its declared joint",
             );
             continue;
         }

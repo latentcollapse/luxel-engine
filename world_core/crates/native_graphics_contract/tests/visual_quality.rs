@@ -1,4 +1,4 @@
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     ADAPTER_REVISION, AlphaMode, Axis, BufferReference, CaptureFormat, CoordinateSystem,
     EnvironmentIntent, FRAME_RECEIPT_SCHEMA, FrameStatus, GraphicsCamera, GraphicsCaptureRequest,
     GraphicsFrameReceipt, GraphicsFrameReceiptBody, GraphicsPassTimings, GraphicsScenePacket,
@@ -16,7 +16,7 @@ const IMAGE_SIDE: usize = 64;
 fn packet(overlays: bool) -> GraphicsScenePacket {
     let camera = GraphicsCamera {
         camera_id: "quality-camera".into(),
-        projection: wge_native_graphics_contract::CameraProjection::Orthographic { span_m: 16.0 },
+        projection: luxel_native_graphics_contract::CameraProjection::Orthographic { span_m: 16.0 },
         position_xyz_m: [0.0, 10.0, 0.0],
         forward_xyz: [0.0, -1.0, 0.0],
         up_xyz: [0.0, 0.0, -1.0],
@@ -72,7 +72,7 @@ fn packet(overlays: bool) -> GraphicsScenePacket {
     seal_scene_packet(GraphicsScenePacketBody {
         deformation: None,
         render_policy: None,
-        schema_version: wge_native_graphics_contract::SCENE_PACKET_SCHEMA.into(),
+        schema_version: luxel_native_graphics_contract::SCENE_PACKET_SCHEMA.into(),
         packet_id: if overlays {
             "quality-overlay-packet".into()
         } else {
@@ -359,7 +359,7 @@ fn flat_with_semantic_discs(packet: &GraphicsScenePacket) -> Vec<u8> {
 }
 
 fn assert_reason(
-    evidence: &wge_native_graphics_contract::VisualQualityEvidence,
+    evidence: &luxel_native_graphics_contract::VisualQualityEvidence,
     code: QualityReasonCode,
 ) {
     assert!(

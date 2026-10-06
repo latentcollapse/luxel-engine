@@ -1,9 +1,9 @@
 {
   "constructors": [
-    {"kind": "constructor", "namespace": "wge.geometry", "symbol": "path"},
-    {"kind": "constructor", "namespace": "wge.geometry", "symbol": "rect"},
-    {"kind": "constructor", "namespace": "wge.world", "symbol": "lane"},
-    {"kind": "constructor", "namespace": "wge.world", "symbol": "place"}
+    {"kind": "constructor", "namespace": "luxel.geometry", "symbol": "path"},
+    {"kind": "constructor", "namespace": "luxel.geometry", "symbol": "rect"},
+    {"kind": "constructor", "namespace": "luxel.world", "symbol": "lane"},
+    {"kind": "constructor", "namespace": "luxel.world", "symbol": "place"}
   ],
   "gates": [
     {"id": "lane.footprint_clear", "operation": "lane_overlap"},
@@ -13,5 +13,5 @@
     {"id": "lane_overlap"},
     {"id": "path_length"}
   ],
-  "schema": "wge.registry/v0"
+  "schema": "luxel.registry/v0"
 }

@@ -1,4 +1,4 @@
-# WGE CONVERGE-2 Contracts
+# Luxel CONVERGE-2 Contracts
 
 Status: **CONVERGE-2 CLOSED, 2026-10-04.** N-6 and N-5 implemented and accepted; closeout at the end. Order N-6 → N-5 approved; landmark: ruin from
 `modular_fort_01` (option 1).
@@ -20,7 +20,7 @@ cannot render without it.
 
 **Renderer.** `alphaMode` is parsed in `asset_contract/src/render.rs:984`,
 projected through `asset_projection.rs:274` and accepted by the packet decoder
-(`WGEGraphics.jl:1088`). Then `LavaAdapter.jl` `_validate_material` refuses
+(`LuxelGraphics.jl:1088`). Then `LavaAdapter.jl` `_validate_material` refuses
 every non-opaque material. `alphaCutoff` is not parsed anywhere.
 `doubleSided` is parsed into `RenderMaterial` but not carried into the packet.
 Every raster pipeline is already `NoCull()`, so back faces draw, but they are
@@ -53,7 +53,7 @@ Two consequences:
    (`/usr/bin/blender`), so decimation runs headless in the build tool.
    Decimating leaf cards destroys them; leaves need a different reduction
    (see N-5).
-2. **Tree and grass leaves are authored as `BLEND`.** WGE will not render
+2. **Tree and grass leaves are authored as `BLEND`.** Luxel will not render
    blended foliage (sorting, no shadows). The build tool converts them to
    `MASK` with an explicit cutoff and records the conversion in the manifest.
 
@@ -107,7 +107,7 @@ decision; see N-5.
   fetched with the existing manifest discipline (URL, size, sha256).
 - **Permitted files:** `asset_contract/src/render.rs`, `asset_projection.rs`,
   `lib.rs` (packet + validation), `material_maps.rs` (mip coverage),
-  `WGEGraphics.jl`, `LavaAdapter.jl`, `calibration.rs`,
+  `LuxelGraphics.jl`, `LavaAdapter.jl`, `calibration.rs`,
   `tools/fetch_calibration_materials.py`, `tools/build_calibration_glb.py`,
   tests.
 - **Tests:** packet round-trip with and without the new fields (absent =
@@ -209,7 +209,7 @@ ones.
 ## 2. N-5 — Hero asset kit, imported
 
 > **Status: IMPLEMENTED (2026-10-04), human acceptance met.** Arm `converge2`
-> (`WGE_PARITY_RENDER_POLICY=converge2`, `WGE_KIT_SET=tools/kit/kit1.lock.json`):
+> (`LUXEL_PARITY_RENDER_POLICY=converge2`, `LUXEL_KIT_SET=tools/kit/kit1.lock.json`):
 > converge1's policy unchanged, the procedural shrine and tree balls replaced
 > by the kit. Packet 52.6 MB (converge1 37.6 MB). Identity: 122/122 frames byte-identical (calibration1 `run3` 88 + `run3-grazing` 16;
 > parity `ab-{null,full,converge0,converge1}-tfix` 12; foliage `n6-foliage` 6), with
@@ -290,7 +290,7 @@ ones.
   | tree | `tree_small_02`: trunk 28,293 → 3,000, branches 94,814 → 6,000, 1.94 M leaf triangles → 370 cluster cards (185 clusters, 24 px tiles, one 512² atlas) | ~9.7 k | 1.11 MB |
   | fern | `fern_02_b` as authored | 2,384 | 0.20 MB |
 
-  Branch UVs come from `TEXCOORD_1` with a `KHR_texture_transform`; WGE
+  Branch UVs come from `TEXCOORD_1` with a `KHR_texture_transform`; Luxel
   carries one UV set, so `tools/gltf_model.py` bakes the transform into UV0.
   Collapse left 36 zero normals on degenerate branch triangles; the builder
   drops zero-area triangles and gives any other zero normal its face normal.
@@ -323,7 +323,7 @@ ones.
   emissive w = 2). Absent, the select returns the factor exactly: every
   existing frame is byte-identical, calibration included.
 - **Frame bound** raised from 64 MiB to 128 MiB on both ends
-  (`supervisor.rs`, `wge_graphics_worker.jl`); converge2 measures 52.6 MB.
+  (`supervisor.rs`, `luxel_graphics_worker.jl`); converge2 measures 52.6 MB.
 - **Tests:** `tests/kit.rs` (lock completeness; converge2 needs a kit and no
   other arm accepts one; with the built kit: primitives gone, pool kept, kit
   instances present, policy and camera equal to converge1; kit adds <= 24 MB

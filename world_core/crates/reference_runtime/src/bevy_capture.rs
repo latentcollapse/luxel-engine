@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::fields::prefixed_sha256;
 use crate::{ReferenceCamera, ReferenceRuntimeError, WorldArtifact, validate_world_artifact};
 
-pub const BEVY_CAPTURE_PROVENANCE_SCHEMA: &str = "wge.bevy-native-capture-provenance/v2";
+pub const BEVY_CAPTURE_PROVENANCE_SCHEMA: &str = "luxel.bevy-native-capture-provenance/v2";
 pub const BEVY_CAPTURE_FORMAT: &str = "image/png";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

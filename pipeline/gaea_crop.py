@@ -286,7 +286,7 @@ def write_glb(
     normal_offset = position_offset + len(pad(position_bytes, b"\0"))
 
     document = {
-        "asset": {"version": "2.0", "generator": "wge gaea_crop"},
+        "asset": {"version": "2.0", "generator": "luxel gaea_crop"},
         "scene": 0,
         "scenes": [{"nodes": [0]}],
         "nodes": [{"mesh": 0, "name": name}],

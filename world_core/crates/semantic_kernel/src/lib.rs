@@ -23,8 +23,8 @@ pub use worker::{
     script_digest, solver_image,
 };
 
-pub const IR_SCHEMA: &str = "wge.semantic-ir/v0";
-pub const MEASUREMENT_SCHEMA: &str = "wge.lane-overlap/v0";
+pub const IR_SCHEMA: &str = "luxel.semantic-ir/v0";
+pub const MEASUREMENT_SCHEMA: &str = "luxel.lane-overlap/v0";
 
 #[derive(Debug)]
 pub enum KernelFailure {
@@ -836,7 +836,7 @@ fn store_evidence(
             "operation": OPERATION,
             "parent_id": parent,
             "proposal_id": proposal_id,
-            "schema": "wge.evidence-binding/v0",
+            "schema": "luxel.evidence-binding/v0",
             "solver_image": solver
         }),
     )?;
@@ -875,7 +875,7 @@ fn repair_for(
         "parent_id": parent_id,
         "registry_digest": registry,
         "rerun_predicate": GATE_ID,
-        "schema": "wge.semantic-repair/v0",
+        "schema": "luxel.semantic-repair/v0",
         "solver_image": solver,
         "source_span": span_json(&ir.place.span),
         "world_id": ir.place.world_id
@@ -1043,7 +1043,7 @@ fn write_proposal(
             "proposal_id": solved.proposal_id,
             "registry_digest": solved.ir.registry_digest,
             "repair_id": repair_id,
-            "schema": "wge.candidate/v0",
+            "schema": "luxel.candidate/v0",
             "solver_image": solver,
             "status": status
         }),
@@ -1065,7 +1065,7 @@ fn write_proposal(
             "registry_digest": solved.ir.registry_digest,
             "repair_id": repair_id,
             "role": "world_author",
-            "schema": "wge.proposal/v0",
+            "schema": "luxel.proposal/v0",
             "solver_image": solver,
             "status": status
         }),
@@ -1103,7 +1103,7 @@ fn commit_candidate(
         "parent_id": parent,
         "receipt_id": receipt_id,
         "registry_digest": solved.ir.registry_digest,
-        "schema": "wge.receipt/v0",
+        "schema": "luxel.receipt/v0",
         "solver_image": solver
     });
     write_json(
@@ -1131,7 +1131,7 @@ fn commit_candidate(
         "measurement_sha256": solved.measurement.sha256,
         "parent_id": parent,
         "registry_digest": solved.ir.registry_digest,
-        "schema": "wge.generation/v0",
+        "schema": "luxel.generation/v0",
         "seed": null,
         "solver_image": solver
     });
@@ -1530,7 +1530,7 @@ fn certify_against(
                 "operation": path::OPERATION,
                 "parent_id": parent,
                 "proposal_id": proposal_id,
-                "schema": "wge.evidence-binding/v0",
+                "schema": "luxel.evidence-binding/v0",
                 "solver_image": solver
             }),
         )?;
@@ -1567,7 +1567,7 @@ fn certify_against(
                 "parent_id": parent,
                 "registry_digest": ir.registry_digest,
                 "rerun_predicate": ops::PATH_GATE,
-                "schema": "wge.semantic-repair/v0",
+                "schema": "luxel.semantic-repair/v0",
                 "solver_image": solver,
                 "source_span": span_json(&decl.span),
                 "world_id": decl.world_id
@@ -1603,7 +1603,7 @@ fn certify_against(
                 "ir_digest": ir.digest,
                 "parent_id": parent,
                 "proposal_id": proposal_id,
-                "schema": "wge.candidate/v0",
+                "schema": "luxel.candidate/v0",
                 "solver_image": solver,
                 "status": "rejected"
             }),
@@ -1621,7 +1621,7 @@ fn certify_against(
                 "receipt_id": null,
                 "registry_digest": ir.registry_digest,
                 "role": "world_author",
-                "schema": "wge.proposal/v0",
+                "schema": "luxel.proposal/v0",
                 "solver_image": solver,
                 "status": "rejected"
             }),
@@ -1696,7 +1696,7 @@ fn commit_outputs(
             "parent_id": parent,
             "receipt_id": receipt_id,
             "registry_digest": solved.ir.registry_digest,
-            "schema": "wge.receipt/v0",
+            "schema": "luxel.receipt/v0",
             "solver_image": solver
         });
         write_json(
@@ -1743,7 +1743,7 @@ fn commit_outputs(
         "parent_id": parent,
         "receipt_index": receipt_index,
         "registry_digest": solved.ir.registry_digest,
-        "schema": "wge.generation/v0",
+        "schema": "luxel.generation/v0",
         "seed": null,
         "solver_image": solver
     });
@@ -2276,7 +2276,7 @@ mod tests {
 
     #[test]
     fn forged_gate_field_is_rejected() {
-        let raw = br#"{"gate_passed":true,"intersects":false,"overlap":{"x0":0,"x1":0,"y0":0,"y1":0},"overlap_area":0,"schema":"wge.lane-overlap/v0"}"#;
+        let raw = br#"{"gate_passed":true,"intersects":false,"overlap":{"x0":0,"x1":0,"y0":0,"y1":0},"overlap_area":0,"schema":"luxel.lane-overlap/v0"}"#;
         let error = ingest_measurement(raw).expect_err("gate field");
         assert_eq!(error.class(), "OperatorFailure");
         assert_eq!(error.code(), "unknown_field");
@@ -2284,7 +2284,7 @@ mod tests {
 
     #[test]
     fn kernel_recomputes_measurement_hash() {
-        let raw = br#"{"intersects":true,"overlap":{"x0":40,"x1":70,"y0":40,"y1":60},"overlap_area":600,"schema":"wge.lane-overlap/v0"}"#;
+        let raw = br#"{"intersects":true,"overlap":{"x0":40,"x1":70,"y0":40,"y1":60},"overlap_area":600,"schema":"luxel.lane-overlap/v0"}"#;
         let measurement = ingest_measurement(raw).expect("measurement");
         assert_eq!(measurement.sha256, sha256_prefixed(raw));
         assert!(measurement.intersects);
@@ -2311,9 +2311,9 @@ mod tests {
 
     #[test]
     fn out_of_span_edit_is_rejected_and_in_span_edit_is_not() {
-        let base = "from wge.world import lane, place\nfrom wge.geometry import rect\n\ncentral_lane = lane(id=\"central\", footprint=rect(x0=0, y0=40, x1=100, y1=60))\nblocked_keep = place(id=\"keep\", footprint=rect(x0=40, y0=30, x1=70, y1=70))\n";
-        let repaired = "from wge.world import lane, place\nfrom wge.geometry import rect\n\ncentral_lane = lane(id=\"central\", footprint=rect(x0=0, y0=40, x1=100, y1=60))\nblocked_keep = place(id=\"keep\", footprint=rect(x0=40, y0=0, x1=70, y1=20))\n";
-        let tampered = "from wge.world import lane, place\nfrom wge.geometry import rect\n# unrelated note\ncentral_lane = lane(id=\"central\", footprint=rect(x0=0, y0=40, x1=100, y1=60))\nblocked_keep = place(id=\"keep\", footprint=rect(x0=40, y0=0, x1=70, y1=20))\n";
+        let base = "from luxel.world import lane, place\nfrom luxel.geometry import rect\n\ncentral_lane = lane(id=\"central\", footprint=rect(x0=0, y0=40, x1=100, y1=60))\nblocked_keep = place(id=\"keep\", footprint=rect(x0=40, y0=30, x1=70, y1=70))\n";
+        let repaired = "from luxel.world import lane, place\nfrom luxel.geometry import rect\n\ncentral_lane = lane(id=\"central\", footprint=rect(x0=0, y0=40, x1=100, y1=60))\nblocked_keep = place(id=\"keep\", footprint=rect(x0=40, y0=0, x1=70, y1=20))\n";
+        let tampered = "from luxel.world import lane, place\nfrom luxel.geometry import rect\n# unrelated note\ncentral_lane = lane(id=\"central\", footprint=rect(x0=0, y0=40, x1=100, y1=60))\nblocked_keep = place(id=\"keep\", footprint=rect(x0=40, y0=0, x1=70, y1=20))\n";
         assert!(authorize_edit(base, repaired, "blocked_keep", "place").is_ok());
         let error = authorize_edit(base, tampered, "blocked_keep", "place").unwrap_err();
         assert_eq!(error.code(), "unauthorized_span");
@@ -2322,7 +2322,7 @@ mod tests {
     #[test]
     fn failed_candidate_leaves_the_pointer_on_g0() {
         let store =
-            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/wge-kernel-unit-store");
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/luxel-kernel-unit-store");
         let _ = fs::remove_dir_all(&store);
         store::create_store(&store, "sha256:abc").unwrap();
         let solved = Solved {
@@ -2391,7 +2391,7 @@ mod tests {
 
     #[test]
     fn reopen_does_not_reset_and_corruption_fails_closed() {
-        let store = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/wge-store-open");
+        let store = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/luxel-store-open");
         let _ = fs::remove_dir_all(&store);
         store::create_store(&store, "sha256:abc").unwrap();
         let genesis = fs::read(store.join("generations").join("G0.json")).unwrap();
@@ -2409,7 +2409,7 @@ mod tests {
         assert!(store::put_immutable(&blob, b"other").is_err());
         assert_eq!(fs::read(&blob).unwrap(), b"same");
 
-        fs::write(store.join("store.json"), "{\"schema\":\"wge.store/v9\"}").unwrap();
+        fs::write(store.join("store.json"), "{\"schema\":\"luxel.store/v9\"}").unwrap();
         assert_eq!(
             store::open_store(&store).unwrap_err().code(),
             "unsupported_schema"
@@ -2420,12 +2420,12 @@ mod tests {
         );
         fs::write(
             store.join("pointer.json"),
-            "{\"generation_id\":\"G-missing\",\"schema\":\"wge.pointer/v0\"}",
+            "{\"generation_id\":\"G-missing\",\"schema\":\"luxel.pointer/v0\"}",
         )
         .unwrap();
         fs::write(
             store.join("store.json"),
-            "{\"registry_digest\":\"sha256:abc\",\"schema\":\"wge.store/v0\"}",
+            "{\"registry_digest\":\"sha256:abc\",\"schema\":\"luxel.store/v0\"}",
         )
         .unwrap();
         assert_eq!(

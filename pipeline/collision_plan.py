@@ -1,6 +1,6 @@
 """Engine-neutral collision plan: what a body can stand on and what stops it.
 
-MVP roadmap 1.1 (see WGE/docs/archive/2026-09_roadmaps-and-audits/mvp-roadmap.md). WGE compiles a world that
+MVP roadmap 1.1 (see Luxel/docs/archive/2026-09_roadmaps-and-audits/mvp-roadmap.md). Luxel compiles a world that
 renders; it does not yet compile one anything can move through. `collision`
 appears nowhere in any emitted artifact -- only in the intake brief, as stated
 intent. This closes that gap for terrain and placed instances.
@@ -250,7 +250,7 @@ def build(batch_dir: Path, asset_root: Path | None = None) -> dict[str, Any]:
     `asset_root` is where the plan's relative asset paths resolve from. It used
     to be reconstructed as `batch_dir.parent.parent`, which silently encoded
     "every batch lives exactly two levels under the engine" -- the single
-    assumption that made WGE unable to compile a batch anywhere but inside its
+    assumption that made Luxel unable to compile a batch anywhere but inside its
     own tree (D8). Defaulted to the old behaviour so a standalone CLI run of an
     in-tree batch is unchanged.
     """

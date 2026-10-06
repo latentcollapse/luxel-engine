@@ -1,7 +1,7 @@
 use std::collections::BTreeSet;
 
 use serde::Deserialize;
-use wge_gameplay_contract::{
+use luxel_gameplay_contract::{
     AbilityId, FailureCode, GAMEPLAY_TRACE_SCHEMA, GameOutcome, GameSnapshot, GameplayEffect,
     GameplayTag, InputEvent, MAX_REPLAY_EVENTS, NpcAction, NpcDecision, ObjectiveState,
     ReplayTrace, TargetingRule, run_replay, validate_snapshot, verify_replay,
@@ -28,7 +28,7 @@ fn fixture() -> Fixture {
     .expect("known-good gameplay fixture must deserialize")
 }
 
-fn assert_code(result: Result<(), wge_gameplay_contract::GameFailure>, expected: FailureCode) {
+fn assert_code(result: Result<(), luxel_gameplay_contract::GameFailure>, expected: FailureCode) {
     let failure = result.expect_err("known-bad input must fail closed");
     assert_eq!(failure.code, expected);
 }
@@ -41,7 +41,7 @@ fn known_good_playthrough_wins_and_receipt_is_byte_stable() {
     let first = run_replay(&fixture.snapshot, &fixture.trace).expect("known-good trace completes");
     let second = run_replay(&fixture.snapshot, &fixture.trace).expect("same trace replays");
     assert_eq!(
-        wge_gameplay_contract::GAMEPLAY_FIXED_TICK_RATE_HZ,
+        luxel_gameplay_contract::GAMEPLAY_FIXED_TICK_RATE_HZ,
         30,
         "the contract declares its deterministic fixed simulation rate"
     );
@@ -80,7 +80,7 @@ fn known_good_playthrough_wins_and_receipt_is_byte_stable() {
     );
     assert!(first.body.events.iter().any(|event| matches!(
         event.transition,
-        wge_gameplay_contract::Transition::AbilityActivated {
+        luxel_gameplay_contract::Transition::AbilityActivated {
             applied_damage: 3,
             target_health_after: 3,
             ..
@@ -154,7 +154,7 @@ fn friendly_target_is_rejected_while_enemy_target_succeeds() {
     assert!(valid.body.events.iter().any(|event| {
         matches!(
             event.transition,
-            wge_gameplay_contract::Transition::AbilityActivated { .. }
+            luxel_gameplay_contract::Transition::AbilityActivated { .. }
         )
     }));
 }
@@ -250,7 +250,7 @@ fn ability_cost_and_cooldown_are_enforced_with_a_ready_tick_control() {
         .filter(|event| {
             matches!(
                 event.transition,
-                wge_gameplay_contract::Transition::AbilityActivated { .. }
+                luxel_gameplay_contract::Transition::AbilityActivated { .. }
             )
         })
         .count();
@@ -324,7 +324,7 @@ fn npc_can_defeat_both_playable_entities_and_produce_a_loss() {
             .final_state
             .entities
             .values()
-            .filter(|entity| matches!(entity.control, wge_gameplay_contract::Control::Playable))
+            .filter(|entity| matches!(entity.control, luxel_gameplay_contract::Control::Playable))
             .all(|entity| entity.health == 0)
     );
 }
@@ -431,7 +431,7 @@ fn schema_navigation_and_encounter_resource_gates_have_good_and_bad_controls() {
     validate_snapshot(&fixture.snapshot).expect("known-good schema, graph, and resources pass");
 
     let mut unsupported = fixture.snapshot.clone();
-    unsupported.schema_version = "wge.gameplay-snapshot/v99".to_owned();
+    unsupported.schema_version = "luxel.gameplay-snapshot/v99".to_owned();
     assert_code(
         validate_snapshot(&unsupported),
         FailureCode::UnsupportedSchema,
@@ -607,7 +607,7 @@ fn trace_schema_and_size_bounds_reject_bad_inputs_and_accept_the_fixture() {
     run_replay(&fixture.snapshot, &fixture.trace).expect("known-good bounded trace passes");
 
     let mut unsupported = fixture.trace.clone();
-    unsupported.schema_version = "wge.gameplay-trace/v99".to_owned();
+    unsupported.schema_version = "luxel.gameplay-trace/v99".to_owned();
     let schema_failure = run_replay(&fixture.snapshot, &unsupported)
         .expect_err("unsupported trace schema must fail closed");
     assert_eq!(schema_failure.code, FailureCode::UnsupportedSchema);

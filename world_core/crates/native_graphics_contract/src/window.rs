@@ -15,10 +15,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LAVA_BACKEND_ID, LAVA_REVISION, MAX_CAPTURE_DIMENSION};
 
-pub const WINDOW_TARGET_REQUEST_SCHEMA: &str = "wge.window-target-request/v1";
-pub const WINDOW_PROBE_RECEIPT_SCHEMA: &str = "wge.window-probe-receipt/v1";
-const JULIA_PROBE_PROTOCOL: &str = "wge.lava-window-probe/v1";
-const PROBE_OUTPUT_PREFIX: &str = "WGE_WINDOW_PROBE=";
+pub const WINDOW_TARGET_REQUEST_SCHEMA: &str = "luxel.window-target-request/v1";
+pub const WINDOW_PROBE_RECEIPT_SCHEMA: &str = "luxel.window-probe-receipt/v1";
+const JULIA_PROBE_PROTOCOL: &str = "luxel.lava-window-probe/v1";
+const PROBE_OUTPUT_PREFIX: &str = "LUXEL_WINDOW_PROBE=";
 const MAX_PROBE_TIMEOUT: Duration = Duration::from_secs(600);
 const MAX_PROCESS_OUTPUT_BYTES: usize = 64 * 1024;
 
@@ -27,10 +27,10 @@ using Lava
 using GeometryBasics
 using JSON3
 
-const WGE_WINDOW_PROBE_PROTOCOL = "wge.lava-window-probe/v1"
-const WGE_LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
+const LUXEL_WINDOW_PROBE_PROTOCOL = "luxel.lava-window-probe/v1"
+const LUXEL_LAVA_REVISION = "11c7e31bdf62408d22bf379e9e59510f69d2103e"
 
-function _wge_window_probe_vertex()
+function _luxel_window_probe_vertex()
     index = Lava.vertex_index()
     x = index == Int32(1) ? -0.8f0 : index == Int32(2) ? 0.8f0 : 0.0f0
     y = index == Int32(3) ? 0.8f0 : -0.8f0
@@ -38,20 +38,20 @@ function _wge_window_probe_vertex()
     return nothing
 end
 
-function _wge_window_probe_fragment()
+function _luxel_window_probe_fragment()
     Lava.gfx_output(0, GeometryBasics.Vec4f(0.15f0, 0.75f0, 1.0f0, 1.0f0))
     return nothing
 end
 
-function _wge_window_probe_payload(outcome, phase, detail, successful_present_count,
+function _luxel_window_probe_payload(outcome, phase, detail, successful_present_count,
                                    framebuffer_width, framebuffer_height, device_name)
     return (
-        protocol=WGE_WINDOW_PROBE_PROTOCOL,
+        protocol=LUXEL_WINDOW_PROBE_PROTOCOL,
         outcome=outcome,
         phase=phase,
         detail=detail,
         backend_id="lava-vulkan",
-        backend_revision=WGE_LAVA_REVISION,
+        backend_revision=LUXEL_LAVA_REVISION,
         runtime_version=string(VERSION),
         device_name=device_name,
         framebuffer_width_px=framebuffer_width,
@@ -60,7 +60,7 @@ function _wge_window_probe_payload(outcome, phase, detail, successful_present_co
     )
 end
 
-function _wge_run_window_probe()
+function _luxel_run_window_probe()
     width = parse(Int, ARGS[1])
     height = parse(Int, ARGS[2])
     vsync = ARGS[3] == "true"
@@ -77,13 +77,13 @@ function _wge_run_window_probe()
         context = Lava.vk_context()
         phase = "window_surface_swapchain"
         win = Lava.RenderWindow(width, height;
-            title="WGE window capability probe", vsync, ctx=context)
+            title="Luxel window capability probe", vsync, ctx=context)
         framebuffer_width, framebuffer_height = size(win)
         device_name = context.device_name
         bq = context.default_bq
         pipeline = Lava.Rasterizer(
-            vertex=_wge_window_probe_vertex,
-            fragment=_wge_window_probe_fragment,
+            vertex=_luxel_window_probe_vertex,
+            fragment=_luxel_window_probe_fragment,
             cull=Lava.NoCull(),
             depth=Lava.DepthOff(),
         )
@@ -105,7 +105,7 @@ function _wge_run_window_probe()
             Lava.present_frame!(bq, win)
             if win.current_frame == mod1(prior_frame + 1, frame_slots)
                 successful_present_count = 1
-                result = _wge_window_probe_payload(
+                result = _luxel_window_probe_payload(
                     "present_verified", "complete", nothing,
                     successful_present_count, framebuffer_width,
                     framebuffer_height, device_name)
@@ -114,14 +114,14 @@ function _wge_run_window_probe()
         end
 
         if result === nothing
-            result = _wge_window_probe_payload(
+            result = _luxel_window_probe_payload(
                 "failed", "presentation",
                 "Lava did not advance its frame slot after three present attempts; no successful present is claimed",
                 successful_present_count, framebuffer_width,
                 framebuffer_height, device_name)
         end
     catch error
-        result = _wge_window_probe_payload(
+        result = _luxel_window_probe_payload(
             "failed", phase, sprint(showerror, error),
             successful_present_count, framebuffer_width,
             framebuffer_height, device_name)
@@ -130,7 +130,7 @@ function _wge_run_window_probe()
             try
                 close(win)
             catch error
-                result = _wge_window_probe_payload(
+                result = _luxel_window_probe_payload(
                     "failed", "cleanup", sprint(showerror, error),
                     successful_present_count, framebuffer_width,
                     framebuffer_height, device_name)
@@ -139,12 +139,12 @@ function _wge_run_window_probe()
     end
 
     result === nothing && error("window probe produced no typed result")
-    println("WGE_WINDOW_PROBE=", JSON3.write(result))
+    println("LUXEL_WINDOW_PROBE=", JSON3.write(result))
     flush(stdout)
     return nothing
 end
 
-_wge_run_window_probe()
+_luxel_run_window_probe()
 "#;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

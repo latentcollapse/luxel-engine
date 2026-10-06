@@ -15,18 +15,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from wge_semantic_ir import canonical_dumps, lower_file  # noqa: E402
+from luxel_semantic_ir import canonical_dumps, lower_file  # noqa: E402
 
 REGISTRY = ROOT / "world_core" / "crates" / "semantic_kernel" / "registry_v0.json"
 WORKER = ROOT / "terrain_lab" / "bin" / "lane_overlap_worker.jl"
 PROJECT = ROOT / "terrain_lab"
 MANIFEST = PROJECT / "Manifest.toml"
 FIXTURES = ROOT / "tests" / "fixtures" / "semantic_kernel"
-BINARY = ROOT / "world_core" / "target" / "debug" / "wge-semantic-kernel"
-INVALID = FIXTURES / "invalid.wge"
-REPAIRED = FIXTURES / "repaired.wge"
-TAMPERED = FIXTURES / "tampered.wge"
-NOTE = FIXTURES / "repaired_note.wge"
+BINARY = ROOT / "world_core" / "target" / "debug" / "luxel-semantic-kernel"
+INVALID = FIXTURES / "invalid.luxel"
+REPAIRED = FIXTURES / "repaired.luxel"
+TAMPERED = FIXTURES / "tampered.luxel"
+NOTE = FIXTURES / "repaired_note.luxel"
 
 
 def events(text: str) -> list[dict]:
@@ -74,13 +74,13 @@ class PersistenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         subprocess.run(
-            ["cargo", "build", "-p", "wge-semantic-kernel", "--quiet"],
+            ["cargo", "build", "-p", "luxel-semantic-kernel", "--quiet"],
             cwd=ROOT / "world_core",
             check=True,
         )
 
     def test_create_reopen_commit_and_equivalent_source(self) -> None:
-        directory = Path(tempfile.mkdtemp(prefix="wge-persist-"))
+        directory = Path(tempfile.mkdtemp(prefix="luxel-persist-"))
         store = directory / "store"
         store.mkdir()
         try:
@@ -174,8 +174,8 @@ class PersistenceTests(unittest.TestCase):
             shutil.rmtree(directory, ignore_errors=True)
 
     def test_two_fresh_runs_share_semantic_ids_and_second_open_is_idempotent(self) -> None:
-        first = Path(tempfile.mkdtemp(prefix="wge-run-a-"))
-        second = Path(tempfile.mkdtemp(prefix="wge-run-b-"))
+        first = Path(tempfile.mkdtemp(prefix="luxel-run-a-"))
+        second = Path(tempfile.mkdtemp(prefix="luxel-run-b-"))
         try:
             first_log = self.full_run(first)
             second_log = self.full_run(second)
@@ -197,7 +197,7 @@ class PersistenceTests(unittest.TestCase):
             shutil.rmtree(second, ignore_errors=True)
 
     def test_corruption_fails_closed_without_resetting_g0(self) -> None:
-        directory = Path(tempfile.mkdtemp(prefix="wge-corrupt-"))
+        directory = Path(tempfile.mkdtemp(prefix="luxel-corrupt-"))
         try:
             self.full_run(directory)
             store = directory / "store"
@@ -217,7 +217,7 @@ class PersistenceTests(unittest.TestCase):
             shutil.rmtree(broken)
             shutil.copytree(store, broken)
             schema = json.loads((broken / "store.json").read_text())
-            schema["schema"] = "wge.store/v9"
+            schema["schema"] = "luxel.store/v9"
             (broken / "store.json").write_text(json.dumps(schema), encoding="utf-8")
             unsupported = run_kernel(["inspect", "--store", str(broken)])
             self.assertEqual(events(unsupported.stdout)[0]["code"], "unsupported_schema")
@@ -244,7 +244,7 @@ class PersistenceTests(unittest.TestCase):
             shutil.rmtree(directory, ignore_errors=True)
 
     def test_solver_drift_and_julia_restart_leave_the_world(self) -> None:
-        directory = Path(tempfile.mkdtemp(prefix="wge-solver-"))
+        directory = Path(tempfile.mkdtemp(prefix="luxel-solver-"))
         try:
             log = self.full_run(directory)
             store = directory / "store"
@@ -265,7 +265,7 @@ class PersistenceTests(unittest.TestCase):
             shutil.rmtree(directory, ignore_errors=True)
 
     def test_same_length_inplace_edits_fail_closed(self) -> None:
-        directory = Path(tempfile.mkdtemp(prefix="wge-inplace-"))
+        directory = Path(tempfile.mkdtemp(prefix="luxel-inplace-"))
         try:
             self.full_run(directory)
             store = directory / "store"
@@ -303,7 +303,7 @@ class PersistenceTests(unittest.TestCase):
             shutil.rmtree(directory, ignore_errors=True)
 
     def test_identity_checks_reject_rewritten_records(self) -> None:
-        directory = Path(tempfile.mkdtemp(prefix="wge-identity-"))
+        directory = Path(tempfile.mkdtemp(prefix="luxel-identity-"))
         try:
             self.full_run(directory)
             store = directory / "store"
@@ -361,10 +361,10 @@ class PersistenceTests(unittest.TestCase):
             g0.write_bytes(g0_bytes)
             self.assertEqual((store / "pointer.json").read_bytes(), pointer)
 
-            other = directory / "other.wge"
+            other = directory / "other.luxel"
             other.write_text(
-                "from wge.world import lane, place\n"
-                "from wge.geometry import rect\n"
+                "from luxel.world import lane, place\n"
+                "from luxel.geometry import rect\n"
                 "\n"
                 "central_lane = lane(id=\"central\", footprint=rect(x0=0, y0=40, x1=100, y1=60))\n"
                 "blocked_keep = place(id=\"keep\", footprint=rect(x0=0, y0=0, x1=10, y1=10))\n",

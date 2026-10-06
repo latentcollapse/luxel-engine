@@ -1,11 +1,11 @@
 [package]
-name = "wge-gameplay-contract"
+name = "luxel-gameplay-contract"
 version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 authors = ["Codeweald contributors"]
 rust-version = "1.95"
-description = "Deterministic, engine-neutral gameplay contract and reference runtime for WGE"
+description = "Deterministic, engine-neutral gameplay contract and reference runtime for Luxel"
 
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
@@ -13,5 +13,5 @@ serde_json = "1.0"
 sha2 = "0.10"
 
 [[bin]]
-name = "wge-gameplay-contract"
+name = "luxel-gameplay-contract"
 path = "src/main.rs"

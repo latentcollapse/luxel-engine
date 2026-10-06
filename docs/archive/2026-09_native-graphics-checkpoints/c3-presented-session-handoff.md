@@ -121,7 +121,7 @@ re-derive them. Also filed as FR-0009/0010/0011 in
   on the C2.5 packet, `frames_presented=3`,
   `window_presented_frames=3`, clean close. First frame ~73.6s (pipeline
   compilation), then 56ms / 26ms steady state.
-- `cargo test -p wge-native-graphics-contract --test presented_session`
+- `cargo test -p luxel-native-graphics-contract --test presented_session`
   (both tests): negative control (present without open window) and the
   full loop — open 640×480 window → warmup offscreen promote → 12
   presented frames → camera move → Tier-A `capture_and_promote` → 4 more

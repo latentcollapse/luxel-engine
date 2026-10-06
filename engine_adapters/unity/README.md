@@ -18,16 +18,16 @@ replaced with a primitive. This adapter has source-level test coverage through
 the zone build, but must still be exercised in an installed Unity Editor before
 it can be called runtime-validated.
 
-## WGE MVP handoff
+## Luxel MVP handoff
 
-The project-ledger vertical slice emits `wge.unity-mvp-import/v1` beside a
-certified `project_snapshot.json`. In Unity use **Tools > Codeweald > WGE MVP >
+The project-ledger vertical slice emits `luxel.unity-mvp-import/v1` beside a
+certified `project_snapshot.json`. In Unity use **Tools > Codeweald > Luxel MVP >
 Import Certified Snapshot**. That existing menu path now reads the strict
-typed contract in `WgeMvpContract.cs`: it checks the canonical snapshot digest,
+typed contract in `LuxelMvpContract.cs`: it checks the canonical snapshot digest,
 snapshot/manifest identity and target agreement, gate coverage, receipt IDs,
 artifact bindings, SHA-256 bytes, and root-contained paths (including symlink
 rejection) before copying artifacts. It preserves the imported artifact set
-and writes `wge_mvp_import_report.json` with target runtime validation marked
+and writes `luxel_mvp_import_report.json` with target runtime validation marked
 `indeterminate`.
 
 The package uses Unity's Newtonsoft JSON package to reject duplicate or
@@ -47,4 +47,4 @@ bindings only; the self-digest is not an execution signature. Until a native
 validator or independently observed Unity process authenticates runtime
 execution, this adapter does not promote a Unity runtime gate. The legacy
 `CodewealdMvpRuntimeReceipt` MonoBehaviour remains for package compatibility;
-its inspector fields are explicitly not valid WGE evidence.
+its inspector fields are explicitly not valid Luxel evidence.

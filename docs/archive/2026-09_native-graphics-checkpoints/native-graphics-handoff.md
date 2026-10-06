@@ -1,11 +1,11 @@
-# WGE Native Graphics Handoff
+# Luxel Native Graphics Handoff
 
 Status: adapter-v6 adversarial audit, Campaign 2 authored-frame checkpoint, and
 C2.5 imported-asset inspection checkpoint closed; native engine-neutral graphics
 is green, while broader production visual quality remains an explicitly measured
 gap, 2026-09-30.
 
-This checkpoint makes Lava the supervised native graphics backend for WGE's
+This checkpoint makes Lava the supervised native graphics backend for Luxel's
 engine-neutral path. Rust remains semantic and receipt-promotion authority;
 Julia owns typed numerical/GPU execution; Lava owns Vulkan machinery behind
 the Julia adapter. Python is not semantic authority.
@@ -18,21 +18,21 @@ crosses the canonical packet boundary, but production texture streaming and
 full asset LOD/collision lowering remain open.
 
 The C2.4 real-asset integration slice remains preserved at
-`/home/mattc/Pictures/WGE/c2.4-real-asset/`. C2.5 extends it with canonical
+`/home/mattc/Pictures/Luxel/c2.4-real-asset/`. C2.5 extends it with canonical
 tangent carry-through, an explicit single-level mip policy, a Rust-owned close
 camera, and a real 640x480 close/context capture. The permanent assembled
 log-hut GLB now renders through that path, the worker is restarted, and the
 warm-state close capture plus deterministic certification receipt replay
 byte-identically. The C2.5 handoff and evidence bundle are recorded in
 `docs/archive/2026-09_native-graphics-checkpoints/c2-5-imported-asset-inspection-handoff.md` and
-`/home/mattc/Pictures/WGE/c2.5-imported-asset/`. This remains a certified
+`/home/mattc/Pictures/Luxel/c2.5-imported-asset/`. This remains a certified
 static-asset inspection slice, not a claim of production visual quality.
 
 ## Frozen identities
 
-- Scene packet: `wge.graphics-scene-packet/v6`.
-- Frame receipt: `wge.graphics-frame-receipt/v1`.
-- Adapter: `wge.lava-adapter/v7`.
+- Scene packet: `luxel.graphics-scene-packet/v6`.
+- Frame receipt: `luxel.graphics-frame-receipt/v1`.
+- Adapter: `luxel.lava-adapter/v7`.
 - Lava: `11c7e31bdf62408d22bf379e9e59510f69d2103e`.
 - Vulkan.jl: `03b4ca2351477ccbb8ee378f512da50f7eec7bac`.
 - VulkanCore.jl: `1d02829e8fa92da430d879db4dd7bf564a872035`.
@@ -61,7 +61,7 @@ restart, so slow initialization cannot become a pass-shaped partial receipt.
 The certification orchestrator now runs `render-quality-layout` through the
 provenance-bound `render-world-showcase-layout` composition and independently
 promotes its packet, frame receipt, raw capture, and visual-quality evidence.
-The showcase is WGE-owned inspection machinery bound to the authored world; it
+The showcase is Luxel-owned inspection machinery bound to the authored world; it
 is not an external-engine comparison or a claim of production visual parity.
 The gate remains fail-closed when the measured scene misses any technical
 floor.
@@ -84,13 +84,13 @@ Terrain coverage is measured independently from authored geometry. Props cannot
 masquerade as terrain, but legitimate authored geometry contributes to the
 content-level color, edge, and tile measurements. The screenshot and evidence
 sidecar are preserved at
-`/home/mattc/Pictures/WGE/native-world-showcase-certified-2026-09-29.png`.
+`/home/mattc/Pictures/Luxel/native-world-showcase-certified-2026-09-29.png`.
 
 A fresh non-fixture `cedar_saddle_relay` layout also passes the same registered
 profile after the generic terrain-material revision: `2,571 bp` terrain
 coverage, `3,255 bp` combined content coverage, `529 bp` spatial edges, `28/314`
 luminance/RGB bins, and `33/64` varied tiles. Its evidence is preserved at
-`/home/mattc/Pictures/WGE/cedar-world-showcase-certified-2026-09-29.png`.
+`/home/mattc/Pictures/Luxel/cedar-world-showcase-certified-2026-09-29.png`.
 
 ## Campaign 2 handoff
 
@@ -98,7 +98,7 @@ The first authored-frame slice is green through the same authority path. Run
 `render-campaign2-layout` to produce the fixed close, medium, and wide views.
 The final current-binary artifacts are in `artifacts/campaign2/live-twelfth/`,
 with the clean replay in `artifacts/campaign2/live-eleventh/`; the viewable
-handoff is `/home/mattc/Pictures/WGE/campaign2-2026-09-29/`.
+handoff is `/home/mattc/Pictures/Luxel/campaign2-2026-09-29/`.
 
 The scene is a Rust-sealed projection over the certified world, with semantic
 source instances fenced from the calibration composition but retained in the
@@ -166,8 +166,8 @@ tears down the transport, and reuse requires an explicit restart.
 From `world_core`:
 
 ```sh
-cargo test -q -p wge-native-graphics-contract --lib -- --test-threads=1
-cargo test -q -p wge-native-graphics-contract --test native_graphics -- --test-threads=1
+cargo test -q -p luxel-native-graphics-contract --lib -- --test-threads=1
+cargo test -q -p luxel-native-graphics-contract --test native_graphics -- --test-threads=1
 /home/mattc/.juliaup/bin/julia --project=graphics_lab --startup-file=no graphics_lab/test/runtests.jl
 /home/mattc/.juliaup/bin/julia --project=graphics_lab --startup-file=no graphics_lab/test/lava_adapter.jl
 ```

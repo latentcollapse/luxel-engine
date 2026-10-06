@@ -9,9 +9,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-pub const GCS_MANIFEST_SCHEMA: &str = "wge.gcs-kit-manifest/v1";
-pub const GCS_RESOLVED_KIT_SCHEMA: &str = "wge.gcs-resolved-kit/v1";
-pub const REFERENCE_VERTICAL_SLICE_KIT_ID: &str = "wge.reference.vertical-slice";
+pub const GCS_MANIFEST_SCHEMA: &str = "luxel.gcs-kit-manifest/v1";
+pub const GCS_RESOLVED_KIT_SCHEMA: &str = "luxel.gcs-resolved-kit/v1";
+pub const REFERENCE_VERTICAL_SLICE_KIT_ID: &str = "luxel.reference.vertical-slice";
 const MAX_ID_BYTES: usize = 128;
 
 macro_rules! string_id {

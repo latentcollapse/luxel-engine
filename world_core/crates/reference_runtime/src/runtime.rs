@@ -62,9 +62,9 @@ pub struct TraversalEvidence {
     pub evidence_sha256: String,
 }
 
-pub const TRAVERSAL_SESSION_SNAPSHOT_SCHEMA: &str = "wge.reference-traversal-session-snapshot/v1";
+pub const TRAVERSAL_SESSION_SNAPSHOT_SCHEMA: &str = "luxel.reference-traversal-session-snapshot/v1";
 pub const TRAVERSAL_SESSION_COMPLETION_SCHEMA: &str =
-    "wge.reference-traversal-session-completion/v1";
+    "luxel.reference-traversal-session-completion/v1";
 pub const MAX_TRAVERSAL_SESSION_STEPS: usize = 257 * 257;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

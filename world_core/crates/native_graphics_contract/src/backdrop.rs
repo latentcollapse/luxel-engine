@@ -31,13 +31,13 @@
 use std::path::Path;
 
 use serde::Deserialize;
-use wge_asset_contract::{RenderPreparationStatus, condition_render_asset};
+use luxel_asset_contract::{RenderPreparationStatus, condition_render_asset};
 
 use crate::asset_projection::{GraphicsAssetProjection, project_render_asset, validate_graphics_asset_projection};
 use crate::scene_composition::{AssetNamespace, append_asset_resources};
 use crate::{GraphicsContractError, GraphicsScenePacketBody, InstanceImportance, InstancePacket, Transform3d, sha256_prefixed};
 
-pub const BACKDROP_LOCK_SCHEMA: &str = "wge.backdrop-lock/v1";
+pub const BACKDROP_LOCK_SCHEMA: &str = "luxel.backdrop-lock/v1";
 
 /// Far plane of a backdrop view. The field reaches ~19 km from the seat along
 /// its diagonal; 24 km keeps the whole of it, with margin, inside the frustum.

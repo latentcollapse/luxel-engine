@@ -350,7 +350,7 @@ def main():
     models = {model["asset"]: model for model in manifest["models"]}
     out_dir = os.path.join(REPO, out_rel)
     os.makedirs(out_dir, exist_ok=True)
-    build = {"schema_version": "wge.kit-build/v1", "set_id": kit_set, "models_manifest": MODELS_MANIFEST,
+    build = {"schema_version": "luxel.kit-build/v1", "set_id": kit_set, "models_manifest": MODELS_MANIFEST,
              "blender": blender_version(), "assets": {}}
     with tempfile.TemporaryDirectory() as workdir:
         builders = {
@@ -373,7 +373,7 @@ def main():
         handle.write("\n")
 
     lock_path = os.path.join(REPO, lock_rel)
-    lock = {"schema_version": "wge.kit-lock/v1", "set_id": kit_set, "blender": build["blender"],
+    lock = {"schema_version": "luxel.kit-lock/v1", "set_id": kit_set, "blender": build["blender"],
             "assets": {name: {"glb": a["glb"], "bytes": a["glb_bytes"], "sha256": a["glb_sha256"]}
                        for name, a in build["assets"].items()}}
     if args.pin:

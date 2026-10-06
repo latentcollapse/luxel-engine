@@ -3,7 +3,7 @@
 pub const OPERATION: &str = crate::ops::PATH_OP;
 pub const GATE_ID: &str = crate::ops::PATH_GATE;
 pub const REPAIR_CLASS: &str = "shorten_path";
-pub const MEASUREMENT_SCHEMA: &str = "wge.path-length/v0";
+pub const MEASUREMENT_SCHEMA: &str = "luxel.path-length/v0";
 
 pub fn passes(length: i64, budget: i64) -> bool {
     length <= budget

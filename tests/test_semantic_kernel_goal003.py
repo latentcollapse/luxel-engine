@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from wge_semantic_ir import canonical_dumps, lower_file  # noqa: E402
+from luxel_semantic_ir import canonical_dumps, lower_file  # noqa: E402
 
 
 REGISTRY = ROOT / "world_core" / "crates" / "semantic_kernel" / "registry_v0.json"
@@ -20,11 +20,11 @@ WORKER = ROOT / "terrain_lab" / "bin" / "lane_overlap_worker.jl"
 PROJECT = ROOT / "terrain_lab"
 MANIFEST = PROJECT / "Manifest.toml"
 FIXTURES = ROOT / "tests" / "fixtures" / "semantic_kernel"
-BINARY = ROOT / "world_core" / "target" / "debug" / "wge-semantic-kernel"
-PATH_INVALID = FIXTURES / "path_invalid.wge"
-PATH_REPAIRED = FIXTURES / "path_repaired.wge"
-PATH_NOTE = FIXTURES / "path_repaired_note.wge"
-PATH_TAMPERED = FIXTURES / "path_tampered.wge"
+BINARY = ROOT / "world_core" / "target" / "debug" / "luxel-semantic-kernel"
+PATH_INVALID = FIXTURES / "path_invalid.luxel"
+PATH_REPAIRED = FIXTURES / "path_repaired.luxel"
+PATH_NOTE = FIXTURES / "path_repaired_note.luxel"
+PATH_TAMPERED = FIXTURES / "path_tampered.luxel"
 
 
 def events(text: str) -> list[dict]:
@@ -45,7 +45,7 @@ class Goal003SemanticKernelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         subprocess.run(
-            ["cargo", "build", "-p", "wge-semantic-kernel", "--quiet"],
+            ["cargo", "build", "-p", "luxel-semantic-kernel", "--quiet"],
             cwd=ROOT / "world_core",
             check=True,
         )
@@ -123,7 +123,7 @@ class Goal003SemanticKernelTests(unittest.TestCase):
         return store, generation_id, applied
 
     def test_path_failure_is_a_repair_and_keeps_genesis_current(self) -> None:
-        directory = Path(tempfile.mkdtemp(prefix="wge-goal003-fail-"))
+        directory = Path(tempfile.mkdtemp(prefix="luxel-goal003-fail-"))
         try:
             store = directory / "store"
             store.mkdir()
@@ -144,7 +144,7 @@ class Goal003SemanticKernelTests(unittest.TestCase):
             shutil.rmtree(directory, ignore_errors=True)
 
     def test_lane_and_path_commit_through_one_generation_and_one_worker(self) -> None:
-        directory = Path(tempfile.mkdtemp(prefix="wge-goal003-commit-"))
+        directory = Path(tempfile.mkdtemp(prefix="luxel-goal003-commit-"))
         try:
             store, generation_id, applied = self.commit_path_world(directory)
             solver_rows = [row for row in events(applied.stdout) if row.get("event") == "solver"]
@@ -184,8 +184,8 @@ class Goal003SemanticKernelTests(unittest.TestCase):
             shutil.rmtree(directory, ignore_errors=True)
 
     def test_equivalent_source_and_fresh_run_keep_multi_gate_identity_stable(self) -> None:
-        first_dir = Path(tempfile.mkdtemp(prefix="wge-goal003-a-"))
-        second_dir = Path(tempfile.mkdtemp(prefix="wge-goal003-b-"))
+        first_dir = Path(tempfile.mkdtemp(prefix="luxel-goal003-a-"))
+        second_dir = Path(tempfile.mkdtemp(prefix="luxel-goal003-b-"))
         try:
             first_store, first_generation, _ = self.commit_path_world(first_dir)
             second_store, second_generation, _ = self.commit_path_world(second_dir)
@@ -229,7 +229,7 @@ class Goal003SemanticKernelTests(unittest.TestCase):
             shutil.rmtree(second_dir, ignore_errors=True)
 
     def test_corrupt_multi_gate_generation_fails_closed(self) -> None:
-        directory = Path(tempfile.mkdtemp(prefix="wge-goal003-corrupt-"))
+        directory = Path(tempfile.mkdtemp(prefix="luxel-goal003-corrupt-"))
         try:
             store, generation_id, _ = self.commit_path_world(directory)
             broken = directory / "broken"

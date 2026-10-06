@@ -20,7 +20,7 @@ The existing PPMs inspected from `/tmp` support the documented limits: the overv
 
 **Anchors:** `docs/gameplay/live-loop-design.md:3,58-88`; `world_core/crates/live_evidence_contract/README.md:3-21`; Tier-A sampling identity/window in `world_core/crates/live_evidence_contract/src/lib.rs:82-112,154-167`; Tier-B identity/counters at `:284-296,500-555`; current snapshot receipt fields in `world_core/crates/native_graphics_contract/src/lib.rs:468-486`.
 
-The new crate adds typed session/request IDs, packet and capability digests, monotonic frame sequence, bounded caller-configured sample interval/window, stale-result rejection, and fail-closed state transitions. But it is standalone and explicitly does not implement a window/swapchain, live telemetry source, presentation acknowledgement, supervisor integration, or receipt revalidation. Tier-B records bind one session packet and counters, not the actual framebuffer or a per-frame packet/state digest; there is no simulation tick/input watermark or dynamic-state digest. The current worker still serves `render_packet` only (`graphics_lab/bin/wge_graphics_worker.jl:88-103`). Therefore an offscreen Tier-A sample cannot yet be proven to correspond to the frame currently displayed, and caller-selected timing policy is not a Campaign 1 acceptance default.
+The new crate adds typed session/request IDs, packet and capability digests, monotonic frame sequence, bounded caller-configured sample interval/window, stale-result rejection, and fail-closed state transitions. But it is standalone and explicitly does not implement a window/swapchain, live telemetry source, presentation acknowledgement, supervisor integration, or receipt revalidation. Tier-B records bind one session packet and counters, not the actual framebuffer or a per-frame packet/state digest; there is no simulation tick/input watermark or dynamic-state digest. The current worker still serves `render_packet` only (`graphics_lab/bin/luxel_graphics_worker.jl:88-103`). Therefore an offscreen Tier-A sample cannot yet be proven to correspond to the frame currently displayed, and caller-selected timing policy is not a Campaign 1 acceptance default.
 
 **Adversarial test:** At integration, present frame `n`, change camera/world state, then deliver telemetry or Tier A from `n-1`; require stale state rejection and a fixed demotion bound. Spoof a monotonically increasing counter without presenting frames, and inject a missed-sample window and worker stall. The standalone crate already has contract-level expiry/stale identity tests; these must not be mistaken for renderer integration evidence.
 
@@ -66,7 +66,7 @@ The bridge describes the warm frame as about 263 ms wall, 48 ms renderer, and 0.
 
 **Status:** Confirmed snapshot-path copying; contribution to wall-time gap is unproven.
 
-**Anchors:** full packet JSON request in `world_core/crates/native_graphics_contract/src/supervisor.rs:295-305,397-405`; capture decode and retained copies at `:334-355,390-394`; Julia readback/conversion in `graphics_lab/src/LavaAdapter.jl:1495-1499,1413-1425,3332-3348`; worker response serialization in `graphics_lab/bin/wge_graphics_worker.jl:25-33,88-103`.
+**Anchors:** full packet JSON request in `world_core/crates/native_graphics_contract/src/supervisor.rs:295-305,397-405`; capture decode and retained copies at `:334-355,390-394`; Julia readback/conversion in `graphics_lab/src/LavaAdapter.jl:1495-1499,1413-1425,3332-3348`; worker response serialization in `graphics_lab/bin/luxel_graphics_worker.jl:25-33,88-103`.
 
 Each snapshot request serializes the complete packet. Julia reads the framebuffer into host memory, allocates RGBA bytes, base64-encodes them, serializes JSON, and copies the response to a byte vector. Rust clones the frame JSON value, decodes base64 into another RGBA vector, then returns both the `GraphicsFrameOutput` containing `capture_base64` and `PromotedFrame.capture_bytes`. The benchmark’s wall-minus-renderer gap is large, but no evidence attributes it to these copies; report this as an allocation/transport risk, not a proven root cause. A 60-Hz path cannot reuse this round trip unchanged.
 
@@ -80,11 +80,11 @@ Each snapshot request serializes the complete packet. Julia reads the framebuffe
 
 **Anchors:** PPM export and receipt-to-stdout behavior in `world_core/crates/native_graphics_contract/src/main.rs:210-222`; RGBA-to-P6 conversion at `:491-513`; raw capture digest in `world_core/crates/native_graphics_contract/src/supervisor.rs:353-388`; human evidence hashes in `docs/archive/2026-09_native-graphics-checkpoints/native-graphics-handoff.md:40-61`.
 
-Rust’s receipt binds the raw RGBA8 bytes. The CLI writes a transformed PPM file (drops alpha, adds a P6 header) and prints the receipt only to stdout. It does not save a sidecar containing the PPM file digest and the receipt together. A reviewer can therefore receive a modified/replaced image beside a valid stdout receipt without a direct artifact-level check. Existing v6 images inspected for this review were temporary `/tmp/wge-v6-*.ppm` files, not a durable review bundle.
+Rust’s receipt binds the raw RGBA8 bytes. The CLI writes a transformed PPM file (drops alpha, adds a P6 header) and prints the receipt only to stdout. It does not save a sidecar containing the PPM file digest and the receipt together. A reviewer can therefore receive a modified/replaced image beside a valid stdout receipt without a direct artifact-level check. Existing v6 images inspected for this review were temporary `/tmp/luxel-v6-*.ppm` files, not a durable review bundle.
 
 **Adversarial test:** Save an image/receipt bundle, alter or truncate the PPM, and require the verifier to reject it. Confirm the unmodified image decodes to RGBA whose hash equals the promoted raw-capture digest.
 
-**Bounded fix:** Export a capture bundle with the image, receipt JSON, and a manifest binding output-file SHA-256, raw-capture SHA-256, packet/world/camera identity, dimensions, format, and exporter version. Store human review images in the agreed WGE screenshot folder; keep the receipt as the authority artifact.
+**Bounded fix:** Export a capture bundle with the image, receipt JSON, and a manifest binding output-file SHA-256, raw-capture SHA-256, packet/world/camera identity, dimensions, format, and exporter version. Store human review images in the agreed Luxel screenshot folder; keep the receipt as the authority artifact.
 
 ### C7 — P2 — GCS resolver is semantic composition, not executable gameplay
 
@@ -115,7 +115,7 @@ The report treats rigging/skinning/retargeting, arbitrary mesh-to-character gene
 ## Checks performed
 
 - Read the requested bridge, quality-gap, handoff, benchmark, and gameplay-kit documents; inspected the Rust supervisor/validator, Julia worker/adapter, gameplay contracts, reference runtime, and existing tests.
-- Inspected existing `/tmp/wge-v6-overview.ppm`, `/tmp/wge-v6-showcase.ppm`, and `/tmp/wge-v6-world-showcase.ppm` without writing converted images to disk.
-- Repository inspection found no WGE `RenderWindow` or swapchain/present integration. A standalone Tier-A/Tier-B contract now exists under `world_core/crates/live_evidence_contract`, but its README says it is not a workspace member and the live-loop design explicitly leaves renderer/supervisor integration unimplemented. The worker path handles `render_packet` only.
-- Attempted `cargo test -q -p wge-gameplay-contract`; it queued behind an already-running native-graphics Rust compile in the shared `target` directory. Stopped only the waiting test command. No test result is claimed.
+- Inspected existing `/tmp/luxel-v6-overview.ppm`, `/tmp/luxel-v6-showcase.ppm`, and `/tmp/luxel-v6-world-showcase.ppm` without writing converted images to disk.
+- Repository inspection found no Luxel `RenderWindow` or swapchain/present integration. A standalone Tier-A/Tier-B contract now exists under `world_core/crates/live_evidence_contract`, but its README says it is not a workspace member and the live-loop design explicitly leaves renderer/supervisor integration unimplemented. The worker path handles `render_packet` only.
+- Attempted `cargo test -q -p luxel-gameplay-contract`; it queued behind an already-running native-graphics Rust compile in the shared `target` directory. Stopped only the waiting test command. No test result is claimed.
 - No world render, code edit, or edit outside this report was performed.

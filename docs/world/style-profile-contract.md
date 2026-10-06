@@ -1,4 +1,4 @@
-# WGE Style Profile Contract
+# Luxel Style Profile Contract
 
 Status: **typed profile/plan slice implemented; broader lowering remains**, 2026-09-30  
 Scope: converting concept art, briefs, and visual constraints into typed, provenance-bound style intent and executable rendering/content policy
@@ -7,16 +7,16 @@ This contract defines visual style as a multidimensional semantic object. It del
 
 Related sources:
 
-- [WGE Capability Registry Design](../platform/capability-registry-design.md)
+- [Luxel Capability Registry Design](../platform/capability-registry-design.md)
 - [Autonomous Game-Construction Forensics](../archive/2026-09_roadmaps-and-audits/autonomous-game-construction-forensics.md)
-- [WGE Native Quality Gaps](native-quality-gaps.md)
-- [WGE Graphics Campaign 2 Report](../archive/2026-10_graphics-sprint-reports/graphics-campaign-2-report.md)
-- [WGE Generality Bridge](../content-sdk/generality-bridge.md)
+- [Luxel Native Quality Gaps](native-quality-gaps.md)
+- [Luxel Graphics Campaign 2 Report](../archive/2026-10_graphics-sprint-reports/graphics-campaign-2-report.md)
+- [Luxel Generality Bridge](../content-sdk/generality-bridge.md)
 
 ## Current implementation slice
 
 The typed Rust implementation lives in
-`world_core/crates/wge_control_plane/src/style_profile.rs`. It provides
+`world_core/crates/luxel_control_plane/src/style_profile.rs`. It provides
 content-digested `StyleProfile` and `StylePlan` records, explicit evidence
 epistemics, bounded basis-point signals, conflict/region/provenance checks,
 and a backend-neutral lowering over the currently registered capabilities.
@@ -24,8 +24,8 @@ and a backend-neutral lowering over the currently registered capabilities.
 The native control plane exposes the read-only lowering command:
 
 ```bash
-cargo run --manifest-path world_core/Cargo.toml --offline -p wge-control-plane -- style-validate PROFILE.json
-cargo run --manifest-path world_core/Cargo.toml --offline -p wge-control-plane -- style-lower PROFILE.json
+cargo run --manifest-path world_core/Cargo.toml --offline -p luxel-control-plane -- style-validate PROFILE.json
+cargo run --manifest-path world_core/Cargo.toml --offline -p luxel-control-plane -- style-lower PROFILE.json
 ```
 
 The Python/MCP transport exposes the same operation as `style_compile`. A
@@ -76,7 +76,7 @@ brief / concept references
 The eventual Rust type should carry the following conceptual fields:
 
 ```yaml
-schema_version: wge.style-profile/v1
+schema_version: luxel.style-profile/v1
 profile_id: style-profile-...
 source_project_id: project-...
 intent:
@@ -243,7 +243,7 @@ The profile compiler must not convert a low-confidence inference into an unmarke
 
 ## StylePlan lowering
 
-`StylePlan` is the Rust-validated answer to “how will this intent be realized in the current WGE capability set?” It should include:
+`StylePlan` is the Rust-validated answer to “how will this intent be realized in the current Luxel capability set?” It should include:
 
 - selected capability IDs and versions;
 - material family assignments;
@@ -376,6 +376,6 @@ Do not begin with a universal style embedding, a learned aesthetic scalar, or a 
 - Which dimensions require human-labelled calibration data before automated judgement is honest?
 - How should regional style conflicts be resolved or surfaced to the model?
 - How should style profiles compose across hero asset, terrain, foliage, UI, and VFX?
-- Which policies belong in Palette versus WGE semantic contracts?
+- Which policies belong in Palette versus Luxel semantic contracts?
 - How should style intent survive asset-provider substitution?
 - What temporal evidence is required before animation style can be promoted?

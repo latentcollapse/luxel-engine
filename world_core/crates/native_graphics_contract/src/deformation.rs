@@ -1,4 +1,4 @@
-//! Scene packet v7 — TetCage deformation extension (WGE_TETCAGE_SEAM_DESIGN §3 P1).
+//! Scene packet v7 — TetCage deformation extension (LUXEL_TETCAGE_SEAM_DESIGN §3 P1).
 //!
 //! P1 GATE, verbatim from the seam design: "existing suites byte-identical with
 //! flag off; flagged run presents deformed frames with receipts."
@@ -15,7 +15,7 @@
 //!
 //! ## The flag
 //!
-//! `WGE_TETCAGE_DEFORM_V7` gates whether a PRODUCER attaches a deformation
+//! `LUXEL_TETCAGE_DEFORM_V7` gates whether a PRODUCER attaches a deformation
 //! section. It does not gate validation — the validator accepts a well-formed
 //! v7 packet whether or not the flag is set, because a flag is a producer
 //! policy, and a receiver must be able to check a packet it did not produce.
@@ -39,11 +39,11 @@ use serde::{Deserialize, Serialize};
 use crate::{BufferReference, GraphicsContractError, GraphicsScenePacketBody};
 
 /// The v7 schema string. v6 remains [`crate::SCENE_PACKET_SCHEMA`].
-pub const SCENE_PACKET_SCHEMA_V7: &str = "wge.graphics-scene-packet/v7";
+pub const SCENE_PACKET_SCHEMA_V7: &str = "luxel.graphics-scene-packet/v7";
 
 /// Producer-side feature flag. Unset or empty = OFF = v6 output, byte-identical
 /// to the pre-P1 campaign.
-pub const DEFORMATION_V7_ENV: &str = "WGE_TETCAGE_DEFORM_V7";
+pub const DEFORMATION_V7_ENV: &str = "LUXEL_TETCAGE_DEFORM_V7";
 
 /// True when the producer flag is on. Read once per process by producers;
 /// validation deliberately does NOT consult it (see module docs).

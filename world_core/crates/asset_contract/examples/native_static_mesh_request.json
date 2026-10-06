@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.asset-runtime-request/v1",
+  "schema_version": "luxel.asset-runtime-request/v1",
   "target": "native",
   "asset_use": "static_mesh",
   "expected_source_sha256": "9560590b27ca1b847cc4b96f7659e99acf5b8fb18622e80ef0b4c2ae7ffd068f",

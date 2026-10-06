@@ -1,6 +1,6 @@
-# Red team 04 — WGE model-native language specification (Kimi/Cursor)
+# Red team 04 — Luxel model-native language specification (Kimi/Cursor)
 
-**Reviewed document:** `WGE_LANGUAGE_SPEC.md`, draft 0.5, dated 2026-08-03  
+**Reviewed document:** `LUXEL_LANGUAGE_SPEC.md`, draft 0.5, dated 2026-08-03  
 **Review date:** 2026-08-03  
 **Reviewer identity:** cursor (Kimi K3), fourth-round follow-up to
 `LANGUAGE_SPEC_REDTEAM_03_KIMI.md`  

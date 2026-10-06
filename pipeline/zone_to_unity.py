@@ -22,7 +22,7 @@ from zone_runtime_effects import RUNTIME_EFFECTS_VERSION, build_runtime_effects
 UNITY_VERSION = "codeweald.unity-zone-import/v1"
 # Where the *art* lives, which is not where this file lives. Deriving it from
 # __file__ silently assumed the engine sat inside the game whose assets it was
-# resolving; once WGE moved out (D8) it pointed at the engine root, no FBX
+# resolving; once Luxel moved out (D8) it pointed at the engine root, no FBX
 # sidecar was ever found, and every Unity placement quietly fell back to the
 # portable GLB -- a downgrade with no error. Callers pass the real root.
 _FALLBACK_PROJECT_ROOT = Path(__file__).resolve().parents[1]

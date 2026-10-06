@@ -1,6 +1,6 @@
-# WGE draft 0.6 freeze verification 01
+# Luxel draft 0.6 freeze verification 01
 
-**Candidate:** `WGE_LANGUAGE_SPEC.md`, draft 0.6, 2026-08-03  
+**Candidate:** `LUXEL_LANGUAGE_SPEC.md`, draft 0.6, 2026-08-03  
 **Closure authority:** `LANGUAGE_SPEC_REDTEAM_06_SOL_FINAL.md`  
 **Ticket:** `CORE-2`  
 **Review mode:** verification only; no new architecture or vocabulary  
@@ -40,7 +40,7 @@
 ## Verification commands and results
 
 ```text
-python3 -m unittest tests.test_wge_language_contract tests.test_worldbuilder_dsl
+python3 -m unittest tests.test_luxel_language_contract tests.test_worldbuilder_dsl
 ......................................
 Ran 38 tests in 0.031s
 OK
@@ -56,7 +56,7 @@ product-profile cache isolation. It also identified a bare boolean in place of
 the semantic-sequence reorder vector and an unguarded digest-matrix universe.
 
 The bounded repair changed only `closure_v06.json` and
-`test_wge_language_contract.py`. The recheck independently matched their
+`test_luxel_language_contract.py`. The recheck independently matched their
 candidate hashes, re-derived all 31 one-field digest expectations from §13.3,
 executed all six module-identity cases, verified profile cache keys, exercised
 the two real sequence orderings, and reran the 38-test command with no failure.
@@ -72,7 +72,7 @@ not edited by this closure loop.
 Draft 0.6 is the frozen **core implementation contract** defined by §25:
 source kernel, type/identity
 rules, canonical IR envelope/order/digests, strict/lenient boundary, and backend
-authority. This is not WGE language 1.0 release conformance. The remaining §24
+authority. This is not Luxel language 1.0 release conformance. The remaining §24
 registry, target, host-bakeoff, constructor, threshold, and model-benchmark
 decisions remain explicit release gates and are available to implementations
 only through unstable namespaces until pinned.

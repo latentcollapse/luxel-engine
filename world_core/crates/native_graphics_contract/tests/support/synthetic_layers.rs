@@ -2,7 +2,7 @@
 //! Real scans are fetched by tools/fetch_terrain_layers.py; tests must not
 //! depend on the network, so they exercise the same builder with generated art.
 
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     LayerCoverage, LayerSource, LayerTextureSizes, MacroRamp, SquareRgba8, TerrainLayerSet, build_terrain_layer_set,
 };
 

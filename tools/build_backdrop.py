@@ -57,8 +57,8 @@ sys.path.insert(0, TOOLS)
 sys.path.insert(0, os.path.join(REPO, "pipeline"))
 from build_calibration_glb import Gltf, box_reduce, linear_to_srgb, png_bytes  # noqa: E402
 
-SPEC_SCHEMA = "wge.backdrop-spec/v1"
-LOCK_SCHEMA = "wge.backdrop-lock/v1"
+SPEC_SCHEMA = "luxel.backdrop-spec/v1"
+LOCK_SCHEMA = "luxel.backdrop-lock/v1"
 BUILDER_VERSION = 1
 
 # Linear albedo of each surface class. Chosen against scanned references of the
@@ -255,7 +255,7 @@ def tile_mesh(seated: np.ndarray, x: np.ndarray, z: np.ndarray, rows: slice, col
     yaw = np.radians(yaw_deg)
     c, s = np.cos(yaw), np.sin(yaw)
 
-    def rotate(vx, vz):  # about +Y, matching a glTF/WGE yaw quaternion
+    def rotate(vx, vz):  # about +Y, matching a glTF/Luxel yaw quaternion
         return c * vx + s * vz, -s * vx + c * vz
 
     px, pz = rotate(gx, gz)
@@ -307,7 +307,7 @@ def build(spec: dict) -> tuple[bytes, dict]:
         raise SystemExit(f"a {span}-cell tile does not box-reduce to {texture_px} px")
 
     gltf = Gltf()
-    gltf.doc["asset"]["generator"] = "wge build_backdrop.py"
+    gltf.doc["asset"]["generator"] = "luxel build_backdrop.py"
     tile_facts = []
     for tile_row in range(tiles):
         for tile_col in range(tiles):

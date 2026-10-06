@@ -1,5 +1,5 @@
 //! Engine-neutral world compiler, validator, traversal runtime, and visual
-//! reference evidence for WGE.
+//! reference evidence for Luxel.
 //!
 //! Julia owns terrain and region fields. Rust pins that boundary, derives the
 //! world artifact identity, checks collision and navigation, runs traversal,
@@ -57,18 +57,18 @@ pub use world::{
     WorldArtifactBody, WorldBuild, build_world, validate_world_artifact,
 };
 
-pub const LAYOUT_SCHEMA: &str = "wge.authored-world-layout/v1";
-pub const WORLD_SCHEMA: &str = "wge.world-artifact/v1";
-pub const JULIA_FIELD_REQUEST_SCHEMA: &str = "wge.julia-world-fields-request/v1";
-pub const JULIA_FIELD_RESPONSE_SCHEMA: &str = "wge.julia-world-fields-response/v1";
-pub const TRAVERSAL_EVIDENCE_SCHEMA: &str = "wge.reference-traversal-evidence/v1";
-pub const VISUAL_EVIDENCE_SCHEMA: &str = "wge.reference-visual-evidence/v1";
-pub const TRAVERSAL_VALIDATOR_ID: &str = "wge.reference-runtime.traversal/v1";
-pub const VISUAL_VALIDATOR_ID: &str = "wge.reference-runtime.visual/v1";
-pub const GAMEPLAY_WORLD_BINDING_SCHEMA: &str = "wge.gameplay-world-binding/v2";
-pub const GAMEPLAY_WORLD_VALIDATOR_ID: &str = "wge.reference-runtime.gameplay-binding/v2";
-pub const GAMEPLAY_CAPTURE_METADATA_SCHEMA: &str = "wge.reference-runtime-capture-metadata/v1";
-pub const REFERENCE_TICK_RATE_HZ: u32 = wge_gameplay_contract::GAMEPLAY_FIXED_TICK_RATE_HZ;
+pub const LAYOUT_SCHEMA: &str = "luxel.authored-world-layout/v1";
+pub const WORLD_SCHEMA: &str = "luxel.world-artifact/v1";
+pub const JULIA_FIELD_REQUEST_SCHEMA: &str = "luxel.julia-world-fields-request/v1";
+pub const JULIA_FIELD_RESPONSE_SCHEMA: &str = "luxel.julia-world-fields-response/v1";
+pub const TRAVERSAL_EVIDENCE_SCHEMA: &str = "luxel.reference-traversal-evidence/v1";
+pub const VISUAL_EVIDENCE_SCHEMA: &str = "luxel.reference-visual-evidence/v1";
+pub const TRAVERSAL_VALIDATOR_ID: &str = "luxel.reference-runtime.traversal/v1";
+pub const VISUAL_VALIDATOR_ID: &str = "luxel.reference-runtime.visual/v1";
+pub const GAMEPLAY_WORLD_BINDING_SCHEMA: &str = "luxel.gameplay-world-binding/v2";
+pub const GAMEPLAY_WORLD_VALIDATOR_ID: &str = "luxel.reference-runtime.gameplay-binding/v2";
+pub const GAMEPLAY_CAPTURE_METADATA_SCHEMA: &str = "luxel.reference-runtime-capture-metadata/v1";
+pub const REFERENCE_TICK_RATE_HZ: u32 = luxel_gameplay_contract::GAMEPLAY_FIXED_TICK_RATE_HZ;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReferenceRuntimeError {

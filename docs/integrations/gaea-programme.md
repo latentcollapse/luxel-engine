@@ -1,4 +1,4 @@
-# The Gaea programme — landform by Gaea, playability by WGE
+# The Gaea programme — landform by Gaea, playability by Luxel
 
 Written 2026-08-04, the night procedural terrain generation was abandoned.
 Audited and red-teamed the same night; see §10 for what the audit changed.
@@ -69,7 +69,7 @@ Gaea graph  ──build──▶  heightfield (PNG16)
                               │
                   ┌───────────┴───────────┐
                   │                       │
-          preview (terrain only)   WGE compiler
+          preview (terrain only)   Luxel compiler
                   │                 ├─ symmetry measurement
              Bevy viewer            ├─ natural lane routing
                                     ├─ local terrain edits (budgeted)
@@ -81,16 +81,16 @@ Gaea graph  ──build──▶  heightfield (PNG16)
 
 **Gaea owns appearance.** Erosion, drainage, rock, mountain character.
 
-**WGE owns playability.** Lanes, siting, enclosure, navmesh, determinism.
+**Luxel owns playability.** Lanes, siting, enclosure, navmesh, determinism.
 **No terrain generator has any concept of these** — Gaea does not know what a
 lane is, and neither do World Machine, World Creator or Instant Terra. This is
-not "replacing WGE with Gaea"; it is deleting the one part of WGE that was
+not "replacing Luxel with Gaea"; it is deleting the one part of Luxel that was
 reinventing a solved problem badly.
 
 **Considered and declined: Houdini.** It genuinely could do both — heightfield
 erosion *and* curve/constraint logic, native Linux, headless `hython`, cheap
-indie licence. It would also subsume WGE and discard months of work. Keep it in
-reserve if the Gaea↔WGE seam becomes the bottleneck; do not switch now.
+indie licence. It would also subsume Luxel and discard months of work. Keep it in
+reserve if the Gaea↔Luxel seam becomes the bottleneck; do not switch now.
 
 ---
 
@@ -99,7 +99,7 @@ reserve if the Gaea↔WGE seam becomes the bottleneck; do not switch now.
 | piece | state |
 |---|---|
 | Headless Gaea build under Proton | **VERIFIED 2026-08-04** — Matt's `MountainRange` graph, marked for export by `gaea_terrain.py`, built at 1024² in under a minute and wrote `Height_Out.png`. Recipe: full `Z:` path, space-free filename, no stdout redirect, judge by files not exit code (§3.3) |
-| `pipeline/gaea_terrain.py` | **verified** — reads/edits `.terrain` JSON *and inserts nodes*. `--insert-after` spliced an `Erosion2` into Matt's graph, rewired its consumer, and Gaea built the result — including the node's `Flow`/`Wear`/`Deposits` outputs. **Gaea is now a dependency WGE drives, not an application anyone operates** |
+| `pipeline/gaea_terrain.py` | **verified** — reads/edits `.terrain` JSON *and inserts nodes*. `--insert-after` spliced an `Erosion2` into Matt's graph, rewired its consumer, and Gaea built the result — including the node's `Flow`/`Wear`/`Deposits` outputs. **Gaea is now a dependency Luxel drives, not an application anyone operates** |
 | A real heightfield | **was verified** — 1024², 16-bit, 10,848 distinct values. **No longer on disk**: it was written to a temporary buildpath. See §7 — this is the argument for committing heightfields, already costing us the one artifact the decision rests on |
 | `pipeline/import_heightfield.py` | **verified** — writes a digest-pinned preview batch at a meshable resolution, with the vertical mapping declared |
 | `pipeline/preview_metrics.py` | **verified** — radial monotonicity, symmetry residual, slope, sink density; non-certifying schema |
@@ -136,7 +136,7 @@ cost an hour each:
 ### 3.1 The resolution contract — read this before building a graph
 
 The viewer decimates the heightfield by `TERRAIN_STRIDE = 4` to build its mesh
-and **refuses any grid where `(resolution - 1) % 4 != 0`**. WGE's own compiler
+and **refuses any grid where `(resolution - 1) % 4 != 0`**. Luxel's own compiler
 emits 1025 for exactly that reason.
 
 **Gaea builds at powers of two, and `2**k - 1` is never divisible by 4.** So
@@ -196,7 +196,7 @@ spaces in their names.** Copy the graph to a space-free filename before building
 the driver should do this automatically.
 
 **Trap 2 — a real build is slow, and looks identical to a hang.** The one
-invocation that parsed cleanly (`_wge_canyon.terrain`, full `Z:` path) ran
+invocation that parsed cleanly (`_luxel_canyon.terrain`, full `Z:` path) ran
 **15 minutes at roughly one core** and was still going when the wrapper timed
 out. Given the above, that was almost certainly a legitimate build in progress —
 `Canyon River with Sea` is heavy (`Erosion2`, `Trees`, `Sea`, `WaveShine`) — that
@@ -377,7 +377,7 @@ symmetric field keeps the drainage physical. Erosion of a symmetric input stays
 symmetric to the extent the solver is rotation-equivariant.
 
 **The preference for (2) was really a preference for measurement, and that is
-separable.** WGE should *measure* residual asymmetry whether or not it imposes
+separable.** Luxel should *measure* residual asymmetry whether or not it imposes
 it. So:
 
 1. Symmetrise the macro-shape **in the graph**, before erosion.
@@ -435,7 +435,7 @@ rather than copies. Route mid first, on the symmetry-invariant subgraph.
 
 Author the Gaea graph as a **basin macro-shape** so edges are high naturally.
 Then `boundary_plan` does what it already does — flood-fill from the keeps with
-the declared agent, report the spans that leak — and WGE patches only those
+the declared agent, report the spans that leak — and Luxel patches only those
 spans. **Verification rather than generation**, which is the opposite of the
 rampart.
 
@@ -449,7 +449,7 @@ sibling graphs.
 
 **Profiles are the real payoff.** A MOBA profile (double-ended, 3 lanes, strict
 symmetry) and an RPG-zone profile (asymmetric, no lane parity) are different
-constraint sets over one importer and one compiler. This is what stops WGE being
+constraint sets over one importer and one compiler. This is what stops Luxel being
 a one-map tool.
 
 A profile should be a **declared artifact**, not a code path: lane count,
@@ -586,7 +586,7 @@ happened.
 That only works if rerolling is genuinely cheap, and **the 29 s figure does not
 generalise**: the audit built `Canyon River with Sea` at 512 and it ran
 single-threaded for over ten minutes under Proton. Budget graph authoring
-accordingly — keep the WGE graph lean, measure its build time before relying on
+accordingly — keep the Luxel graph lean, measure its build time before relying on
 reroll-driven workflows, and if a reroll costs ten minutes then the profile
 constraints have to be loose enough to usually pass on the first build.
 
@@ -670,7 +670,7 @@ self-shadowing. The tint is working; the flatness is overwhelming it.
 noise to a distance function is precisely the rampart. There is no version of
 this that is not the defect.
 
-**The programme deletes it structurally.** The apron exists only because WGE's
+**The programme deletes it structurally.** The apron exists only because Luxel's
 terrain stops dead at the data edge. If the heightfield is authored as a basin
 macro-shape over a larger world (§9), the land beyond the play space is *real
 eroded terrain from Gaea* and there is nothing to extrude — `boundary_plan`
@@ -855,7 +855,7 @@ lidar; the ingest is unchanged.
 
 ## 6. Determinism
 
-WGE emits or drives the graph, builds it headlessly, and **digest-pins the built
+Luxel emits or drives the graph, builds it headlessly, and **digest-pins the built
 heightfield as a declared input**. §17 of the language spec grades determinism
 over *equal declared inputs*, so a pinned import is Grade A. The world stays both
 regenerable and byte-exact.
@@ -931,7 +931,7 @@ anything Gaea-shaped.
    - **3b. Measure radial monotonicity and symmetry residual** on those examples
      (§5.5, §5.1) to calibrate the gates against real terrain rather than
      guesses.
-4. **Author a WGE graph** in the Gaea GUI: basin macro-shape, symmetric
+4. **Author a Luxel graph** in the Gaea GUI: basin macro-shape, symmetric
    composite before erosion, exposed variables, marked height export.
    Interactive; Matt's job.
    - **Steps 3 and 3a DONE 2026-10-05.** Builds run repeatedly from an agent
@@ -943,7 +943,7 @@ anything Gaea-shaped.
      `docs/world/landscape-parity-plan.md` P3.
 5. **The driver** — `--vars` / `--seed` / `--resolution`, digest pinning of
    graph, vars, seed and Gaea version. **DONE 2026-10-05:**
-   `pipeline/gaea_build.py`, plus the `wgeGaea` MCP server
+   `pipeline/gaea_build.py`, plus the `luxelGaea` MCP server
    (`pipeline/gaea_mcp_server.py`). Pins pixel digests, not file digests.
 6. **Symmetry measurement, then enforcement if needed** (§5.1).
 7. **Lane routing against real terrain** (§5.2), with the edit budget (§5.6) in

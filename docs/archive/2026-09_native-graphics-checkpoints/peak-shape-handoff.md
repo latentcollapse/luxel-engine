@@ -1,7 +1,7 @@
-# WGE Peak-Shape Handoff
+# Luxel Peak-Shape Handoff
 
 Date: 2026-09-28
-Scope: WGE engine quality and model-native authoring through the native WGE
+Scope: Luxel engine quality and model-native authoring through the native Luxel
 runtime.
 
 ## Current truth
@@ -24,7 +24,7 @@ The supplied GLB remains a permanent negative control and is rejected. The
 known-good rigging input is a structural/provider control; arbitrary
 mesh-to-character generation and production-quality skinning/retargeting remain
 explicit scope gates rather than implied passes. External-editor/runtime
-comparison is not part of the WGE certification scope.
+comparison is not part of the Luxel certification scope.
 
 ## Verified failure points
 
@@ -135,7 +135,7 @@ future slices require them.
 
 ## Evidence at hand
 
-- `python3 -m unittest tests.test_wge_native_mvp -v`: passed, including fresh
+- `python3 -m unittest tests.test_luxel_native_mvp -v`: passed, including fresh
   intake, native certification, archive revalidation, bad-GLB rejection, and
   archive path-traversal rejection.
 - `python3 -m unittest discover -s tests`: 683 tests passed.

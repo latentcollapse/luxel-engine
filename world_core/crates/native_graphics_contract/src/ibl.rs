@@ -37,9 +37,9 @@ use crate::{
     TextureReference, procedural_texture,
 };
 
-pub const IBL_ENVIRONMENT_TEXTURE_ID: &str = "wge-ibl-environment";
-pub const IBL_BRDF_LUT_TEXTURE_ID: &str = "wge-ibl-brdf-lut";
-const IBL_SOURCE_ARTIFACT_ID: &str = "wge-ibl-bake";
+pub const IBL_ENVIRONMENT_TEXTURE_ID: &str = "luxel-ibl-environment";
+pub const IBL_BRDF_LUT_TEXTURE_ID: &str = "luxel-ibl-brdf-lut";
+const IBL_SOURCE_ARTIFACT_ID: &str = "luxel-ibl-bake";
 
 /// Stored radiance = sRGB(radiance / scale). Near the sun the analytic sky
 /// plus glow exceeds 4; 8 keeps it unclipped at ~1.4% quantisation. Mirrored

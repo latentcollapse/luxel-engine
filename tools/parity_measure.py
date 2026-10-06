@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""WGE graphical-parity measurement instrument.
+"""Luxel graphical-parity measurement instrument.
 
 Reads a campaign2 capture tree and emits a deterministic metric set used for
 before/after A/B comparison. Every number here is computed from the promoted

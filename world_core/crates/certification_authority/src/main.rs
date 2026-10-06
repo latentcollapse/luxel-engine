@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use wge_certification_authority::{
+use luxel_certification_authority::{
     ArtifactBytes, CandidateContext, GateRequirement, MAX_ARTIFACT_BYTES, MAX_CANDIDATES,
     MAX_ENVELOPE_BYTES, MAX_RECEIPTS, MAX_TOTAL_ARTIFACT_BYTES, REQUEST_SCHEMA, ReceiptEnvelope,
     ValidationRequest, ValidatorRegistry, candidate_identity, candidate_identity_bytes,
@@ -14,7 +14,7 @@ use wge_certification_authority::{
     native_repair_evidence_reference, native_repair_receipt_bytes, repair_validator_registry,
     sha256_prefixed, validate_candidate_identity, validate_request,
 };
-use wge_intake_repair_contract as repair_contract;
+use luxel_intake_repair_contract as repair_contract;
 
 const MAX_REQUEST_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
@@ -100,12 +100,12 @@ fn dispatch() -> Result<ExitCode, String> {
                 return Err(usage());
             }
             let registry = match profile.as_str() {
-                "engine-neutral" => ValidatorRegistry::wge_engine_neutral_v1(),
-                "native-mvp" => ValidatorRegistry::wge_native_mvp_v1(),
+                "engine-neutral" => ValidatorRegistry::luxel_engine_neutral_v1(),
+                "native-mvp" => ValidatorRegistry::luxel_native_mvp_v1(),
                 _ => return Err(usage()),
             };
             let result = json!({
-                "schema_version": "wge.validator-registry/v1",
+                "schema_version": "luxel.validator-registry/v1",
                 "registry_sha256": registry.digest(),
                 "validators": registry.descriptors(),
             });
@@ -119,17 +119,17 @@ fn dispatch() -> Result<ExitCode, String> {
             }
             let (registry, gates) = match profile.as_str() {
                 "engine-neutral" => (
-                    ValidatorRegistry::wge_engine_neutral_v1(),
+                    ValidatorRegistry::luxel_engine_neutral_v1(),
                     engine_neutral_gate_profile(),
                 ),
                 "native-mvp" => (
-                    ValidatorRegistry::wge_native_mvp_v1(),
+                    ValidatorRegistry::luxel_native_mvp_v1(),
                     native_mvp_gate_profile(),
                 ),
                 _ => return Err(usage()),
             };
             let result = json!({
-                "schema_version": "wge.certification-profile/v1",
+                "schema_version": "luxel.certification-profile/v1",
                 "registry_sha256": registry.digest(),
                 "profile_id": profile,
                 "gates": gates,
@@ -156,7 +156,7 @@ fn dispatch() -> Result<ExitCode, String> {
             let candidate = load_candidate(&candidate_file, &canonical_root, &mut 0, false)?;
             let identity = candidate_identity(&candidate).map_err(|error| error.to_string())?;
             let result = json!({
-                "schema_version": "wge.candidate-identity/v1",
+                "schema_version": "luxel.candidate-identity/v1",
                 "project_id": candidate.project_id,
                 "snapshot_id": candidate.snapshot_id,
                 "candidate_sha256": identity,
@@ -194,7 +194,7 @@ fn dispatch() -> Result<ExitCode, String> {
             let receipt_value = read_json_value(&receipt_path)?;
             let receipt: ReceiptEnvelope = serde_json::from_value(receipt_value)
                 .map_err(|error| format!("malformed receipt envelope: {error}"))?;
-            let registry = ValidatorRegistry::wge_engine_neutral_v1();
+            let registry = ValidatorRegistry::luxel_engine_neutral_v1();
             let reference = native_repair_evidence_reference(&receipt, &candidate, &registry)
                 .map_err(|error| error.to_string())?;
             if let Some(path) = output_bridge {
@@ -223,7 +223,7 @@ fn dispatch() -> Result<ExitCode, String> {
             let request_value = read_json_value(&request_path)?;
             let request: RepairDeltaRequestFile = serde_json::from_value(request_value)
                 .map_err(|error| format!("malformed repair-delta request: {error}"))?;
-            if request.schema_version != "wge.repair-delta-request/v1" {
+            if request.schema_version != "luxel.repair-delta-request/v1" {
                 return Err("unsupported repair-delta request schema".into());
             }
             let canonical_root = artifact_root
@@ -249,7 +249,7 @@ fn dispatch() -> Result<ExitCode, String> {
                 typed_value(&request.proposal, &request_path, "repair proposal")?;
             let delta_draft: repair_contract::RepairEvidenceDeltaDraft =
                 typed_value(&request.delta_draft, &request_path, "repair delta draft")?;
-            let registry = ValidatorRegistry::wge_engine_neutral_v1();
+            let registry = ValidatorRegistry::luxel_engine_neutral_v1();
             let before_native =
                 native_repair_receipt_bytes(&before_receipt, &before_candidate, &registry)
                     .map_err(|error| error.to_string())?;
@@ -293,11 +293,11 @@ fn dispatch() -> Result<ExitCode, String> {
             let request = load_request(&request_path, &artifact_root)?;
             let (registry, expected_gates) = match profile.as_str() {
                 "engine-neutral" => (
-                    ValidatorRegistry::wge_engine_neutral_v1(),
+                    ValidatorRegistry::luxel_engine_neutral_v1(),
                     engine_neutral_gate_profile(),
                 ),
                 "native-mvp" => (
-                    ValidatorRegistry::wge_native_mvp_v1(),
+                    ValidatorRegistry::luxel_native_mvp_v1(),
                     native_mvp_gate_profile(),
                 ),
                 _ => return Err(usage()),
@@ -313,7 +313,7 @@ fn dispatch() -> Result<ExitCode, String> {
                 "{}",
                 canonical_json(&serde_json::to_value(&report).map_err(|error| error.to_string())?)
             );
-            if report.status != wge_certification_authority::CertificationStatus::Rejected {
+            if report.status != luxel_certification_authority::CertificationStatus::Rejected {
                 Ok(ExitCode::SUCCESS)
             } else {
                 Ok(ExitCode::from(3))
@@ -500,5 +500,5 @@ fn safe_existing_path(root: &Path, relative: &str, directory: bool) -> Result<Pa
 }
 
 fn usage() -> String {
-    "usage:\n  wge-certification-authority registry [engine-neutral|native-mvp]\n  wge-certification-authority profile [engine-neutral|native-mvp]\n  wge-certification-authority seal RECEIPT.json OUTPUT.json\n  wge-certification-authority candidate-id CANDIDATE.json --artifact-root DIR\n  wge-certification-authority repair-reference RECEIPT.json --candidate CANDIDATE.json --artifact-root DIR [--output-bridge BRIDGE.json]\n  wge-certification-authority repair-delta REQUEST.json --artifact-root DIR --output DELTA.json\n  wge-certification-authority validate REQUEST.json --artifact-root DIR [--profile engine-neutral|native-mvp]".into()
+    "usage:\n  luxel-certification-authority registry [engine-neutral|native-mvp]\n  luxel-certification-authority profile [engine-neutral|native-mvp]\n  luxel-certification-authority seal RECEIPT.json OUTPUT.json\n  luxel-certification-authority candidate-id CANDIDATE.json --artifact-root DIR\n  luxel-certification-authority repair-reference RECEIPT.json --candidate CANDIDATE.json --artifact-root DIR [--output-bridge BRIDGE.json]\n  luxel-certification-authority repair-delta REQUEST.json --artifact-root DIR --output DELTA.json\n  luxel-certification-authority validate REQUEST.json --artifact-root DIR [--profile engine-neutral|native-mvp]".into()
 }

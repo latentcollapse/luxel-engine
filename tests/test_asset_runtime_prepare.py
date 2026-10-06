@@ -16,7 +16,7 @@ from asset_runtime_prepare import prepare_asset_runtime  # noqa: E402
 class AssetRuntimeTransportTest(unittest.TestCase):
     def test_native_arguments_and_rejection_exit_are_passed_through(self):
         native_result = CompletedProcess(
-            args=["/native/wge-asset-contract", "prepare"],
+            args=["/native/luxel-asset-contract", "prepare"],
             returncode=3,
             stdout='{"status":"rejected"}',
             stderr="",
@@ -25,7 +25,7 @@ class AssetRuntimeTransportTest(unittest.TestCase):
             result = prepare_asset_runtime(
                 "source.glb",
                 "request.json",
-                executable="/native/wge-asset-contract",
+                executable="/native/luxel-asset-contract",
                 cwd="/project",
                 timeout_seconds=9.0,
             )
@@ -33,7 +33,7 @@ class AssetRuntimeTransportTest(unittest.TestCase):
         self.assertIs(result, native_result)
         run.assert_called_once_with(
             (
-                "/native/wge-asset-contract",
+                "/native/luxel-asset-contract",
                 "prepare",
                 "source.glb",
                 "request.json",
@@ -47,7 +47,7 @@ class AssetRuntimeTransportTest(unittest.TestCase):
 
     def test_configured_binary_is_transport_only(self):
         native_result = CompletedProcess(args=[], returncode=0, stdout="{}", stderr="")
-        with patch.dict("os.environ", {"WGE_ASSET_CONTRACT_BIN": "/configured/native"}):
+        with patch.dict("os.environ", {"LUXEL_ASSET_CONTRACT_BIN": "/configured/native"}):
             with patch("asset_runtime_prepare.subprocess.run", return_value=native_result) as run:
                 result = prepare_asset_runtime("a.glb", "request.json")
 

@@ -3,7 +3,7 @@
 //! contract; this module only identifies their raw candidate-bound bytes.
 
 use serde::{Deserialize, Serialize};
-use wge_intake_repair_contract::{RepairEvidenceDelta, RepairEvidenceDeltaDraft, RepairProposal};
+use luxel_intake_repair_contract::{RepairEvidenceDelta, RepairEvidenceDeltaDraft, RepairProposal};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -91,7 +91,7 @@ pub struct AssetReceiptPayload {
 }
 
 /// Native rigging evidence binds the exact source GLB, typed preparation
-/// request, and raw `wge-asset-contract` receipt bytes. The authority reruns
+/// request, and raw `luxel-asset-contract` receipt bytes. The authority reruns
 /// preparation itself before allowing this gate to pass.
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]

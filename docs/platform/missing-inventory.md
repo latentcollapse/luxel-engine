@@ -1,17 +1,17 @@
-# WGE missing inventory
+# Luxel missing inventory
 
 > **Historical inventory.** This snapshot records the pre-convergence
 > Codeweald/target-engine gap and is useful as archaeology only. It does not
 > override the current native-engine doctrine. See
 > [`../ACTIVE_ARCHITECTURE.md`](active-architecture.md) and
-> [`../WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md`](../archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md)
+> [`../LUXEL_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md`](../archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md)
 > for current authority boundaries and campaign scope.
 
 Written 2026-07-31. Things that **do not exist yet**, as distinct from things
 that exist and are wrong ([docs/platform/debt-ledger.md](debt-ledger.md)) and things that are
 built and ranked ([docs/platform/tooling-upgrades.md](tooling-upgrades.md)).
 
-Scope: WGE **and the game gap**. Codeweald is a real-time three-lane MOBA; WGE
+Scope: Luxel **and the game gap**. Codeweald is a real-time three-lane MOBA; Luxel
 compiles the world it is played on. As of this audit the pipeline compiles a
 certified, renderable world and stops there. Nothing below is broken — it is
 unbuilt, and the distinction matters because unbuilt work needs a decision
@@ -21,7 +21,7 @@ Each entry states what does exist, so the gap is measured rather than asserted.
 
 ---
 
-## Part 1 — WGE (the compiler and its instrument)
+## Part 1 — Luxel (the compiler and its instrument)
 
 ### M1. Silhouette complexity has no metric
 
@@ -160,7 +160,7 @@ motion if abilities are physical.
 ### G6. Units, entities, and combat
 
 **Exists:** nothing in the current tree. The prior tick-based hex-combat sim was
-archived 2026-07-31 as superseded (`_archive/codeweald-pre-wge/`) — a real-time
+archived 2026-07-31 as superseded (`_archive/codeweald-pre-luxel/`) — a real-time
 MOBA does not reuse it, though its combat-resolution logic is readable
 reference.
 
@@ -185,7 +185,7 @@ removed with Godot on 2026-07-31. Bevy is the reference renderer and
 Sidhe.**
 
 The decision splits rather than resolving to one engine, which the artifact
-layer exists to permit: WGE emits engine-neutral certified artifacts, so the
+layer exists to permit: Luxel emits engine-neutral certified artifacts, so the
 compiler and the asset pipeline do not care what renders them.
 
 **Why Unity here.** The MOBA arena is an *LLM arena* -- a test ground where
@@ -211,7 +211,7 @@ replication integration is most of its value. Sidhe wants it. Nothing about
 choosing Unity here forecloses that -- both adapters are scaffolded.
 
 **Caveat that shapes the workflow.** UnityMCP requires the editor *running and
-connected*; it is a live-session dependency, not headless CI. WGE's own pipeline
+connected*; it is a live-session dependency, not headless CI. Luxel's own pipeline
 therefore stays headless, and Unity is the presentation and sale target rather
 than the place work happens.
 
@@ -224,14 +224,14 @@ Ordered by what unblocks the most:
 1. ~~**G8** (pick a backend)~~ — **DONE 2026-08-05: Unity here, UE5 for Sidhe.**
 2. **G7** (authority model) — same: a decision that constrains G4/G6.
 3. **G1 + G2** (collision + navmesh) — the pipeline already has the inputs;
-   this converts a rendered world into a traversable one and is squarely WGE's
+   this converts a rendered world into a traversable one and is squarely Luxel's
    job rather than the game's.
 4. **G3** (spawns, lanes, objectives) — largely derivable from data the spec
    already carries.
-5. **G4/G5/G6** — the game proper, and the point at which "WGE and the game are
+5. **G4/G5/G6** — the game proper, and the point at which "Luxel and the game are
    built side by side" starts being literally true.
 
-Items 3 and 4 are WGE work and can proceed now, independent of the decisions in
+Items 3 and 4 are Luxel work and can proceed now, independent of the decisions in
 1 and 2. That is the useful observation from this audit: **the compiler can be
 taken meaningfully further toward a playable map before any game-side
 architecture is chosen.**

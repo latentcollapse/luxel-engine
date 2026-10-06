@@ -1,32 +1,32 @@
 {
-  "schema_version": "wge.kit-lock/v1",
+  "schema_version": "luxel.kit-lock/v1",
   "set_id": "kit2",
   "blender": "Blender 5.2.2 LTS",
   "assets": {
     "ruin": {
       "glb": "artifacts/kit/kit2/ruin.glb",
-      "bytes": 1351992,
-      "sha256": "sha256:33a46ad995a1a378af76d0898c56f1f867069bac4f58e0cd593c6fd06f2494ae"
+      "bytes": 1351996,
+      "sha256": "sha256:78cc26805e67d54a0efbd04ae388ddb5b2730b37900e0432052f83a3770ad9fb"
     },
     "rock_a": {
       "glb": "artifacts/kit/kit2/rock_a.glb",
       "bytes": 270260,
-      "sha256": "sha256:69f05d2d548cf2e830e5b81fb89b830f27696878d17dd1b9b2c4629493596c27"
+      "sha256": "sha256:fa50cf1aec8001733c7d79e516d2a7d6a3d7fbd519d3b5b106d7042aeb5a9c22"
     },
     "rock_b": {
       "glb": "artifacts/kit/kit2/rock_b.glb",
       "bytes": 301608,
-      "sha256": "sha256:e8ad34e779f3bde98e9ca4ae1cc389d4f5fb3d207a97723112cb5658d2c3df05"
+      "sha256": "sha256:d8135619b48577c3e71c15b59927760bc3c1e7ac4ef71f8b63a82e42a0902d84"
     },
     "tree": {
       "glb": "artifacts/kit/kit2/tree.glb",
       "bytes": 1109108,
-      "sha256": "sha256:97a0c1e5ab4cd11520d1a6f1fb8b112e57cd7fe058e3760e74cca60010909677"
+      "sha256": "sha256:31691fc0cb397e6b384892bb3fc5ed524db0b8db8d0efce06af5164db8b66299"
     },
     "fern": {
       "glb": "artifacts/kit/kit2/fern.glb",
-      "bytes": 202696,
-      "sha256": "sha256:98c2bc879ff23ed6b06357fcda58e3ab68785dbeb5dabd81e81a85a859a93bd5"
+      "bytes": 202700,
+      "sha256": "sha256:f0428141feee7965c91991ce53d9c5bb7dc9e2e72836344da447df160f56ba33"
     }
   }
 }

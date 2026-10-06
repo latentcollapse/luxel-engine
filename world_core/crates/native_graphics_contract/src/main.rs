@@ -5,7 +5,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use serde::Serialize;
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     Campaign2View, GraphicsWorkerSupervisor, QualityOutcome, VisualQualityProfile,
     assess_campaign2_visual_evidence, assess_visual_quality,
     deterministic_certification_frame_receipt, load_terrain_layer_set,
@@ -14,9 +14,9 @@ use wge_native_graphics_contract::{
     lower_showcase_packet, lower_world_showcase_packet, sha256_prefixed,
     validate_campaign2_visual_evidence,
 };
-use wge_reference_runtime::build_from_layout_path;
+use luxel_reference_runtime::build_from_layout_path;
 
-const BENCHMARK_SCHEMA: &str = "wge.native-graphics-benchmark/v2";
+const BENCHMARK_SCHEMA: &str = "luxel.native-graphics-benchmark/v2";
 const DEFAULT_WARM_FRAMES: usize = 30;
 const MAX_WARM_FRAMES: usize = 256;
 
@@ -106,8 +106,8 @@ struct CaptureManifest {
     format: &'static str,
 }
 
-const CAPTURE_MANIFEST_SCHEMA: &str = "wge.native-graphics-capture-manifest/v1";
-const CAPTURE_EXPORTER: &str = "wge-native-graphics-contract-cli/v1";
+const CAPTURE_MANIFEST_SCHEMA: &str = "luxel.native-graphics-capture-manifest/v1";
+const CAPTURE_EXPORTER: &str = "luxel-native-graphics-contract-cli/v1";
 
 fn main() -> ExitCode {
     match run() {
@@ -312,12 +312,12 @@ fn run() -> Result<(), String> {
 
             let world = build_from_layout_path(&layout, &julia, &terrain_lab)
                 .map_err(|error| error.to_string())?;
-            // The quality command deliberately renders the canonical WGE
+            // The quality command deliberately renders the canonical Luxel
             // world-showcase composition. It remains bound to the authored
             // world artifact and spatial fields, while providing enough
             // authored geometry/material structure for the technical visual
             // floor to measure a real scene rather than a diagnostic flat
-            // overview. This is WGE machinery, not a comparison fixture.
+            // overview. This is Luxel machinery, not a comparison fixture.
             let reference_packet =
                 lower_reference_world(&world.world).map_err(|error| error.to_string())?;
             let packet = lower_world_showcase_packet(&reference_packet)
@@ -380,7 +380,7 @@ fn run() -> Result<(), String> {
             let outcome = serde_json::to_value(evidence.body.outcome)
                 .map_err(|error| format!("cannot serialize visual-quality outcome: {error}"))?;
             let summary = serde_json::json!({
-                "schema_version": "wge.native-visual-quality-artifacts/v1",
+                "schema_version": "luxel.native-visual-quality-artifacts/v1",
                 "outcome": outcome,
                 "packet_sha256": packet.packet_sha256,
                 "frame_receipt_sha256": certification_receipt.receipt_sha256,
@@ -466,8 +466,8 @@ fn run() -> Result<(), String> {
             let parity_candidate = ParityPolicyCandidate::from_env();
             let parity_content = ParityContent::from_env(parity_candidate).map_err(|error| error.to_string())?;
             let terrain_layers = if parity_content.converge0 {
-                let manifest = env::var("WGE_TERRAIN_LAYER_SET").map_err(|_| {
-                    "converge0 needs WGE_TERRAIN_LAYER_SET=<manifest>, e.g. tools/terrain_layers/converge0.json \
+                let manifest = env::var("LUXEL_TERRAIN_LAYER_SET").map_err(|_| {
+                    "converge0 needs LUXEL_TERRAIN_LAYER_SET=<manifest>, e.g. tools/terrain_layers/converge0.json \
                      (fetch the files first with tools/fetch_terrain_layers.py)"
                         .to_owned()
                 })?;
@@ -482,8 +482,8 @@ fn run() -> Result<(), String> {
             // N-5: converge2's kit, the same explicit-input seam. The lock path
             // comes from the environment; its GLBs are digest-verified on load.
             let kit = if parity_candidate.uses_kit() {
-                let lock = env::var("WGE_KIT_SET").map_err(|_| {
-                    "converge2, converge3 and converge4 need WGE_KIT_SET=<lock>: tools/kit/kit1.lock.json \
+                let lock = env::var("LUXEL_KIT_SET").map_err(|_| {
+                    "converge2, converge3 and converge4 need LUXEL_KIT_SET=<lock>: tools/kit/kit1.lock.json \
                      or tools/kit/kit2.lock.json (build it first with tools/build_kit.py --set kit1|kit2)"
                         .to_owned()
                 })?;
@@ -497,8 +497,8 @@ fn run() -> Result<(), String> {
             };
             // N-3: converge4's backdrop, the same explicit-input seam.
             let backdrop = if parity_candidate.uses_backdrop() {
-                let lock = env::var("WGE_BACKDROP_SET").map_err(|_| {
-                    "converge4 needs WGE_BACKDROP_SET=<lock>: tools/backdrop/backdrop1.lock.json \
+                let lock = env::var("LUXEL_BACKDROP_SET").map_err(|_| {
+                    "converge4 needs LUXEL_BACKDROP_SET=<lock>: tools/backdrop/backdrop1.lock.json \
                      (build it first with tools/build_backdrop.py --set backdrop1)"
                         .to_owned()
                 })?;
@@ -625,8 +625,8 @@ fn run() -> Result<(), String> {
                 }));
             }
             let summary = serde_json::json!({
-                "schema_version": "wge.native-graphics-campaign2/v1",
-                "campaign": "WGE GRAPHICS CAMPAIGN 2 — THE AUTHORED FRAME",
+                "schema_version": "luxel.native-graphics-campaign2/v1",
+                "campaign": "Luxel GRAPHICS CAMPAIGN 2 — THE AUTHORED FRAME",
                 "world_artifact_id": world.world.artifact_id,
                 "world_artifact_sha256": world.world.artifact_sha256,
                 "views": view_summaries,
@@ -782,7 +782,7 @@ fn run() -> Result<(), String> {
         }
         Some("render-calibration") => run_render_calibration(arguments.collect()),
         _ => {
-            Err("usage: wge-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       wge-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-world-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       wge-native-graphics-contract render-quality-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       wge-native-graphics-contract render-campaign2-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       wge-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]\n       wge-native-graphics-contract benchmark-dense-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES] DENSE_BACKGROUND_INSTANCES\n       wge-native-graphics-contract render-calibration LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER CALIBRATION_GLB OUTPUT_DIR [--rigs all|sun,overcast,grazing,sun-albedo-grey] [--views all|row|close|grazing|VIEW,...]".into())
+            Err("usage: luxel-native-graphics-contract lower-layout LAYOUT JULIA TERRAIN_LAB\n       luxel-native-graphics-contract render-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       luxel-native-graphics-contract render-close-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       luxel-native-graphics-contract render-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       luxel-native-graphics-contract render-world-showcase-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT\n       luxel-native-graphics-contract render-quality-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       luxel-native-graphics-contract render-campaign2-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER OUTPUT_DIR\n       luxel-native-graphics-contract benchmark-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES]\n       luxel-native-graphics-contract benchmark-dense-layout LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER [WARM_FRAMES] DENSE_BACKGROUND_INSTANCES\n       luxel-native-graphics-contract render-calibration LAYOUT JULIA TERRAIN_LAB GRAPHICS_PROJECT WORKER CALIBRATION_GLB OUTPUT_DIR [--rigs all|sun,overcast,grazing,sun-albedo-grey] [--views all|row|close|grazing|VIEW,...]".into())
         }
     }
 }
@@ -791,12 +791,12 @@ fn run() -> Result<(), String> {
 /// calibration scene through the authorized bound-scene route, for each
 /// requested enumerated rig and derived view.
 fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
-    use wge_asset_contract::{PreparationStatus, RenderPreparationStatus, condition_render_asset, prepare_asset};
-    use wge_native_graphics_contract::calibration::{
+    use luxel_asset_contract::{PreparationStatus, RenderPreparationStatus, condition_render_asset, prepare_asset};
+    use luxel_native_graphics_contract::calibration::{
         GREY_CARD_TARGET_SRGB8, grey_card_local_center, local_sphere, project_local_point, project_local_sphere,
         render_request, runtime_request,
     };
-    use wge_native_graphics_contract::{
+    use luxel_native_graphics_contract::{
         BoundSceneRenderAuthorization, CalibrationPlacement, CalibrationRig, CalibrationView,
         compose_bound_scene_with_view, project_render_asset, validate_graphics_asset_projection,
     };
@@ -874,7 +874,7 @@ fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
     let reference = lower_reference_world(&world.world).map_err(|error| error.to_string())?;
     let base = lower_objective_close_packet(&reference).map_err(|error| error.to_string())?;
     let placement = CalibrationPlacement::for_world(&world.world).map_err(|error| error.to_string())?;
-    let scene = wge_native_graphics_contract::calibration::calibration_scene(
+    let scene = luxel_native_graphics_contract::calibration::calibration_scene(
         &world.world,
         &runtime_receipt,
         package,
@@ -994,7 +994,7 @@ fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
         }
     }
     let summary = serde_json::json!({
-        "schema_version": "wge.native-graphics-calibration/v1",
+        "schema_version": "luxel.native-graphics-calibration/v1",
         "contract": "docs/world/converge/converge1-contracts.md §3 CALIBRATION-1",
         "world_artifact_id": world.world.artifact_id,
         "glb_sha256": sha256_prefixed(&glb),
@@ -1021,8 +1021,8 @@ fn write_json_artifact<T: Serialize>(path: &PathBuf, value: &T) -> Result<(), St
 
 fn measure_frame(
     supervisor: &mut GraphicsWorkerSupervisor,
-    packet: &wge_native_graphics_contract::GraphicsScenePacket,
-    world: &wge_reference_runtime::WorldArtifact,
+    packet: &luxel_native_graphics_contract::GraphicsScenePacket,
+    world: &luxel_reference_runtime::WorldArtifact,
 ) -> Result<(BenchmarkSample, String), String> {
     let started = Instant::now();
     let promoted = supervisor

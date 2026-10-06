@@ -12,7 +12,7 @@ use std::path::Path;
 use serde_json::{Map, Value};
 
 use crate::{ArtifactRef, LedgerError, ProjectSpec, sha256_prefixed, validate_relative_path};
-use wge_reference_runtime::{
+use luxel_reference_runtime::{
     TRAVERSAL_EVIDENCE_SCHEMA, TraversalEvidence, WORLD_SCHEMA, WorldArtifact,
     validate_traversal_evidence, validate_world_artifact,
 };
@@ -107,8 +107,8 @@ fn validate_reference_runtime_bundle(
             )));
         };
         let expected_team = match native.role {
-            wge_reference_runtime::SpawnRole::PlayerStart => "player",
-            wge_reference_runtime::SpawnRole::Opponent => "opponent",
+            luxel_reference_runtime::SpawnRole::PlayerStart => "player",
+            luxel_reference_runtime::SpawnRole::Opponent => "opponent",
         };
         if spawn.team != expected_team
             || !same_measure(spawn.position_xz_m[0], native.position_xz_m[0])
@@ -132,7 +132,7 @@ fn read_reference_artifact<T: serde::de::DeserializeOwned>(
 ) -> Result<T, LedgerError> {
     if artifact.kind != expected_kind
         || artifact.schema_version != expected_schema
-        || artifact.producer != "wge-reference-runtime"
+        || artifact.producer != "luxel-reference-runtime"
     {
         return Err(LedgerError::Contract(format!(
             "{label} reference must name the registered native runtime schema, kind, and producer"
@@ -163,7 +163,7 @@ fn read_reference_artifact<T: serde::de::DeserializeOwned>(
         .map_err(|error| LedgerError::Json(format!("{}: {error}", canonical_path.display())))
 }
 
-fn runtime_error(error: wge_reference_runtime::ReferenceRuntimeError) -> LedgerError {
+fn runtime_error(error: luxel_reference_runtime::ReferenceRuntimeError) -> LedgerError {
     match error.code {
         "provenance_failure" => LedgerError::Provenance(error.to_string()),
         _ => LedgerError::Contract(error.to_string()),
@@ -305,7 +305,7 @@ fn validate_terrain(value: &Value, spec: &ProjectSpec) -> Result<(), LedgerError
         ],
         "terrain",
     )?;
-    if string_field(terrain, "schema_version", "terrain")? != "wge.terrain-manifest/v1"
+    if string_field(terrain, "schema_version", "terrain")? != "luxel.terrain-manifest/v1"
         || string_field(terrain, "world_id", "terrain")? != spec.world.world_id
     {
         return Err(LedgerError::Contract(
@@ -364,7 +364,7 @@ fn validate_collision(value: &Value, spec: &ProjectSpec) -> Result<(), LedgerErr
         ],
         "collision",
     )?;
-    if string_field(collision, "schema_version", "collision")? != "wge.collision-plan/v1"
+    if string_field(collision, "schema_version", "collision")? != "luxel.collision-plan/v1"
         || string_field(collision, "world_id", "collision")? != spec.world.world_id
     {
         return Err(LedgerError::Contract(
@@ -459,7 +459,7 @@ fn validate_navigation(value: &Value, spec: &ProjectSpec) -> Result<(), LedgerEr
         ],
         "navigation",
     )?;
-    if string_field(navigation, "schema_version", "navigation")? != "wge.navigation-plan/v1"
+    if string_field(navigation, "schema_version", "navigation")? != "luxel.navigation-plan/v1"
         || string_field(navigation, "world_id", "navigation")? != spec.world.world_id
     {
         return Err(LedgerError::Contract(

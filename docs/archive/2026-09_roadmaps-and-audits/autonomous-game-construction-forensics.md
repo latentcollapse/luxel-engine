@@ -1,18 +1,18 @@
-# WGE Autonomous Game-Construction Forensics
+# Luxel Autonomous Game-Construction Forensics
 
 Status: **research design**, 2026-09-30  
-Owner: WGE research / construction-harness track  
+Owner: Luxel research / construction-harness track  
 Scope: extracting reusable construction machinery from Astra-class autonomous game and 3D production workflows
 
-This document defines how WGE studies frontier-model game construction without copying a particular model, engine, provider, or public demonstration. It is a methodology document, not evidence that any external claim has been independently verified.
+This document defines how Luxel studies frontier-model game construction without copying a particular model, engine, provider, or public demonstration. It is a methodology document, not evidence that any external claim has been independently verified.
 
-Related WGE sources:
+Related Luxel sources:
 
-- [WGE Generality Bridge](../../content-sdk/generality-bridge.md)
+- [Luxel Generality Bridge](../../content-sdk/generality-bridge.md)
 - [Game Dev Harness Roadmap](game-dev-harness-roadmap.md)
-- [WGE Graphics Campaign 2 Report](../2026-10_graphics-sprint-reports/graphics-campaign-2-report.md)
-- [WGE Gameplay Kit Architecture](../../gameplay/gameplay-kit-architecture.md)
-- [WGE Native Graphics Architecture](../../platform/native-graphics-architecture.md)
+- [Luxel Graphics Campaign 2 Report](../2026-10_graphics-sprint-reports/graphics-campaign-2-report.md)
+- [Luxel Gameplay Kit Architecture](../../gameplay/gameplay-kit-architecture.md)
+- [Luxel Native Graphics Architecture](../../platform/native-graphics-architecture.md)
 
 ## Executive thesis
 
@@ -22,7 +22,7 @@ The useful question is not:
 
 The useful question is:
 
-> Which capabilities did the model inherit from its substrate, which machinery did it repeatedly construct, and which of those repeated procedures should become WGE infrastructure?
+> Which capabilities did the model inherit from its substrate, which machinery did it repeatedly construct, and which of those repeated procedures should become Luxel infrastructure?
 
 The working model is:
 
@@ -36,7 +36,7 @@ brief / references
     -> certified snapshot
 ```
 
-This implies that WGE does not need to reproduce every host tool or secretly emulate a full commercial engine before it becomes useful. It needs to make the recurring construction procedures explicit, typed, inspectable, and cheaper for the next model.
+This implies that Luxel does not need to reproduce every host tool or secretly emulate a full commercial engine before it becomes useful. It needs to make the recurring construction procedures explicit, typed, inspectable, and cheaper for the next model.
 
 ## Research boundary
 
@@ -53,9 +53,9 @@ It does not:
 
 - treat a public demo, marketing claim, or narrated workflow as implementation evidence;
 - assume that a reported rig, renderer, or game system generalizes from one example;
-- make an external engine the WGE runtime or semantic authority;
-- turn model-generated code into WGE canonical state;
-- replace WGE's Rust authority, Julia/Lava packet boundary, or receipt discipline;
+- make an external engine the Luxel runtime or semantic authority;
+- turn model-generated code into Luxel canonical state;
+- replace Luxel's Rust authority, Julia/Lava packet boundary, or receipt discipline;
 - begin broad feature implementation before repeated-task evidence identifies a stable abstraction.
 
 ## Evidence discipline
@@ -67,7 +67,7 @@ Every case study receives an evidence grade.
 | A | Frozen source, prompt, assets, dependencies, tests, tool trace, and runnable build | Forensic reconstruction and quantitative comparison |
 | B | Runnable artifact plus partial source or reproducible build instructions | Behavioral reconstruction with explicit unknowns |
 | C | Screenshots, video, report, or narrated claim without a complete artifact | Hypothesis generation only |
-| D | Repeated secondary description with no inspectable artifact | Background context; never a WGE requirement |
+| D | Repeated secondary description with no inspectable artifact | Background context; never a Luxel requirement |
 
 Public Astra-class examples in the research notes begin as hypotheses until the exact source, version, prompt, asset set, and test harness are pinned. A strong result is still valuable at Grade C, but it must remain labelled as an observation or inference rather than a fact about the underlying implementation.
 
@@ -95,7 +95,7 @@ The central forensic operation is to classify every meaningful subsystem by wher
 | `MODEL_GENERATED_REUSABLE` | Machinery created by the model that could plausibly serve another project | Is this a general terrain worker, input layer, animation helper, or test harness? |
 | `PROJECT_SPECIFIC` | Logic whose semantics belong to this particular game | Is this a quest, enemy rule, level layout, weapon, or bespoke interaction? |
 | `HARNESS_INSPECTION` | Machinery used to build, run, inspect, test, or repair the project | Can another model use this to observe and correct its work? |
-| `MANUAL_OR_UNKNOWN` | Human intervention, hidden scaffold, or unresolved origin | What must be reproduced before this can influence WGE design? |
+| `MANUAL_OR_UNKNOWN` | Human intervention, hidden scaffold, or unresolved origin | What must be reproduced before this can influence Luxel design? |
 
 No item may be classified as reusable merely because it has a convenient name. It needs a second-task test or a compelling substrate-independent contract.
 
@@ -127,7 +127,7 @@ construction_trace:
 subsystems: []
 claims: []
 unknowns: []
-candidate_wge_capabilities: []
+candidate_luxel_capabilities: []
 ```
 
 For each subsystem:
@@ -165,7 +165,7 @@ Inventory:
 - visual review and repair;
 - persistence, packaging, and handoff.
 
-For each item, separate host-provided machinery from model-authored machinery. Pay special attention to the “small mini-engine” that often appears inside a project: it is a likely WGE capability candidate, but only after it survives the reuse test.
+For each item, separate host-provided machinery from model-authored machinery. Pay special attention to the “small mini-engine” that often appears inside a project: it is a likely Luxel capability candidate, but only after it survives the reuse test.
 
 ### Track B — 3D production archaeology
 
@@ -184,7 +184,7 @@ Record:
 9. retargeting or export;
 10. runtime import and validation.
 
-The important question is not whether a model “can rig.” It is which parts were selected, scripted, delegated, tested, and repaired. A Blender provider that performs automatic weights is evidence of a useful provider seam, not evidence that WGE should make Blender canonical.
+The important question is not whether a model “can rig.” It is which parts were selected, scripted, delegated, tested, and repaired. A Blender provider that performs automatic weights is evidence of a useful provider seam, not evidence that Luxel should make Blender canonical.
 
 ### Track C — style decomposition
 
@@ -222,16 +222,16 @@ Look for repeated:
 
 Anything that recurs independently is stronger evidence than a polished one-off implementation. Anything that recurs but has incompatible semantics may need a family of capabilities rather than one universal abstraction.
 
-### Track E — WGE transfer test
+### Track E — Luxel transfer test
 
 Run the same model, brief, references, inputs, and acceptance criteria through:
 
 ```text
 A: ordinary model-accessible graphics/game tooling
-B: WGE's typed construction and inspection surface
+B: Luxel's typed construction and inspection surface
 ```
 
-This is a construction-leverage experiment, not a Unity comparison and not a claim that WGE must imitate the ordinary stack. The question is how much repeated work WGE eliminates while preserving or improving correctness, quality, provenance, and recovery.
+This is a construction-leverage experiment, not a Unity comparison and not a claim that Luxel must imitate the ordinary stack. The question is how much repeated work Luxel eliminates while preserving or improving correctness, quality, provenance, and recovery.
 
 ## Standard procedure
 
@@ -243,12 +243,12 @@ This is a construction-leverage experiment, not a Unity comparison and not a cla
 6. **Probe reuse.** Apply candidate reusable machinery to a second task without copying project-specific semantics.
 7. **Measure failure.** Inject or reproduce failures at the semantic, asset, runtime, visual, and packaging layers.
 8. **Extract the contract.** Describe inputs, outputs, preconditions, identity, determinism, cost, evidence, and repair behavior.
-9. **Compare with WGE.** Determine whether the candidate is already covered, partially covered, or genuinely missing.
-10. **Promote cautiously.** Only a repeated, independently validated procedure becomes a WGE capability candidate.
+9. **Compare with Luxel.** Determine whether the candidate is already covered, partially covered, or genuinely missing.
+10. **Promote cautiously.** Only a repeated, independently validated procedure becomes a Luxel capability candidate.
 
 ## Promotion rule for extracted machinery
 
-A finding may become a WGE subsystem requirement only when:
+A finding may become a Luxel subsystem requirement only when:
 
 - it appears in at least two independent tasks, or one task exposes a clearly reusable provider-independent contract;
 - the semantic inputs and outputs are identifiable;
@@ -257,7 +257,7 @@ A finding may become a WGE subsystem requirement only when:
 - success and failure are independently validated;
 - determinism is guaranteed or the nondeterministic envelope is explicit;
 - a repair procedure can be bounded;
-- the capability does not smuggle backend representation into WGE state.
+- the capability does not smuggle backend representation into Luxel state.
 
 The default outcome for an interesting one-off is “research observation,” not “new engine feature.”
 
@@ -269,7 +269,7 @@ The first campaign should use:
 2. one source-complete 3D asset/animation case;
 3. one procedural-world case;
 4. one deliberately style-divergent reconstruction;
-5. one WGE implementation of the same small vertical slice.
+5. one Luxel implementation of the same small vertical slice.
 
 The initial deliverables are:
 
@@ -278,7 +278,7 @@ The initial deliverables are:
 - construction traces and repair ledgers;
 - a recurrence matrix;
 - a list of proposed capabilities with evidence grades;
-- a WGE gap map tied to existing contracts;
+- a Luxel gap map tied to existing contracts;
 - a benchmark-ready task and acceptance bundle.
 
 ## Failure modes this research must prevent
@@ -291,10 +291,10 @@ The initial deliverables are:
 - measuring only final screenshots and not repair cost or determinism;
 - comparing different prompts, models, time budgets, or providers;
 - allowing a visual critic to promote its own suggestions;
-- importing a backend object as canonical WGE state;
+- importing a backend object as canonical Luxel state;
 - adding breadth before the recurring construction bottleneck is known.
 
 ## Expected research conclusion
 
-The desired outcome is not “WGE copied Astra.” It is a map of the smallest set of typed, reusable construction capabilities that lets future models spend their intelligence on game design rather than repeatedly rebuilding terrain workers, asset import scripts, style plumbing, test harnesses, and repair loops.
+The desired outcome is not “Luxel copied Astra.” It is a map of the smallest set of typed, reusable construction capabilities that lets future models spend their intelligence on game design rather than repeatedly rebuilding terrain workers, asset import scripts, style plumbing, test harnesses, and repair loops.
 

@@ -2,13 +2,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use wge_asset_contract::{
+use luxel_asset_contract::{
     ASSET_RUNTIME_RECEIPT_SCHEMA, ASSET_RUNTIME_REQUEST_SCHEMA, AssetPreparationRequest, AssetUse,
     Axis, CollisionMetadata, CollisionShape, LodMetadata, PreparationStatus,
     RenderConditioningRequest, RenderMipPolicy, RenderPreparationStatus, RuntimeTarget,
     condition_render_asset, prepare_asset,
 };
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     AlphaMode, BoundSceneRenderAuthorization, BufferReference, CameraProjection, CaptureFormat,
     CoordinateSystem, EnvironmentIntent, GraphicsCamera, GraphicsCaptureRequest,
     GraphicsScenePacketBody, GraphicsWorkerSupervisor, Handedness, LightIntent, LightKind,
@@ -16,13 +16,13 @@ use wge_native_graphics_contract::{
     deterministic_certification_frame_receipt, lower_reference_world, lower_showcase_packet,
     project_render_asset, sha256_prefixed, validate_graphics_asset_projection,
 };
-use wge_project_ledger::{
+use luxel_project_ledger::{
     CollisionPolicy, SCENE_ARTIFACT_SCHEMA, SCENE_OBJECT_SCHEMA, SceneArtifact, SceneArtifactBody,
     SceneImportance, SceneLodLevel, SceneLodPolicy, SceneObject, SceneObjectProvenance,
     SceneProvenance, SceneTransform, SceneVisibilityPolicy, canonical_json,
     seal_scene_with_render_assets, sha256_prefixed as ledger_sha256_prefixed,
 };
-use wge_reference_runtime::build_from_layout_path;
+use luxel_reference_runtime::build_from_layout_path;
 
 const SOURCE_SHA256: &str = "9560590b27ca1b847cc4b96f7659e99acf5b8fb18622e80ef0b4c2ae7ffd068f";
 
@@ -53,7 +53,7 @@ fn runtime_request() -> AssetPreparationRequest {
 
 fn render_request() -> RenderConditioningRequest {
     RenderConditioningRequest {
-        schema_version: "wge.render-asset-request/v1".into(),
+        schema_version: "luxel.render-asset-request/v1".into(),
         meters_per_unit: 1.0,
         vertical_axis: Axis::Y,
         require_uv0: true,
@@ -65,8 +65,8 @@ fn render_request() -> RenderConditioningRequest {
 }
 
 fn scene_for_asset(
-    runtime_receipt: &wge_asset_contract::AssetPreparationReceipt,
-    render_package: &wge_asset_contract::RenderAssetPackage,
+    runtime_receipt: &luxel_asset_contract::AssetPreparationReceipt,
+    render_package: &luxel_asset_contract::RenderAssetPackage,
 ) -> SceneArtifact {
     scene_for_asset_at(
         runtime_receipt,
@@ -78,8 +78,8 @@ fn scene_for_asset(
 }
 
 fn scene_for_asset_at(
-    runtime_receipt: &wge_asset_contract::AssetPreparationReceipt,
-    render_package: &wge_asset_contract::RenderAssetPackage,
+    runtime_receipt: &luxel_asset_contract::AssetPreparationReceipt,
+    render_package: &luxel_asset_contract::RenderAssetPackage,
     world_artifact_id: &str,
     world_artifact_sha256: String,
     translation_xyz_m: [f64; 3],
@@ -112,12 +112,12 @@ fn scene_for_asset_at(
             },
             collision: if mesh.mesh_id == "foundation_mesh" {
                 CollisionPolicy::Static {
-                    shape: wge_project_ledger::SceneCollisionShape::Box,
+                    shape: luxel_project_ledger::SceneCollisionShape::Box,
                 }
             } else {
                 CollisionPolicy::None
             },
-            material_assignments: vec![wge_project_ledger::MaterialAssignment {
+            material_assignments: vec![luxel_project_ledger::MaterialAssignment {
                 slot: 0,
                 material_id: mesh.material_id.clone(),
                 material_artifact_id: None,
@@ -174,7 +174,7 @@ fn base_body() -> GraphicsScenePacketBody {
     GraphicsScenePacketBody {
         deformation: None,
         render_policy: None,
-        schema_version: "wge.graphics-scene-packet/v6".into(),
+        schema_version: "luxel.graphics-scene-packet/v6".into(),
         packet_id: "real-asset-packet".into(),
         scene_artifact_id: None,
         scene_artifact_sha256: None,
@@ -183,7 +183,7 @@ fn base_body() -> GraphicsScenePacketBody {
         spatial_fields_sha256: sha256_prefixed(b"real-log-hut-fields"),
         frame_seed: 1,
         coordinate_system: CoordinateSystem {
-            up_axis: wge_native_graphics_contract::Axis::Y,
+            up_axis: luxel_native_graphics_contract::Axis::Y,
             handedness: Handedness::Right,
             units_per_meter: 1.0,
         },
@@ -200,7 +200,7 @@ fn base_body() -> GraphicsScenePacketBody {
             width_px: 64,
             height_px: 64,
         },
-        terrain: wge_native_graphics_contract::TerrainPacket {
+        terrain: luxel_native_graphics_contract::TerrainPacket {
             terrain_id: "real-asset-terrain".into(),
             width_m: 20.0,
             length_m: 20.0,
@@ -307,7 +307,7 @@ fn imported_asset_close_camera(scene: &SceneArtifact) -> GraphicsCamera {
 }
 
 fn julia_executable() -> PathBuf {
-    std::env::var_os("WGE_JULIA")
+    std::env::var_os("LUXEL_JULIA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("julia"))
 }
@@ -319,7 +319,7 @@ fn graphics_test_guard() -> std::sync::MutexGuard<'static, ()> {
         .expect("real asset graphics test lock is not poisoned")
 }
 
-fn terrain_height_at(world: &wge_reference_runtime::WorldArtifact, x: f64, z: f64) -> f64 {
+fn terrain_height_at(world: &luxel_reference_runtime::WorldArtifact, x: f64, z: f64) -> f64 {
     let layout = &world.body.authored_layout;
     let resolution = world.body.fields.resolution;
     let denominator = (resolution - 1) as f64;
@@ -390,18 +390,18 @@ fn supplied_real_asset_renders_in_lava_and_replays_after_worker_restart() {
     let workspace_root = manifest_dir
         .ancestors()
         .nth(3)
-        .expect("crate is inside the WGE workspace");
+        .expect("crate is inside the Luxel workspace");
     let layout = manifest_dir
         .join("../reference_runtime/examples/riverwatch.layout.json")
         .canonicalize()
         .expect("reference layout exists");
     let graphics_lab = workspace_root.join("graphics_lab");
     let terrain_lab = workspace_root.join("terrain_lab");
-    let worker = graphics_lab.join("bin/wge_graphics_worker.jl");
-    let output_dir = std::env::var_os("WGE_C2_4_CAPTURE_DIR")
+    let worker = graphics_lab.join("bin/luxel_graphics_worker.jl");
+    let output_dir = std::env::var_os("LUXEL_C2_4_CAPTURE_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            std::env::temp_dir().join(format!("wge-c2-4-real-asset-render-{}", std::process::id()))
+            std::env::temp_dir().join(format!("luxel-c2-4-real-asset-render-{}", std::process::id()))
         });
     fs::create_dir_all(&output_dir).expect("capture output directory is writable");
     let input = output_dir.join("riverwatch.layout.json");

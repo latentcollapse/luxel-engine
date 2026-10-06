@@ -1,4 +1,4 @@
-# WGE CONVERGE-4 Contracts
+# Luxel CONVERGE-4 Contracts
 
 Status: **OPEN, 2026-10-06.** N-3 accepted by review. Next: L-1, then R-2 (crispness), then N-8. The forest-settlement scene (the "Sidhe" references) follows as its own campaign; B-1 folds into it.
 Source: "Carried into CONVERGE-4" in `docs/world/converge/converge3-contracts.md`, and the
@@ -62,7 +62,7 @@ a source artifact pinned by pixel digest.
 > *aura*? This scene has some aura now." Haze: "proper professional
 > fog-of-war quality." Range drop on the right: confirmed as a composition
 > gap. Not yet Alpine; the landform graph is the lever (`Code Projects/Gaea/`).
-> Arm `converge4` (`WGE_PARITY_RENDER_POLICY=converge4`,
+> Arm `converge4` (`LUXEL_PARITY_RENDER_POLICY=converge4`,
 > kit `tools/kit/kit2.lock.json`, backdrop `tools/backdrop/backdrop1.lock.json`).
 
 ### Contract
@@ -83,7 +83,7 @@ a source artifact pinned by pixel digest.
   `backdrop.rs` (lock verification, conditioning, placement), the same seam as
   the kit.
 - **Permitted files:** `backdrop.rs` (new), `lib.rs` (arm, inputs, lowering
-  call), `main.rs` (`WGE_BACKDROP_SET`), `supervisor.rs` (inputs struct),
+  call), `main.rs` (`LUXEL_BACKDROP_SET`), `supervisor.rs` (inputs struct),
   `tools/build_backdrop.py`, `tools/backdrop/`, `tools/parity_ab_policy.sh`,
   `tools/verify_identity.py`, tests.
 - **Tests** (`tests/converge4.rs`): converge4's policy is converge3's; the

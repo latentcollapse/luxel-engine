@@ -7,15 +7,15 @@
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
-use wge_asset_contract::{
+use luxel_asset_contract::{
     ASSET_RUNTIME_RECEIPT_SCHEMA, AssetPreparationReceipt, PreparationStatus, RenderAssetPackage,
     RuntimeAssetPackage, validate_render_asset_package,
 };
 
 use crate::{LedgerError, canonical_json, sha256_hex, sha256_prefixed};
 
-pub const SCENE_ARTIFACT_SCHEMA: &str = "wge.scene-artifact/v1";
-pub const SCENE_OBJECT_SCHEMA: &str = "wge.scene-object/v1";
+pub const SCENE_ARTIFACT_SCHEMA: &str = "luxel.scene-artifact/v1";
+pub const SCENE_OBJECT_SCHEMA: &str = "luxel.scene-object/v1";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -271,7 +271,7 @@ pub fn project_scene_for_graphics(
 ) -> Result<SceneProjection, LedgerError> {
     validate_scene_artifact(artifact)?;
     Ok(SceneProjection {
-        schema_version: "wge.scene-projection/v1".into(),
+        schema_version: "luxel.scene-projection/v1".into(),
         source_scene_artifact_id: artifact.artifact_id.clone(),
         source_scene_artifact_sha256: artifact.artifact_sha256.clone(),
         world_artifact_id: artifact.body.world_artifact_id.clone(),
@@ -632,7 +632,7 @@ fn validate_receipt(receipt: &AssetPreparationReceipt) -> Result<(), LedgerError
 }
 
 fn validate_runtime_package(package: &RuntimeAssetPackage) -> Result<(), LedgerError> {
-    if package.schema_version != "wge.runtime-asset-package/v1" {
+    if package.schema_version != "luxel.runtime-asset-package/v1" {
         return Err(contract_error(format!(
             "unsupported runtime package schema {}",
             package.schema_version

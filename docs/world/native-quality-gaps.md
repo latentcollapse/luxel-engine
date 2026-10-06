@@ -1,4 +1,4 @@
-# WGE Native Graphics Quality Gaps
+# Luxel Native Graphics Quality Gaps
 
 Status: measured gap register, 2026-09-30
 
@@ -40,7 +40,7 @@ payload was single-level; C2.7 provides the versioned authority-side chain
 representation and C2.8 closes GPU residency with a sampler LOD span. The
 close/context
 captures and their receipts are preserved in
-`/home/mattc/Pictures/WGE/c2.5-imported-asset/`.
+`/home/mattc/Pictures/Luxel/c2.5-imported-asset/`.
 
 This is a technical inspection closure, not a visual-quality closure. The hut
 is still framed inside the calibration shrine, and the next visual frontier is
@@ -164,7 +164,7 @@ open.
 These are deferred or negative controls, not silently passed features. No
 certification report may promote them based on a world snapshot or a status-only
 receipt. There is no external-engine certification or comparison gate in the
-current WGE scope.
+current Luxel scope.
 
 ## Priority order for closing gaps
 

@@ -64,7 +64,7 @@ foliage. It does not rescue the character pipeline.
 
 ## Gameplay — FOUNDATION ONLY
 
-A WGE-native capability model (preconditions, costs, targeting, phases,
+A Luxel-native capability model (preconditions, costs, targeting, phases,
 effects, tags, interruptibility, animation/VFX/audio intent, authority policy,
 telemetry), not a clone of Unreal GAS. Existing: the gameplay contract crate,
 GCS capability resolution, the deterministic reference runtime
@@ -74,7 +74,7 @@ GCS capability resolution, the deterministic reference runtime
 
 Semantic authoring contracts that Cyan and add-ons speak. Existing: the
 semantic facade, construction plans, the semantic kernel, and the frozen
-model-native language spec (`docs/DSL docs/WGE_LANGUAGE_SPEC.md`, hash-pinned
+model-native language spec (`docs/DSL docs/LUXEL_LANGUAGE_SPEC.md`, hash-pinned
 by `tests/dsl_conformance/freeze_v06.json`; do not move or edit it without
 re-freezing).
 

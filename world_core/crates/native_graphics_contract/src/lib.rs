@@ -1,4 +1,4 @@
-//! Typed, engine-neutral input and evidence contracts for the native WGE
+//! Typed, engine-neutral input and evidence contracts for the native Luxel
 //! graphics path.
 //!
 //! This crate owns no Vulkan handles and imports no renderer-specific types.
@@ -11,13 +11,13 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use wge_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
+use luxel_reference_runtime::{ReferenceCamera, WorldArtifact, validate_world_artifact};
 
-pub const SCENE_PACKET_SCHEMA: &str = "wge.graphics-scene-packet/v6";
-pub const READY_SCHEMA: &str = "wge.graphics-ready/v1";
-pub const FRAME_RECEIPT_SCHEMA: &str = "wge.graphics-frame-receipt/v1";
-pub const RENDERER_ATTESTATION_SCHEMA: &str = "wge.graphics-renderer-attestation/v1";
-pub const ADAPTER_REVISION: &str = "wge.lava-adapter/v7";
+pub const SCENE_PACKET_SCHEMA: &str = "luxel.graphics-scene-packet/v6";
+pub const READY_SCHEMA: &str = "luxel.graphics-ready/v1";
+pub const FRAME_RECEIPT_SCHEMA: &str = "luxel.graphics-frame-receipt/v1";
+pub const RENDERER_ATTESTATION_SCHEMA: &str = "luxel.graphics-renderer-attestation/v1";
+pub const ADAPTER_REVISION: &str = "luxel.lava-adapter/v7";
 pub const LAVA_BACKEND_ID: &str = "lava-vulkan";
 pub const LAVA_REVISION: &str = "11c7e31bdf62408d22bf379e9e59510f69d2103e";
 pub const MAX_PACKET_ELEMENTS: usize = 16 * 1024 * 1024;
@@ -2919,8 +2919,8 @@ fn procedural_campaign2_terrain_albedo_texture() -> TextureReference {
         }
     }
     procedural_texture(
-        "wge-campaign2-terrain-albedo",
-        "procedural-wge-campaign2-terrain-albedo-v1",
+        "luxel-campaign2-terrain-albedo",
+        "procedural-luxel-campaign2-terrain-albedo-v1",
         TextureColorSpace::Srgb,
         WIDTH as u32,
         HEIGHT as u32,
@@ -2952,8 +2952,8 @@ fn procedural_campaign2_wet_albedo_texture() -> TextureReference {
         }
     }
     procedural_texture(
-        "wge-campaign2-wet-albedo",
-        "procedural-wge-campaign2-wet-albedo-v1",
+        "luxel-campaign2-wet-albedo",
+        "procedural-luxel-campaign2-wet-albedo-v1",
         TextureColorSpace::Srgb,
         WIDTH as u32,
         HEIGHT as u32,
@@ -2963,8 +2963,8 @@ fn procedural_campaign2_wet_albedo_texture() -> TextureReference {
 
 fn procedural_campaign2_foliage_albedo_texture() -> TextureReference {
     procedural_material_albedo_texture(
-        "wge-campaign2-foliage-albedo",
-        "procedural-wge-campaign2-foliage-albedo-v1",
+        "luxel-campaign2-foliage-albedo",
+        "procedural-luxel-campaign2-foliage-albedo-v1",
         [52, 96, 30],
         [132, 174, 58],
     )
@@ -2972,8 +2972,8 @@ fn procedural_campaign2_foliage_albedo_texture() -> TextureReference {
 
 fn procedural_campaign2_bark_albedo_texture() -> TextureReference {
     procedural_material_albedo_texture(
-        "wge-campaign2-bark-albedo",
-        "procedural-wge-campaign2-bark-albedo-v1",
+        "luxel-campaign2-bark-albedo",
+        "procedural-luxel-campaign2-bark-albedo-v1",
         [76, 48, 28],
         [154, 96, 52],
     )
@@ -2981,8 +2981,8 @@ fn procedural_campaign2_bark_albedo_texture() -> TextureReference {
 
 fn procedural_campaign2_hero_stone_albedo_texture() -> TextureReference {
     procedural_material_albedo_texture(
-        "wge-campaign2-hero-stone-albedo",
-        "procedural-wge-campaign2-hero-stone-albedo-v1",
+        "luxel-campaign2-hero-stone-albedo",
+        "procedural-luxel-campaign2-hero-stone-albedo-v1",
         [122, 134, 144],
         [208, 216, 220],
     )
@@ -2990,8 +2990,8 @@ fn procedural_campaign2_hero_stone_albedo_texture() -> TextureReference {
 
 fn procedural_campaign2_hero_metal_albedo_texture() -> TextureReference {
     procedural_material_albedo_texture(
-        "wge-campaign2-hero-metal-albedo",
-        "procedural-wge-campaign2-hero-metal-albedo-v1",
+        "luxel-campaign2-hero-metal-albedo",
+        "procedural-luxel-campaign2-hero-metal-albedo-v1",
         [194, 94, 28],
         [252, 196, 86],
     )
@@ -2999,8 +2999,8 @@ fn procedural_campaign2_hero_metal_albedo_texture() -> TextureReference {
 
 fn procedural_campaign2_hero_glow_albedo_texture() -> TextureReference {
     procedural_material_albedo_texture(
-        "wge-campaign2-hero-glow-albedo",
-        "procedural-wge-campaign2-hero-glow-albedo-v1",
+        "luxel-campaign2-hero-glow-albedo",
+        "procedural-luxel-campaign2-hero-glow-albedo-v1",
         [18, 84, 116],
         [84, 220, 232],
     )
@@ -3022,8 +3022,8 @@ fn procedural_campaign2_emissive_texture() -> TextureReference {
         }
     }
     procedural_texture(
-        "wge-campaign2-emissive",
-        "procedural-wge-campaign2-emissive-v1",
+        "luxel-campaign2-emissive",
+        "procedural-luxel-campaign2-emissive-v1",
         TextureColorSpace::Srgb,
         WIDTH as u32,
         HEIGHT as u32,
@@ -3368,10 +3368,10 @@ pub fn lower_reference_world(
         let cell = spawn.grid_cell;
         let y = world.body.fields.heights_m[cell];
         let (role, color) = match spawn.role {
-            wge_reference_runtime::SpawnRole::PlayerStart => {
+            luxel_reference_runtime::SpawnRole::PlayerStart => {
                 (MarkerRole::PlayerSpawn, [0.28, 0.94, 0.42, 1.0])
             }
-            wge_reference_runtime::SpawnRole::Opponent => {
+            luxel_reference_runtime::SpawnRole::Opponent => {
                 (MarkerRole::OpponentSpawn, [0.88, 0.20, 0.47, 1.0])
             }
         };
@@ -4006,7 +4006,7 @@ pub fn lower_world_showcase_packet(
 /// validation does not consult it, for the same reason `deformation_v7_enabled`
 /// is producer-only: a receiver must be able to check a packet it did not
 /// produce.
-pub const PARITY_POLICY_ENV: &str = "WGE_PARITY_RENDER_POLICY";
+pub const PARITY_POLICY_ENV: &str = "LUXEL_PARITY_RENDER_POLICY";
 
 /// Which candidate policy a run should attach.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -4073,7 +4073,7 @@ pub enum ParityPolicyCandidate {
 /// baseline. Content is now its own comma-separated variable.
 ///
 /// Unset = no content change = the frozen baseline content, byte-identical.
-pub const PARITY_CONTENT_ENV: &str = "WGE_PARITY_CONTENT";
+pub const PARITY_CONTENT_ENV: &str = "LUXEL_PARITY_CONTENT";
 
 /// Which content changes a run applies on top of the authored Campaign 2 frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -4086,7 +4086,7 @@ pub struct ParityContent {
 }
 
 impl ParityContent {
-    /// Parse `WGE_PARITY_CONTENT` together with the policy arm it must agree
+    /// Parse `LUXEL_PARITY_CONTENT` together with the policy arm it must agree
     /// with. Unknown tokens are refused rather than ignored: a typo that
     /// silently rendered the baseline would be a mislabelled experiment.
     pub fn from_env(policy: ParityPolicyCandidate) -> Result<Self, GraphicsContractError> {
@@ -4108,7 +4108,7 @@ impl ParityContent {
                 }
             }
         }
-        // The legacy spelling `WGE_PARITY_RENDER_POLICY=hero-materials` still
+        // The legacy spelling `LUXEL_PARITY_RENDER_POLICY=hero-materials` still
         // means "baseline renderer + hero content", so the archived `ab-hero3`
         // run stays reproducible.
         if policy == ParityPolicyCandidate::HeroMaterials {

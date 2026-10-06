@@ -13,18 +13,18 @@
 //! a name, and its lights, environment and render policy are constants here.
 
 use serde::{Deserialize, Serialize};
-use wge_asset_contract::{
+use luxel_asset_contract::{
     ASSET_RUNTIME_REQUEST_SCHEMA, AssetPreparationReceipt, AssetPreparationRequest, AssetUse,
     Axis as AssetAxis, CollisionMetadata, CollisionShape, LodMetadata, RenderAssetPackage,
     RenderConditioningRequest, RenderMipPolicy, RuntimeTarget,
 };
-use wge_project_ledger::{
+use luxel_project_ledger::{
     CollisionPolicy, MaterialAssignment, SCENE_ARTIFACT_SCHEMA, SCENE_OBJECT_SCHEMA,
     SceneArtifact, SceneArtifactBody, SceneImportance, SceneLodLevel, SceneLodPolicy, SceneObject,
     SceneObjectProvenance, SceneProvenance, SceneTransform, SceneVisibilityPolicy,
     seal_scene_with_render_assets,
 };
-use wge_reference_runtime::WorldArtifact;
+use luxel_reference_runtime::WorldArtifact;
 
 use crate::{
     CameraProjection, EnvironmentIntent, GraphicsCamera, GraphicsContractError,
@@ -249,7 +249,7 @@ const SLAB_LEAN_DEG: f32 = 15.0;
 
 pub fn render_request() -> RenderConditioningRequest {
     RenderConditioningRequest {
-        schema_version: "wge.render-asset-request/v1".into(),
+        schema_version: "luxel.render-asset-request/v1".into(),
         meters_per_unit: 1.0,
         vertical_axis: AssetAxis::Y,
         require_uv0: true,
@@ -395,7 +395,7 @@ pub fn calibration_scene(
                     scale_xyz: [1.0, 1.0, 1.0],
                 },
                 collision: if mesh.mesh_id == "ground_plane" {
-                    CollisionPolicy::Static { shape: wge_project_ledger::SceneCollisionShape::Box }
+                    CollisionPolicy::Static { shape: luxel_project_ledger::SceneCollisionShape::Box }
                 } else {
                     CollisionPolicy::None
                 },

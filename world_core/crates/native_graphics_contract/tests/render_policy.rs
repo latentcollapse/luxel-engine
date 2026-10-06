@@ -7,7 +7,7 @@
 //! also built — a round-trip assertion could not catch a leak into canonical
 //! JSON, but re-sealing a committed packet can.
 
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     BloomPolicy, DitherPolicy, GradePolicy, MeshSurfacePolicy, RenderPolicy, SamplerPolicy,
     ShadowFitPolicy, ShadowPolicy, SkyModel, SkyPolicy, AtmospherePolicy, DebugPolicy, FoliageCoveragePolicy, IblPolicy, TerrainSurfacePolicy, VignettePolicy, canonical_json, seal_scene_packet, validate_render_policy,
     validate_scene_packet, GraphicsContractError, GraphicsScenePacketBody, POLICY_SCALE,
@@ -61,7 +61,7 @@ fn committed_packet_reseals_identically_with_render_policy_module_present() {
     let raw = std::fs::read_to_string(&path).expect("committed packet reads");
     let value: serde_json::Value = serde_json::from_str(&raw).expect("committed packet parses");
     let committed = value["packet_sha256"].as_str().expect("digest").to_owned();
-    assert_eq!(value["body"]["schema_version"], "wge.graphics-scene-packet/v6");
+    assert_eq!(value["body"]["schema_version"], "luxel.graphics-scene-packet/v6");
 
     let body: GraphicsScenePacketBody =
         serde_json::from_value(value["body"].clone()).expect("body deserializes");

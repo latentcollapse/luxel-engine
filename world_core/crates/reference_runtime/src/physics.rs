@@ -1,4 +1,4 @@
-//! Deterministic, engine-neutral kinematic movement over the certified WGE world.
+//! Deterministic, engine-neutral kinematic movement over the certified Luxel world.
 //!
 //! This is a bounded contact/query seam, not a force-based physics engine. The
 //! controlled body is a grounded disc using the authored navigation radius;
@@ -12,12 +12,12 @@ use crate::{
     REFERENCE_TICK_RATE_HZ, ReferenceRuntimeError, WorldArtifact, validate_world_artifact,
 };
 
-pub const PHYSICS_STATE_SCHEMA: &str = "wge.reference-kinematic-state/v1";
-pub const PHYSICS_STEP_SCHEMA: &str = "wge.reference-kinematic-step/v1";
+pub const PHYSICS_STATE_SCHEMA: &str = "luxel.reference-kinematic-state/v1";
+pub const PHYSICS_STEP_SCHEMA: &str = "luxel.reference-kinematic-step/v1";
 /// Bounds the amount of field sampling performed by one movement request.
 pub const PHYSICS_MAX_SWEEP_SAMPLES: usize = 4096;
-const STATE_DIGEST_DOMAIN: &[u8] = b"wge.reference-kinematic-state/v1\0";
-const STEP_DIGEST_DOMAIN: &[u8] = b"wge.reference-kinematic-step/v1\0";
+const STATE_DIGEST_DOMAIN: &[u8] = b"luxel.reference-kinematic-state/v1\0";
+const STEP_DIGEST_DOMAIN: &[u8] = b"luxel.reference-kinematic-step/v1\0";
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case")]

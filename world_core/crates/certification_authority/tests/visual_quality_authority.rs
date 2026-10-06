@@ -4,8 +4,8 @@ use std::sync::OnceLock;
 
 use serde::Serialize;
 use serde_json::json;
-use wge_certification_authority::schema::NativeVisualQualityReceiptPayload;
-use wge_certification_authority::{
+use luxel_certification_authority::schema::NativeVisualQualityReceiptPayload;
+use luxel_certification_authority::{
     ArtifactBytes, CandidateContext, EvidenceBinding, NATIVE_GRAPHICS_FRAME_RECEIPT_KIND,
     NATIVE_GRAPHICS_PACKET_KIND, NATIVE_GRAPHICS_RENDERER_ATTESTATION_KIND,
     NATIVE_RGBA8_CAPTURE_KIND, NATIVE_VISUAL_QUALITY_EVIDENCE_KIND,
@@ -13,8 +13,8 @@ use wge_certification_authority::{
     candidate_identity, engine_neutral_gate_profile, native_mvp_gate_profile, sha256_prefixed,
     validate_receipt,
 };
-use wge_native_graphics_contract as graphics;
-use wge_reference_runtime::{WorldBuild, build_from_layout_path};
+use luxel_native_graphics_contract as graphics;
+use luxel_reference_runtime::{WorldBuild, build_from_layout_path};
 
 const WORLD_ID: &str = "native-quality-world";
 const PACKET_ID: &str = "native-quality-packet";
@@ -29,7 +29,7 @@ fn project_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(3)
-        .expect("certification authority is nested under the WGE project")
+        .expect("certification authority is nested under the Luxel project")
         .to_path_buf()
 }
 
@@ -38,7 +38,7 @@ fn world_build() -> &'static WorldBuild {
         let root = project_root();
         let layout =
             root.join("world_core/crates/reference_runtime/examples/riverwatch.layout.json");
-        let julia = std::env::var_os("WGE_JULIA")
+        let julia = std::env::var_os("LUXEL_JULIA")
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("julia"));
         build_from_layout_path(&layout, &julia, &root.join("terrain_lab"))
@@ -270,7 +270,7 @@ fn candidate_with_quality_evidence() -> CandidateContext {
         .expect("fixture evidence independently revalidates");
 
     let mut candidate = CandidateContext {
-        project_id: "wge-native-visual-quality-authority-tests".into(),
+        project_id: "luxel-native-visual-quality-authority-tests".into(),
         snapshot_id: "quality-candidate".into(),
         candidate_sha256: String::new(),
         artifacts: BTreeMap::new(),
@@ -334,13 +334,13 @@ fn evidence_bindings(candidate: &CandidateContext, ids: &[&str]) -> Vec<Evidence
 
 fn receipt(candidate: &CandidateContext, status: ReceiptStatus) -> ReceiptEnvelope {
     let mut envelope = ReceiptEnvelope {
-        schema_version: wge_certification_authority::ENVELOPE_SCHEMA.into(),
+        schema_version: luxel_certification_authority::ENVELOPE_SCHEMA.into(),
         receipt_id: String::new(),
         project_id: candidate.project_id.clone(),
         snapshot_id: candidate.snapshot_id.clone(),
         candidate_sha256: candidate.candidate_sha256.clone(),
         gate_id: "visual_quality".into(),
-        validator_id: "wge.validator.visual-quality/v1".into(),
+        validator_id: "luxel.validator.visual-quality/v1".into(),
         receipt_schema: NATIVE_VISUAL_QUALITY_RECEIPT_SCHEMA.into(),
         status,
         producer: "authority-test-fixture".into(),
@@ -378,9 +378,9 @@ fn reidentify(candidate: &mut CandidateContext, envelope: &mut ReceiptEnvelope) 
 
 #[test]
 fn strict_visual_quality_is_registered_required_and_independently_remeasured() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let descriptor = registry
-        .descriptor("wge.validator.visual-quality/v1")
+        .descriptor("luxel.validator.visual-quality/v1")
         .expect("strict native validator is registered");
     assert_eq!(descriptor.gate_id, "visual_quality");
     assert_eq!(
@@ -391,16 +391,16 @@ fn strict_visual_quality_is_registered_required_and_independently_remeasured() {
         gate.gate_id == "visual_quality"
             && gate.validator_id == descriptor.validator_id
             && gate.receipt_schema == descriptor.receipt_schema
-            && gate.disposition == wge_certification_authority::GateDisposition::RequiredPass
+            && gate.disposition == luxel_certification_authority::GateDisposition::RequiredPass
     }));
     assert!(native_mvp_gate_profile().iter().any(|gate| {
         gate.gate_id == "visual_quality"
             && gate.validator_id == descriptor.validator_id
-            && gate.disposition == wge_certification_authority::GateDisposition::RequiredPass
+            && gate.disposition == luxel_certification_authority::GateDisposition::RequiredPass
     }));
     assert!(
-        ValidatorRegistry::wge_native_mvp_v1()
-            .descriptor("wge.validator.visual-quality/v1")
+        ValidatorRegistry::luxel_native_mvp_v1()
+            .descriptor("luxel.validator.visual-quality/v1")
             .is_some()
     );
 
@@ -413,7 +413,7 @@ fn strict_visual_quality_is_registered_required_and_independently_remeasured() {
 
 #[test]
 fn packet_receipt_capture_and_quality_tampering_are_rejected_after_outer_resealing() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = candidate_with_quality_evidence();
     let valid = receipt(&candidate, ReceiptStatus::Pass);
     assert_eq!(
@@ -468,7 +468,7 @@ fn packet_receipt_capture_and_quality_tampering_are_rejected_after_outer_reseali
 
 #[test]
 fn status_only_extra_artifact_and_pass_shaped_quality_claims_are_rejected() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = candidate_with_quality_evidence();
     let valid = receipt(&candidate, ReceiptStatus::Pass);
 
@@ -502,7 +502,7 @@ fn status_only_extra_artifact_and_pass_shaped_quality_claims_are_rejected() {
 
 #[test]
 fn producer_claimed_status_must_match_rust_derived_quality_outcome() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let candidate = candidate_with_quality_evidence();
     let forged = receipt(&candidate, ReceiptStatus::Fail);
     let error = validate_receipt(&forged, &candidate, &registry).unwrap_err();
@@ -511,7 +511,7 @@ fn producer_claimed_status_must_match_rust_derived_quality_outcome() {
 
 #[test]
 fn bad_failed_and_indeterminate_quality_outcomes_have_explicit_authority_statuses() {
-    let registry = ValidatorRegistry::wge_engine_neutral_v1();
+    let registry = ValidatorRegistry::luxel_engine_neutral_v1();
     let base = candidate_with_quality_evidence();
     let packet: graphics::GraphicsScenePacket =
         serde_json::from_slice(&base.artifacts[PACKET_ID].bytes).unwrap();

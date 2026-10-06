@@ -15,21 +15,21 @@ The first vertical slice renders:
 - a free camera and an automatically refreshing status HUD.
 
 It also has a native, engine-neutral inspection path. This consumes a
-Rust/Julia-validated `wge.world-artifact/v1` directly and never requires a
+Rust/Julia-validated `luxel.world-artifact/v1` directly and never requires a
 Godot project, delivery-backend assets, or legacy renderer manifests:
 
 ```bash
 cargo run -p codeweald-world-viewer -- \
   --native-world /path/to/world_artifact.json \
-  --capture /tmp/wge-native.png \
+  --capture /tmp/luxel-native.png \
   --view overview
 ```
 
 Native captures write a sibling `<capture>_provenance.json` using
-`wge.bevy-native-capture-provenance/v2`. The sidecar is written only after the
+`luxel.bevy-native-capture-provenance/v2`. The sidecar is written only after the
 PNG exists and binds its exact digest to the validated world artifact,
 spatial-field digest, authored camera/view, and Bevy viewer build identity.
-`wge-reference-runtime` independently validates that record. The native path
+`luxel-reference-runtime` independently validates that record. The native path
 is still an inspection consumer; the deterministic reference capture remains
 the registered promotion gate owned by the Rust certification authority.
 

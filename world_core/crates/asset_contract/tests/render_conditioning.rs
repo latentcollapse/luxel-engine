@@ -2,7 +2,7 @@ use std::io::Cursor;
 
 use image::{ColorType, ImageEncoder, codecs::png::PngEncoder};
 use serde_json::json;
-use wge_asset_contract::{
+use luxel_asset_contract::{
     Axis, RENDER_ASSET_REQUEST_SCHEMA, RenderConditioningRequest, RenderFindingCode,
     RenderMipPolicy, RenderPreparationStatus, condition_render_asset,
     validate_render_asset_package, validate_render_conditioning_receipt,
@@ -212,7 +212,7 @@ fn make_glb_with_texture_transform_and_image(
         json!([{"pbrMetallicRoughness": {"baseColorFactor": [0.6, 0.4, 0.2, 1.0]}}])
     };
     let mut document = json!({
-        "asset": {"version": "2.0", "generator": "wge-render-test"},
+        "asset": {"version": "2.0", "generator": "luxel-render-test"},
         "scene": 0,
         "scenes": [{"nodes": [0]}],
         "nodes": [{"name": "triangle", "mesh": 0}],

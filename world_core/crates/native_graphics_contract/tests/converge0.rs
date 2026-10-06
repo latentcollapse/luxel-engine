@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
-use wge_native_graphics_contract::material_maps::mean_linear_rgb;
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::material_maps::mean_linear_rgb;
+use luxel_native_graphics_contract::{
     BufferPayload, Campaign2View, GraphicsScenePacket, ParityContent, ParityPolicyCandidate,
     RenderPolicy, ShadowFitPolicy, SkyPolicy, TerrainLayerSet, lower_campaign2_packet_with,
     validate_render_policy, world_void_fraction_bp, CONVERGE0_TERRAIN_SCALE,

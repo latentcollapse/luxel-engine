@@ -1,6 +1,6 @@
 {
   "snapshot": {
-    "schema_version": "wge.gameplay-snapshot/v1",
+    "schema_version": "luxel.gameplay-snapshot/v1",
     "navigation": {
       "adjacency": {
       "arena": ["bridge", "relay"],
@@ -68,7 +68,7 @@
     }
   },
   "trace": {
-    "schema_version": "wge.gameplay-trace/v1",
+    "schema_version": "luxel.gameplay-trace/v1",
     "events": [
       {"kind": "move", "destination": "bridge"},
       {"kind": "move", "destination": "arena"},

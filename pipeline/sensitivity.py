@@ -1,6 +1,6 @@
 """Sensitivity matrix: which knob actually moves which metric, and by how much.
 
-WGE tooling item 3 (see WGE/docs/platform/tooling-upgrades.md). The critic once
+Luxel tooling item 3 (see Luxel/docs/platform/tooling-upgrades.md). The critic once
 attributed a 6.9x ``foreground_edge_density`` shortfall to landform
 composition and emitted jitter/spine repairs for it. Driving every composition
 scalar to its bound moved that metric by 0.3% -- while pushing further broke
@@ -39,7 +39,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from wge_critic import apply_to_scaffold
+from luxel_critic import apply_to_scaffold
 
 PIPELINE_DIR = Path(__file__).resolve().parent
 RENDERER_ROOT = PIPELINE_DIR.parent

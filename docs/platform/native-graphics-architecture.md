@@ -1,4 +1,4 @@
-# WGE Native Graphics Architecture
+# Luxel Native Graphics Architecture
 
 Status: supervised native Lava backend checkpoint green; adapter-v6 audit,
 Campaign 2 authored-frame slice, C2.5 imported-asset inspection, and C2.7
@@ -14,7 +14,7 @@ Upstream substrate: Lava.jl
 
 The companion forensic record is [`docs/archive/2026-09_native-graphics-checkpoints/lava-graphics-audit.md`](../archive/2026-09_native-graphics-checkpoints/lava-graphics-audit.md).
 This document turns that audit into an executable boundary. The design is
-deliberately narrow: WGE owns meaning and certification; Rust supervises and
+deliberately narrow: Luxel owns meaning and certification; Rust supervises and
 promotes; Julia owns numerical/GPU execution inside a persistent process; Lava
 owns Vulkan machinery behind one adapter.
 
@@ -46,7 +46,7 @@ Rust graphics supervisor
         | length-prefixed request/response; timeout; restart; digest checks
         v
 persistent Julia graphics worker
-        | WGE adapter only
+        | Luxel adapter only
         v
 Lava.jl pinned revision -> Vulkan device/context/queues -> offscreen target
 ```
@@ -66,7 +66,7 @@ set.
 
 ## Typed packet boundary
 
-The current Rust contract is `wge.graphics-scene-packet/v6`. It is a closed,
+The current Rust contract is `luxel.graphics-scene-packet/v6`. It is a closed,
 `deny_unknown_fields` structure with a canonical body digest. Its shape is:
 
 ```text
@@ -145,7 +145,7 @@ transforms are rejected at the asset boundary.
 
 The packet does not contain an arbitrary shader string, arbitrary Vulkan handle,
 or arbitrary code callback. Shader/material lowering is selected by a
-registered WGE renderer capability and a content-addressed intent identity.
+registered Luxel renderer capability and a content-addressed intent identity.
 
 ## Backend and capture contracts
 
@@ -249,8 +249,8 @@ claimed as imported hero-asset parity. The frozen evidence and remaining quality
 
 The strict certification command, `render-quality-layout`, uses that composed
 world-showcase packet so the technical visual floor measures a materially
-structured WGE scene while preserving the authored world and spatial-field
-bindings. This is an internal WGE quality probe, not a comparison against any
+structured Luxel scene while preserving the authored world and spatial-field
+bindings. This is an internal Luxel quality probe, not a comparison against any
 other engine; a failed measurement remains a failed gate.
 
 The quality authority reports terrain and authored geometry separately. The
@@ -283,7 +283,7 @@ The calibration packet contains:
   fog, linear HDR resolve, and deterministic shadow-map sampling.
 
 The Rust-registered `campaign2-authored-frame` profile is the technical floor
-for these cuts. The separate `wge.campaign2-visual-evidence/v1` vector records
+for these cuts. The separate `luxel.campaign2-visual-evidence/v1` vector records
 silhouette/readability, material separation, composition, texture frequency,
 density, artifact rate, frame/GPU cost, upload/readback memory, and instance
 counts. Grounding/contact, lighting consistency, and atmospheric depth are
@@ -295,7 +295,7 @@ receipt and evidence.
 The final current-binary run is preserved under
 `artifacts/campaign2/live-twelfth/`; its clean replay is preserved under
 `artifacts/campaign2/live-eleventh/`; and the viewable captures are under
-`/home/mattc/Pictures/WGE/campaign2-2026-09-29/`. The full measurements,
+`/home/mattc/Pictures/Luxel/campaign2-2026-09-29/`. The full measurements,
 hashes, rejected experiments, and next frontier are in
 [`docs/archive/2026-10_graphics-sprint-reports/graphics-campaign-2-report.md`](../archive/2026-10_graphics-sprint-reports/graphics-campaign-2-report.md).
 
@@ -327,12 +327,12 @@ indeterminate receipt with recovery evidence. It does not reuse stale handles.
 
 The graphics Julia project is separate from `terrain_lab` so Lava’s Julia 1.12
 dependency does not silently change the terrain package’s compatibility promise.
-The adapter is the only WGE module allowed to import Lava names. It must:
+The adapter is the only Luxel module allowed to import Lava names. It must:
 
 - use concrete domain types and meaningful multiple dispatch for packet
   lowering, material variants, target formats, and capability profiles;
 - keep `LavaArray`/Vulkan handles out of the Rust protocol;
-- compile/cache by stable WGE identities, not only Julia object hashes;
+- compile/cache by stable Luxel identities, not only Julia object hashes;
 - make ownership and lifetime explicit for buffers, textures, pipelines, and
   readback memory;
 - expose phase timing and transfer/draw/dispatch counts;
@@ -353,7 +353,7 @@ replacement for the authored mesh contract, and not part of the current native
 raster certification gate. The canonical source mesh and conventional animated
 BLAS path remain available for every comparison.
 
-The central question is when WGE should materialize animated geometry as
+The central question is when Luxel should materialize animated geometry as
 tetrahedral cages. A possible hybrid policy—full BLAS near, cluster AS at
 intermediate scale, and TetCageRT for far/dense geometry—is only a hypothesis
 until measured.
@@ -397,7 +397,7 @@ Each layer must be green before the next depends on it:
    offscreen clear, depth, texture, readback, teardown.
 4. Rust-supervised process tests: ready handshake, restart, schema/provenance
    checks, stale-packet rejection, and bounded response handling.
-5. Native frame test: certified WGE world -> packet -> Lava frame -> Rust
+5. Native frame test: certified Luxel world -> packet -> Lava frame -> Rust
    validation -> clean-restart deterministic replay.
 6. Bevy parity test: same packet intent and camera produce semantically
    equivalent marker/terrain measurements; representation may differ.

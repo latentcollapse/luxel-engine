@@ -1,10 +1,10 @@
-# WGE Grindstone — Interactive Playtesting, Tuning, Diagnosis, and Refinement Subsystem
+# Luxel Grindstone — Interactive Playtesting, Tuning, Diagnosis, and Refinement Subsystem
 
 Status: **architecture / product specification, registered 2026-10-02**
 Provenance: operator-authored product specification, registered verbatim-intent as the
-post-TetCage-integration build target. Namespace `wge.grindstone`; operator surface
+post-TetCage-integration build target. Namespace `luxel.grindstone`; operator surface
 "Refinement Lab"; primary operator: human playtester/designer; primary agent: Cyan;
-authority: WGE Rust kernel; execution: Julia / Lava / runtime workers; optional
+authority: Luxel Rust kernel; execution: Julia / Lava / runtime workers; optional
 analytics: Gesso; future representation experiments: TetCageRT.
 
 This document is the registered condensation the build proceeds from. Where it and the
@@ -15,7 +15,7 @@ operator's full text differ, the operator's text wins; file corrections as evide
 Grindstone closes the gap between "the game works" and "the game feels right." The
 traditional loop (play → stop → note → inspect → edit → rebuild → reproduce → retest)
 collapses into: play → report (voice/text ticket) → automatic context capture → Cyan
-diagnosis → bounded candidates → WGE validation → hot/warm/cold reload → human retests →
+diagnosis → bounded candidates → Luxel validation → hot/warm/cold reload → human retests →
 accept/reject → Rust promotes. The human remains the final judge of subjective
 experience; Cyan translates "that grab is bullshit" into
 "phase-2 grab volume active 117 ms beyond the visible contact envelope."
@@ -59,7 +59,7 @@ Rolling diagnostic buffers frozen into the ticket at report time: replay ~20 s, 
 ~30 s, combat events ~60 s, frame telemetry (10 s hi-res + summarized minutes), bounded
 AI decision traces, relevant collision contacts, encounter snapshot. The human never
 reproduces technical context manually. **The C3.2 input trace (digest-bound
-`wge.input-trace/v1`) is the first concrete instance of the input buffer.**
+`luxel.input-trace/v1`) is the first concrete instance of the input buffer.**
 
 ## 4. Reload classes (mutation cost is formalized)
 
@@ -119,4 +119,4 @@ the C3.2 input trace is already its input buffer; the presented session's teleme
 already its frame window; TetCage A/B (baseline vs RT candidates, measured frame/VRAM/
 memory/visual-error/density) is literally Grindstone §30's representation-policy
 laboratory. Demo A therefore ships as both public demo and continuous refinement
-benchmark. "WGE builds the blade. Grindstone sharpens it."
+benchmark. "Luxel builds the blade. Grindstone sharpens it."

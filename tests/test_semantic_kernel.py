@@ -16,17 +16,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "pipeline"))
 
-from wge_semantic_ir import LowerError, canonical_dumps, file_digest, lower_file, lower_source  # noqa: E402
+from luxel_semantic_ir import LowerError, canonical_dumps, file_digest, lower_file, lower_source  # noqa: E402
 
 REGISTRY = ROOT / "world_core" / "crates" / "semantic_kernel" / "registry_v0.json"
 WORKER = ROOT / "terrain_lab" / "bin" / "lane_overlap_worker.jl"
 PROJECT = ROOT / "terrain_lab"
 MANIFEST = PROJECT / "Manifest.toml"
 FIXTURES = ROOT / "tests" / "fixtures" / "semantic_kernel"
-BINARY = ROOT / "world_core" / "target" / "debug" / "wge-semantic-kernel"
-INVALID = FIXTURES / "invalid.wge"
-REPAIRED = FIXTURES / "repaired.wge"
-TAMPERED = FIXTURES / "tampered.wge"
+BINARY = ROOT / "world_core" / "target" / "debug" / "luxel-semantic-kernel"
+INVALID = FIXTURES / "invalid.luxel"
+REPAIRED = FIXTURES / "repaired.luxel"
+TAMPERED = FIXTURES / "tampered.luxel"
 
 
 def events(text: str) -> list[dict]:
@@ -58,12 +58,12 @@ class SemanticKernelTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         subprocess.run(
-            ["cargo", "build", "-p", "wge-semantic-kernel", "--quiet"],
+            ["cargo", "build", "-p", "luxel-semantic-kernel", "--quiet"],
             cwd=ROOT / "world_core",
             check=True,
         )
-        cls.store_a = Path(tempfile.mkdtemp(prefix="wge-kernel-a-"))
-        cls.store_b = Path(tempfile.mkdtemp(prefix="wge-kernel-b-"))
+        cls.store_a = Path(tempfile.mkdtemp(prefix="luxel-kernel-a-"))
+        cls.store_b = Path(tempfile.mkdtemp(prefix="luxel-kernel-b-"))
         cls.transcript_a = cls._run_demo(cls.store_a)
         cls.transcript_b = cls._run_demo(cls.store_b)
         cls.events_a = events(cls.transcript_a)
@@ -181,7 +181,7 @@ class SemanticKernelTests(unittest.TestCase):
                     "minted_by": "julia-worker",
                     "operation": "generation.commit",
                     "receipt_id": "forged",
-                    "schema": "wge.receipt/v0",
+                    "schema": "luxel.receipt/v0",
                 }
             ),
             encoding="utf-8",
@@ -245,7 +245,7 @@ class SemanticKernelTests(unittest.TestCase):
         )
         self.assertNotEqual(checked.returncode, 0)
         self.assertEqual(events(checked.stdout)[0]["code"], "solver_image_mismatch")
-        fresh = Path(tempfile.mkdtemp(prefix="wge-kernel-solver-"))
+        fresh = Path(tempfile.mkdtemp(prefix="luxel-kernel-solver-"))
         try:
             self._write_ir(INVALID, fresh, "invalid.ir.json")
             self._write_ir(REPAIRED, fresh, "repaired.ir.json")
@@ -304,13 +304,13 @@ class SemanticKernelTests(unittest.TestCase):
         self.assertEqual(final["julia_jobs"], 2)
 
     def test_o_author_surface_rejects_arbitrary_code(self) -> None:
-        marker = Path(tempfile.mkdtemp(prefix="wge-kernel-exec-")) / "marker"
+        marker = Path(tempfile.mkdtemp(prefix="luxel-kernel-exec-")) / "marker"
         source = f"import os\nos.system('touch {marker}')\n"
         with self.assertRaises(LowerError) as caught:
             lower_source(source, REGISTRY)
         self.assertEqual(caught.exception.code, "unsupported_statement")
         self.assertFalse(marker.exists())
-        self.assertNotIn("exec(", (ROOT / "pipeline" / "wge_semantic_ir.py").read_text(encoding="utf-8"))
+        self.assertNotIn("exec(", (ROOT / "pipeline" / "luxel_semantic_ir.py").read_text(encoding="utf-8"))
         rejected = run_kernel(["reject-effect", "--effect", "generation.commit"])
         self.assertNotEqual(rejected.returncode, 0)
         self.assertEqual(events(rejected.stdout)[0]["code"], "effect_forbidden")
@@ -399,7 +399,7 @@ class SemanticKernelTests(unittest.TestCase):
         )
         self.assertEqual(events(checked.stdout)[0]["code"], "unknown_field")
         with self.assertRaises(LowerError) as caught:
-            lower_source("from wge.world import lane\nthing = not_a_constructor()\n", REGISTRY)
+            lower_source("from luxel.world import lane\nthing = not_a_constructor()\n", REGISTRY)
         self.assertEqual(caught.exception.code, "unregistered_call")
 
     def test_corrupt_evidence_fails_verification_without_moving_the_pointer(self) -> None:

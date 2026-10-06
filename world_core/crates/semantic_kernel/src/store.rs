@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use crate::{KernelFailure, canonical_json, ident, ops, sha256_prefixed};
 
-pub const STORE_SCHEMA: &str = "wge.store/v0";
+pub const STORE_SCHEMA: &str = "luxel.store/v0";
 
 #[derive(Debug)]
 pub struct Opened {
@@ -97,10 +97,10 @@ pub fn open_store(store: &Path) -> Result<Opened, KernelFailure> {
             KernelFailure::provenance("missing_pointer", "pointer has no generation_id")
         })?
         .to_owned();
-    if pointer.get("schema").and_then(|value| value.as_str()) != Some("wge.pointer/v0") {
+    if pointer.get("schema").and_then(|value| value.as_str()) != Some("luxel.pointer/v0") {
         return Err(KernelFailure::provenance(
             "malformed_pointer",
-            "pointer schema is not wge.pointer/v0",
+            "pointer schema is not luxel.pointer/v0",
         ));
     }
     let generation_path = store
@@ -421,7 +421,7 @@ fn expected_generation_body(
             "measurement_sha256": measurement,
             "parent_id": required_str(generation, "parent_id")?,
             "registry_digest": registry,
-            "schema": "wge.generation/v0",
+            "schema": "luxel.generation/v0",
             "seed": null,
             "solver_image": solver
         }));
@@ -451,7 +451,7 @@ fn expected_generation_body(
         "parent_id": required_str(generation, "parent_id")?,
         "receipt_index": receipt_index,
         "registry_digest": registry,
-        "schema": "wge.generation/v0",
+        "schema": "luxel.generation/v0",
         "seed": null,
         "solver_image": solver
     }))
@@ -496,7 +496,7 @@ fn assert_receipt(
         "parent_id": parent,
         "receipt_id": receipt_id,
         "registry_digest": registry,
-        "schema": "wge.receipt/v0",
+        "schema": "luxel.receipt/v0",
         "solver_image": solver
     });
     if !bytes_match_canonical(raw, &canonical_json(&expected))
@@ -531,7 +531,7 @@ pub fn genesis(registry: &str) -> Value {
         "measurement_sha256": null,
         "parent_id": null,
         "registry_digest": registry,
-        "schema": "wge.generation/v0",
+        "schema": "luxel.generation/v0",
         "seed": null,
         "solver_image": null
     })
@@ -582,7 +582,7 @@ pub fn replace_pointer(store: &Path, generation_id: &str) -> Result<(), KernelFa
         &store.join("pointer.json"),
         canonical_json(&json!({
             "generation_id": generation_id,
-            "schema": "wge.pointer/v0"
+            "schema": "luxel.pointer/v0"
         }))
         .as_bytes(),
     )

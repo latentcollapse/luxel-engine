@@ -1,4 +1,4 @@
-# WGE C3.2 Input Seam — Pre-Reboot Checkpoint
+# Luxel C3.2 Input Seam — Pre-Reboot Checkpoint
 
 Status: **checkpoint green and committed; deliberately parked for the reboot + TetLab integration sprint**
 Date: 2026-10-02
@@ -9,10 +9,10 @@ Grindstone (`docs/add-ons/grindstone-spec.md`), then the Demo A gauntlet.
 ## What is landed (all verified green)
 
 **Rust — `native_graphics_contract/src/input_session.rs` (new module):**
-- `InputSample` (`wge.input-sample/v1`): device-raw worker report — held GLFW keys
+- `InputSample` (`luxel.input-sample/v1`): device-raw worker report — held GLFW keys
   (positive codes) plus reserved mouse codes `-2..-1`, normalized cursor while focused,
   joystick-1 axes/buttons. Fail-closed validation (finite, bounded, code domain).
-- `InputFrame` (`wge.input-frame/v1`): semantic per-tick intent — camera-space
+- `InputFrame` (`luxel.input-frame/v1`): semantic per-tick intent — camera-space
   `move_x/move_y`, look deltas (rad), sprint/roll/guard/light/heavy/interact.
 - `ds3_map`: DS3-style Xbox layout. Keyboard: WASD move, Shift sprint, Space roll,
   Ctrl/RMB guard, LMB light, Shift+LMB heavy, E interact. Gamepad: left stick move
@@ -28,7 +28,7 @@ Grindstone (`docs/add-ons/grindstone-spec.md`), then the Demo A gauntlet.
   ±1.2 rad, floor clamp above body height).
 - `InputDrivenSession<'world>`: owns sim state + trace over the borrowed validated
   world; `capture_and_promote` delegates through the unchanged authority path.
-- Trace: `TraceStep` records + rolling chained digest (`wge.input-trace/v1`) —
+- Trace: `TraceStep` records + rolling chained digest (`luxel.input-trace/v1`) —
   byte-comparable replays. **This is Grindstone's first input buffer.**
 - Heading convention (right-handed, Y-up): `forward = (sin yaw, cos yaw)`,
   `right = up × forward`. Do not "simplify" back to cos/sin.
@@ -62,7 +62,7 @@ merges `input_samples` into the response only when requested.
    batch. Keep the `expected_tick` guard; the sim already rejects stale frames.
 2. **Worker input-collection has no dedicated test** (existing suites stay green with
    the flag off). Add a worker-op test: `report_input:true` with `frame_count:N` →
-   response carries `N` samples, each with `schema_version == "wge.input-sample/v1"`
+   response carries `N` samples, each with `schema_version == "luxel.input-sample/v1"`
    and frame-matched `timestamp_ms` monotonicity. Headless CI cannot press keys —
    assert on structure and count, not key state.
 3. **No Rust integration test binds the loop over a real world.** Add

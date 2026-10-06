@@ -6,13 +6,13 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     ADAPTER_REVISION, Campaign2View, GraphicsReady, GraphicsWorkerSupervisor, LAVA_REVISION,
     lower_campaign2_packet, lower_dense_benchmark_packet, lower_objective_close_packet,
     lower_reference_world, lower_showcase_packet, lower_world_showcase_packet, seal_scene_packet,
     validate_ready, validate_scene_packet,
 };
-use wge_reference_runtime::build_from_layout_path;
+use luxel_reference_runtime::build_from_layout_path;
 
 fn gpu_test_guard() -> std::sync::MutexGuard<'static, ()> {
     static GPU_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -23,7 +23,7 @@ fn gpu_test_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn julia_executable() -> PathBuf {
-    std::env::var_os("WGE_JULIA")
+    std::env::var_os("LUXEL_JULIA")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("julia"))
 }
@@ -41,7 +41,7 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
         .expect("crate is inside the workspace")
         .join("terrain_lab");
     let output_dir = std::env::temp_dir().join(format!(
-        "wge-native-graphics-contract-{}",
+        "luxel-native-graphics-contract-{}",
         std::process::id()
     ));
     fs::create_dir_all(&output_dir).expect("test output directory is writable");
@@ -74,13 +74,13 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
         .expect("objective beacon instance exists");
     assert_eq!(
         beacon.importance,
-        wge_native_graphics_contract::InstanceImportance::Landmark
+        luxel_native_graphics_contract::InstanceImportance::Landmark
     );
     assert!(packet.body.instances.len() > build.world.body.authored_layout.obstacles.len());
     assert!(packet.body.instances.iter().any(|instance| {
         matches!(
             instance.importance,
-            wge_native_graphics_contract::InstanceImportance::Background
+            luxel_native_graphics_contract::InstanceImportance::Background
         )
     }));
     let terrain_albedo = packet
@@ -106,7 +106,7 @@ fn certified_reference_world_lowers_to_a_valid_coarse_packet() {
         (terrain_texture.width_px, terrain_texture.height_px),
         (128, 128)
     );
-    let wge_native_graphics_contract::TexturePayload::Rgba8(encoded) = terrain_texture
+    let luxel_native_graphics_contract::TexturePayload::Rgba8(encoded) = terrain_texture
         .payload
         .as_ref()
         .expect("inline terrain albedo")
@@ -301,9 +301,9 @@ fn rust_packet_crosses_the_julia_protocol_boundary() {
         .expect("reference layout exists");
     let terrain_lab = workspace_root.join("terrain_lab");
     let graphics_lab = workspace_root.join("graphics_lab");
-    let worker = graphics_lab.join("bin/wge_graphics_worker.jl");
+    let worker = graphics_lab.join("bin/luxel_graphics_worker.jl");
     let output_dir = std::env::temp_dir().join(format!(
-        "wge-native-graphics-protocol-{}",
+        "luxel-native-graphics-protocol-{}",
         std::process::id()
     ));
     fs::create_dir_all(&output_dir).expect("test output directory is writable");
@@ -321,8 +321,8 @@ fn rust_packet_crosses_the_julia_protocol_boundary() {
 
     let script = r#"
 using JSON3
-include(ENV["WGE_GRAPHICS_WORKER"])
-packet = JSON3.read(read(ENV["WGE_PACKET_PATH"], String))
+include(ENV["LUXEL_GRAPHICS_WORKER"])
+packet = JSON3.read(read(ENV["LUXEL_PACKET_PATH"], String))
 response = JSON3.read(handle(JSON3.write((op="validate_packet", packet=packet))))
 response["kind"] == "packet_shape_checked" || error(JSON3.write(response))
 println(response["packet_sha256"])
@@ -332,8 +332,8 @@ println(response["packet_sha256"])
         .arg("--startup-file=no")
         .arg("-e")
         .arg(script)
-        .env("WGE_GRAPHICS_WORKER", &worker)
-        .env("WGE_PACKET_PATH", &packet_path)
+        .env("LUXEL_GRAPHICS_WORKER", &worker)
+        .env("LUXEL_PACKET_PATH", &packet_path)
         .output()
         .expect("graphics Julia worker starts");
     assert!(
@@ -354,7 +354,7 @@ fn rust_supervisor_restarts_the_persistent_worker() {
         .nth(3)
         .expect("crate is inside the workspace");
     let graphics_lab = workspace_root.join("graphics_lab");
-    let worker = graphics_lab.join("bin/wge_graphics_worker.jl");
+    let worker = graphics_lab.join("bin/luxel_graphics_worker.jl");
     let mut supervisor =
         GraphicsWorkerSupervisor::start(julia_executable(), &graphics_lab, &worker)
             .expect("Rust supervisor starts the persistent Julia worker");
@@ -385,7 +385,7 @@ fn rust_supervisor_times_out_and_recovers_from_a_stalled_worker() {
         .expect("crate is inside the workspace");
     let graphics_lab = workspace_root.join("graphics_lab");
     let output_dir = std::env::temp_dir().join(format!(
-        "wge-native-graphics-timeout-{}",
+        "luxel-native-graphics-timeout-{}",
         std::process::id()
     ));
     fs::create_dir_all(&output_dir).expect("test output directory is writable");
@@ -403,7 +403,7 @@ function write_frame(payload)
 end
 
 script_sha256 = "sha256:" * bytes2hex(sha256(read(PROGRAM_FILE)))
-write_frame("{{\"schema\":\"wge.graphics-worker/v1\",\"kind\":\"ready\",\"script_sha256\":\"" * script_sha256 * "\",\"lava_revision\":\"{}\",\"adapter_revision\":\"{}\"}}")
+write_frame("{{\"schema\":\"luxel.graphics-worker/v1\",\"kind\":\"ready\",\"script_sha256\":\"" * script_sha256 * "\",\"lava_revision\":\"{}\",\"adapter_revision\":\"{}\"}}")
 sleep(120.0)
 "#,
         LAVA_REVISION, ADAPTER_REVISION
@@ -458,9 +458,9 @@ fn rust_packet_renders_through_the_pinned_lava_worker() {
         .expect("reference layout exists");
     let terrain_lab = workspace_root.join("terrain_lab");
     let graphics_lab = workspace_root.join("graphics_lab");
-    let worker = graphics_lab.join("bin/wge_graphics_worker.jl");
+    let worker = graphics_lab.join("bin/luxel_graphics_worker.jl");
     let output_dir = std::env::temp_dir().join(format!(
-        "wge-native-graphics-lava-render-{}",
+        "luxel-native-graphics-lava-render-{}",
         std::process::id()
     ));
     fs::create_dir_all(&output_dir).expect("test output directory is writable");
@@ -501,15 +501,15 @@ fn rust_packet_renders_through_the_pinned_lava_worker() {
 
     let script = r#"
 using JSON3
-include(ENV["WGE_GRAPHICS_WORKER"])
-packet = JSON3.read(read(ENV["WGE_PACKET_PATH"], String))
+include(ENV["LUXEL_GRAPHICS_WORKER"])
+packet = JSON3.read(read(ENV["LUXEL_PACKET_PATH"], String))
 response = JSON3.read(handle(JSON3.write((
     op="render_packet",
     packet=packet,
     expected_packet_sha256=packet["packet_sha256"],
 ))))
 response["kind"] == "frame_rendered" || error(JSON3.write(response))
-perspective_packet = JSON3.read(read(ENV["WGE_PERSPECTIVE_PACKET_PATH"], String))
+perspective_packet = JSON3.read(read(ENV["LUXEL_PERSPECTIVE_PACKET_PATH"], String))
 perspective_response = JSON3.read(handle(JSON3.write((
     op="render_packet",
     packet=perspective_packet,
@@ -523,9 +523,9 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
         .arg("--startup-file=no")
         .arg("-e")
         .arg(script)
-        .env("WGE_GRAPHICS_WORKER", &worker)
-        .env("WGE_PACKET_PATH", &packet_path)
-        .env("WGE_PERSPECTIVE_PACKET_PATH", &perspective_packet_path)
+        .env("LUXEL_GRAPHICS_WORKER", &worker)
+        .env("LUXEL_PACKET_PATH", &packet_path)
+        .env("LUXEL_PERSPECTIVE_PACKET_PATH", &perspective_packet_path)
         .output()
         .expect("graphics Julia worker starts");
     assert!(
@@ -535,7 +535,7 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
     );
     let frames: serde_json::Value = serde_json::from_slice(&output.stdout).expect("frame JSON");
     let frame = &frames["orthographic"];
-    assert_eq!(frame["schema"], "wge.lava-frame/v1");
+    assert_eq!(frame["schema"], "luxel.lava-frame/v1");
     assert_eq!(frame["packet_sha256"], packet.packet_sha256);
     assert_eq!(frame["width_px"], packet.body.capture.width_px);
     assert_eq!(frame["height_px"], packet.body.capture.height_px);
@@ -596,7 +596,7 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
             .filter(|instance| {
                 matches!(
                     instance.importance,
-                    wge_native_graphics_contract::InstanceImportance::GameplayCritical
+                    luxel_native_graphics_contract::InstanceImportance::GameplayCritical
                 )
             })
             .count() as u64
@@ -618,7 +618,7 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
             .filter(|instance| {
                 matches!(
                     instance.importance,
-                    wge_native_graphics_contract::InstanceImportance::Background
+                    luxel_native_graphics_contract::InstanceImportance::Background
                 )
             })
             .count() as u64
@@ -634,7 +634,7 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
             .filter(|instance| {
                 matches!(
                     instance.importance,
-                    wge_native_graphics_contract::InstanceImportance::Landmark
+                    luxel_native_graphics_contract::InstanceImportance::Landmark
                 )
             })
             .count() as u64
@@ -646,7 +646,7 @@ println(JSON3.write((orthographic=response["frame"], perspective=perspective_res
         expected_mesh_vertex_count
     );
     let perspective_frame = &frames["perspective"];
-    assert_eq!(perspective_frame["schema"], "wge.lava-frame/v1");
+    assert_eq!(perspective_frame["schema"], "luxel.lava-frame/v1");
     assert_eq!(
         perspective_frame["packet_sha256"],
         perspective_packet.packet_sha256
@@ -686,10 +686,10 @@ fn pinned_lava_capabilities_promote_through_rust_validation() {
         .nth(3)
         .expect("crate is inside the workspace");
     let graphics_lab = workspace_root.join("graphics_lab");
-    let worker = graphics_lab.join("bin/wge_graphics_worker.jl");
+    let worker = graphics_lab.join("bin/luxel_graphics_worker.jl");
     let script = r#"
 using JSON3
-include(ENV["WGE_GRAPHICS_WORKER"])
+include(ENV["LUXEL_GRAPHICS_WORKER"])
 response = JSON3.read(handle(JSON3.write((op="probe_capabilities",))))
 response["kind"] == "capabilities_probed" || error(JSON3.write(response))
 println(JSON3.write(response["ready"]))
@@ -699,7 +699,7 @@ println(JSON3.write(response["ready"]))
         .arg("--startup-file=no")
         .arg("-e")
         .arg(script)
-        .env("WGE_GRAPHICS_WORKER", &worker)
+        .env("LUXEL_GRAPHICS_WORKER", &worker)
         .output()
         .expect("graphics Julia worker starts");
     assert!(
@@ -730,9 +730,9 @@ fn rust_supervisor_promotes_a_bound_lava_frame() {
         .expect("reference layout exists");
     let terrain_lab = workspace_root.join("terrain_lab");
     let graphics_lab = workspace_root.join("graphics_lab");
-    let worker = graphics_lab.join("bin/wge_graphics_worker.jl");
+    let worker = graphics_lab.join("bin/luxel_graphics_worker.jl");
     let output_dir = std::env::temp_dir().join(format!(
-        "wge-native-graphics-supervisor-{}",
+        "luxel-native-graphics-supervisor-{}",
         std::process::id()
     ));
     fs::create_dir_all(&output_dir).expect("test output directory is writable");

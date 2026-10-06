@@ -1,25 +1,25 @@
-# WGE Construction-Leverage Benchmark
+# Luxel Construction-Leverage Benchmark
 
 Status: **benchmark design**, 2026-09-30  
-Purpose: measure how much recurring model construction work WGE removes while preserving or improving correctness, quality, provenance, and recovery
+Purpose: measure how much recurring model construction work Luxel removes while preserving or improving correctness, quality, provenance, and recovery
 
 This is a controlled research benchmark. It is not a Unity comparison, a claim that ordinary Three.js/Blender tooling is inferior, or a single-number ranking of engines.
 
 Related sources:
 
 - [Autonomous Game-Construction Forensics](autonomous-game-construction-forensics.md)
-- [WGE Capability Registry Design](../../platform/capability-registry-design.md)
-- [WGE Style Profile Contract](../../world/style-profile-contract.md)
-- [WGE Graphics Campaign 2 Report](../2026-10_graphics-sprint-reports/graphics-campaign-2-report.md)
-- [WGE Native Graphics Benchmark](../../world/native-graphics-benchmark.md)
+- [Luxel Capability Registry Design](../../platform/capability-registry-design.md)
+- [Luxel Style Profile Contract](../../world/style-profile-contract.md)
+- [Luxel Graphics Campaign 2 Report](../2026-10_graphics-sprint-reports/graphics-campaign-2-report.md)
+- [Luxel Native Graphics Benchmark](../../world/native-graphics-benchmark.md)
 
 ## Benchmark question
 
 For the same model, task, inputs, time budget, and acceptance criteria:
 
-> How much repeated construction work does WGE eliminate, and what does that do to successful completion, repair cost, determinism, evidence coverage, and final quality?
+> How much repeated construction work does Luxel eliminate, and what does that do to successful completion, repair cost, determinism, evidence coverage, and final quality?
 
-The baseline is an ordinary model-accessible graphics/game environment. The treatment is WGE's typed construction, execution, inspection, and certification surface.
+The baseline is an ordinary model-accessible graphics/game environment. The treatment is Luxel's typed construction, execution, inspection, and certification surface.
 
 ## Experimental controls
 
@@ -58,9 +58,9 @@ Record what the stack provides before the model starts:
 - testing and capture;
 - packaging.
 
-### Environment B — WGE
+### Environment B — Luxel
 
-Use only the WGE surface permitted by the current checkpoint:
+Use only the Luxel surface permitted by the current checkpoint:
 
 - typed semantic intake;
 - world/gameplay contracts;
@@ -70,7 +70,7 @@ Use only the WGE surface permitted by the current checkpoint:
 - deterministic captures and evidence;
 - Rust authority and repair loop.
 
-Unavailable WGE capabilities remain unavailable. The benchmark must not quietly grant a feature because the baseline happens to have it.
+Unavailable Luxel capabilities remain unavailable. The benchmark must not quietly grant a feature because the baseline happens to have it.
 
 ## Task ladder
 
@@ -202,9 +202,9 @@ Do not collapse these into one score for the primary report. A secondary summary
 Each run should eventually emit a machine-readable result equivalent to:
 
 ```yaml
-schema_version: wge.construction-leverage-result/v1
+schema_version: luxel.construction-leverage-result/v1
 run_id: run-...
-environment: ordinary-stack | wge
+environment: ordinary-stack | luxel
 task_id: T0-authored-calibration
 model:
   id: pinned
@@ -269,7 +269,7 @@ If a provider, model, or runtime version changes, start a new benchmark cohort. 
 
 ## Interpretation rules
 
-WGE has demonstrated leverage when it reduces repeated model work without reducing:
+Luxel has demonstrated leverage when it reduces repeated model work without reducing:
 
 - semantic correctness;
 - mechanical correctness;
@@ -292,9 +292,9 @@ The first executable cohort should use T0 and T1:
 The first report should answer:
 
 1. Which work did ordinary tooling force the model to reinvent?
-2. Which of that work is already covered by WGE?
+2. Which of that work is already covered by Luxel?
 3. Which recurring work is missing from the capability registry?
-4. Did WGE improve recovery, not merely first-pass completion?
+4. Did Luxel improve recovery, not merely first-pass completion?
 5. Which quality axes remain indeterminate in both environments?
 
 ## Promotion criteria for benchmark findings
@@ -303,7 +303,7 @@ A benchmark finding may drive implementation when:
 
 - it recurs across independent tasks or materially blocks the same task family;
 - its desired semantic interface is clear;
-- the authority boundary is compatible with WGE doctrine;
+- the authority boundary is compatible with Luxel doctrine;
 - the capability has a validator and failure behavior;
 - the expected model-cost or quality benefit is measurable;
 - the change does not require weakening existing gates.

@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.terrain-manifest/v1",
+  "schema_version": "luxel.terrain-manifest/v1",
   "world_id": "gate-run",
   "dimensions_m": [64.0, 64.0],
   "heightfield": "flat-fixture",

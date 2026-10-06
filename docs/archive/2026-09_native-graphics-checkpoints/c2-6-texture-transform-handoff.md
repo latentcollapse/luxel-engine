@@ -1,4 +1,4 @@
-# WGE C2.6 Texture-Transform Conditioning Handoff
+# Luxel C2.6 Texture-Transform Conditioning Handoff
 
 Status: **green contract checkpoint**, 2026-09-30.
 
@@ -27,13 +27,13 @@ produces canonical UV0 for downstream rendering.
 ```sh
 cargo fmt --manifest-path world_core/Cargo.toml --all -- --check
 cargo test --manifest-path world_core/Cargo.toml --offline \
-  --package wge-asset-contract --test render_conditioning
+  --package luxel-asset-contract --test render_conditioning
 cargo clippy --manifest-path world_core/Cargo.toml --offline \
-  --package wge-asset-contract --all-targets -- -D warnings
+  --package luxel-asset-contract --all-targets -- -D warnings
 cargo test --manifest-path world_core/Cargo.toml --offline \
-  --package wge-native-graphics-contract --test asset_projection
+  --package luxel-native-graphics-contract --test asset_projection
 cargo test --manifest-path world_core/Cargo.toml --offline \
-  --package wge-project-ledger --test scene
+  --package luxel-project-ledger --test scene
 ```
 
 Observed gates:

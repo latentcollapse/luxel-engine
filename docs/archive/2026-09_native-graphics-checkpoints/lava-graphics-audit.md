@@ -1,4 +1,4 @@
-# WGE Lava Graphics Audit
+# Luxel Lava Graphics Audit
 
 Status: audit closed; supervised native Lava adapter-v6 checkpoint green through
 typed clearcoat/material lowering, composed-world coverage, independent capture
@@ -6,7 +6,7 @@ promotion, and adversarial Rust↔Julia/GPU verification.
 
 Date: 2026-09-29
 
-Audited WGE checkpoint: `10c3823` (`lift native foliage material readability`)
+Audited Luxel checkpoint: `10c3823` (`lift native foliage material readability`)
 
 Audited upstream:
 
@@ -15,7 +15,7 @@ Audited upstream:
 - commit date: 2026-08-06
 - upstream `main` and `HEAD` resolved to this commit during the audit
 
-This document is the pre-implementation forensic record required by the WGE
+This document is the pre-implementation forensic record required by the Luxel
 native-graphics goal. It separates capabilities demonstrated by source or
 tests from capabilities merely claimed by upstream documentation. The word
 “renderer” below means a game-facing rendering system; Lava itself is a
@@ -24,7 +24,7 @@ low-level Julia/Vulkan graphics, compute, and ray-tracing substrate.
 ## Audit method
 
 The audit used the pinned upstream checkout, its `Project.toml`, README,
-known-issues record, source tree, graphics and ray-tracing tests, and the WGE
+known-issues record, source tree, graphics and ray-tracing tests, and the Luxel
 working tree. The important upstream evidence is linked directly:
 
 - [upstream package manifest](https://github.com/SimonDanisch/Lava.jl/blob/11c7e31bdf62408d22bf379e9e59510f69d2103e/Project.toml)
@@ -48,7 +48,7 @@ Evidence labels used in the matrices:
 
 - **EXISTS UPSTREAM** — present in source and exercised by a relevant test or
   direct implementation inspection.
-- **EXISTS IN WGE** — already exists in WGE as an authority-owned contract or
+- **EXISTS IN Luxel** — already exists in Luxel as an authority-owned contract or
   implementation, though it may not yet be connected to Lava.
 - **PARTIAL** — some machinery exists, but the game-facing contract, coverage,
   or verification boundary is incomplete.
@@ -56,54 +56,54 @@ Evidence labels used in the matrices:
 - **DO NOT NEED** — deliberately outside the native graphics goal.
 
 README benchmark numbers and upstream “feature complete” statements are not
-treated as WGE evidence. They remain useful leads, but WGE promotion requires
+treated as Luxel evidence. They remain useful leads, but Luxel promotion requires
 our own reproducible probes and Rust-owned receipts.
 
 ## Upstream Lava capability matrix
 
-| Capability | Evidence found | Status | WGE interpretation |
+| Capability | Evidence found | Status | Luxel interpretation |
 | --- | --- | --- | --- |
-| Julia GPU compute backend | `LavaBackend`, `LavaArray`, KernelAbstractions and GPUArrays adapters; GPU array tests | EXISTS UPSTREAM | Good numerical/scene-preparation substrate; it does not define WGE semantics. |
-| Unified GPU buffers | `LavaArray` is usable by compute, graphics, and RT paths; buffer-device-address plumbing is present | EXISTS UPSTREAM | Suitable for persistent scene buffers once WGE defines layouts and lifetime rules. |
-| Vulkan device/context ownership | `VkContext` owns device state, queues, caches, diagnostics, and device-lost state | EXISTS UPSTREAM | Keep one long-lived Julia graphics owner behind a Rust supervisor; never let WGE call Vulkan through per-draw FFI. |
-| Queue submission and synchronization | `BatchQueue` contains command batching, timeline semaphores, staging, deferred frees, indirect slabs, and queue policy | EXISTS UPSTREAM | Reuse behind an adapter, but make WGE frame/packet boundaries explicit and observable. |
+| Julia GPU compute backend | `LavaBackend`, `LavaArray`, KernelAbstractions and GPUArrays adapters; GPU array tests | EXISTS UPSTREAM | Good numerical/scene-preparation substrate; it does not define Luxel semantics. |
+| Unified GPU buffers | `LavaArray` is usable by compute, graphics, and RT paths; buffer-device-address plumbing is present | EXISTS UPSTREAM | Suitable for persistent scene buffers once Luxel defines layouts and lifetime rules. |
+| Vulkan device/context ownership | `VkContext` owns device state, queues, caches, diagnostics, and device-lost state | EXISTS UPSTREAM | Keep one long-lived Julia graphics owner behind a Rust supervisor; never let Luxel call Vulkan through per-draw FFI. |
+| Queue submission and synchronization | `BatchQueue` contains command batching, timeline semaphores, staging, deferred frees, indirect slabs, and queue policy | EXISTS UPSTREAM | Reuse behind an adapter, but make Luxel frame/packet boundaries explicit and observable. |
 | CPU/GPU transfers and memory policy | staging/BAR paths, GPU-to-GPU copies, deferred retirement, pinned references | EXISTS UPSTREAM | The adapter must expose residency and transfer telemetry rather than hiding it in a black box. |
-| Batched and indirect dispatch/draw | exported indirect commands and indirect dispatch/draw paths | EXISTS UPSTREAM | Candidate machinery for WGE instance and visibility batches; culling policy is still WGE work. |
-| Julia-to-SPIR-V compilation | custom Julia/LLVM/SPIR-V emitter with graphics, compute, and RT stages | EXISTS UPSTREAM | Strong reason to use Lava; shader compilation must be isolated behind a stable WGE shader identity. |
+| Batched and indirect dispatch/draw | exported indirect commands and indirect dispatch/draw paths | EXISTS UPSTREAM | Candidate machinery for Luxel instance and visibility batches; culling policy is still Luxel work. |
+| Julia-to-SPIR-V compilation | custom Julia/LLVM/SPIR-V emitter with graphics, compute, and RT stages | EXISTS UPSTREAM | Strong reason to use Lava; shader compilation must be isolated behind a stable Luxel shader identity. |
 | Vertex and fragment stages | typed graphics pipelines, varyings, vertex/fragment compilation, offscreen draw tests | EXISTS UPSTREAM | Enough for the first raster path, not enough for a complete material/lighting system. |
-| Geometry and tessellation stages | exported stage types and compiler support | EXISTS UPSTREAM | Available, but not a reason to make them canonical for WGE. |
-| Specialization and pipeline caching | type-driven compilation and per-context pipeline caches | PARTIAL | The existing cache key is derived from Julia function/type/state hashes; WGE needs content-addressed shader/material/pipeline identities and invalidation rules. |
+| Geometry and tessellation stages | exported stage types and compiler support | EXISTS UPSTREAM | Available, but not a reason to make them canonical for Luxel. |
+| Specialization and pipeline caching | type-driven compilation and per-context pipeline caches | PARTIAL | The existing cache key is derived from Julia function/type/state hashes; Luxel needs content-addressed shader/material/pipeline identities and invalidation rules. |
 | Swapchain/window path | `RenderWindow`, GLFW surface, swapchain, acquire/present, resize, per-image synchronization | EXISTS UPSTREAM | Useful for interactive probes, but not the canonical evidence path. |
-| Offscreen rendering | `LavaFramebuffer`, color/depth attachments, readback, blit, deterministic-sized target support | EXISTS UPSTREAM | Use offscreen targets for WGE captures; window presentation remains optional tooling. |
-| Textures, samplers, descriptors | `LavaTexture2D`, `LavaSampler`, texture bindings and descriptor setup | EXISTS UPSTREAM | Low-level binding exists; WGE still needs canonical texture/material asset contracts, color space, mip, streaming, and provenance policy. |
-| Raster state | depth, blending, culling, topology, attachments, viewport/scissor-related state | EXISTS UPSTREAM | Sufficient primitives for a first forward/deferred experiment; WGE render intent is missing. |
-| PBR/material graph | WGE now has a narrow typed opaque material intent with bounded metallic/roughness and clearcoat response, role-specific content-addressed albedo/normal/roughness/occlusion/emissive maps, and a Cook–Torrance-style Lava lowering; it is not a complete production graph | PARTIAL | Keep the bounded material contract canonical while adding richer graph semantics and production asset policy behind separate evidence. Do not make Hikari’s scene representation canonical. |
+| Offscreen rendering | `LavaFramebuffer`, color/depth attachments, readback, blit, deterministic-sized target support | EXISTS UPSTREAM | Use offscreen targets for Luxel captures; window presentation remains optional tooling. |
+| Textures, samplers, descriptors | `LavaTexture2D`, `LavaSampler`, texture bindings and descriptor setup | EXISTS UPSTREAM | Low-level binding exists; Luxel still needs canonical texture/material asset contracts, color space, mip, streaming, and provenance policy. |
+| Raster state | depth, blending, culling, topology, attachments, viewport/scissor-related state | EXISTS UPSTREAM | Sufficient primitives for a first forward/deferred experiment; Luxel render intent is missing. |
+| PBR/material graph | Luxel now has a narrow typed opaque material intent with bounded metallic/roughness and clearcoat response, role-specific content-addressed albedo/normal/roughness/occlusion/emissive maps, and a Cook–Torrance-style Lava lowering; it is not a complete production graph | PARTIAL | Keep the bounded material contract canonical while adding richer graph semantics and production asset policy behind separate evidence. Do not make Hikari’s scene representation canonical. |
 | Lights, shadows, IBL, HDR, AA, fog | typed directional-light/environment intent, orientation-aware analytic sky/horizon/ground lighting, one deterministic directional shadow map, a linear-HDR scene target with 2× spatial resolve, and tone-mapped fog now exist in the native adapter | PARTIAL | Keep the fixed shadow/resolve profile behind the authority boundary; cascades/contact shadows, prefiltered image-based lighting, HDR history, temporal AA, and richer atmosphere remain quality-gap work. |
 | Terrain, foliage, decals, particles, water, post-processing | certified terrain now renders with deterministic opaque background foliage cross-mesh instances and Rust-checked instancing; decals, particles, water, and broad post-processing remain absent | PARTIAL | Keep the bounded foliage proof behind typed semantic importance and telemetry; add density/alpha/LOD/ecology systems only with their own evidence. |
-| GPU scene, culling, LOD, meshlets, streaming | Lava-backed instanced batches now consume closed WGE importance hints (`background`, `landmark`, `gameplay_critical`), use typed culling margins, and report per-class visibility/culling totals; LOD/meshlets/residency/streaming remain absent | PARTIAL | Keep semantic visibility and capture priorities Rust-owned; add LOD/residency only through the same typed packet and independently balanced telemetry. |
+| GPU scene, culling, LOD, meshlets, streaming | Lava-backed instanced batches now consume closed Luxel importance hints (`background`, `landmark`, `gameplay_critical`), use typed culling margins, and report per-class visibility/culling totals; LOD/meshlets/residency/streaming remain absent | PARTIAL | Keep semantic visibility and capture priorities Rust-owned; add LOD/residency only through the same typed packet and independently balanced telemetry. |
 | BLAS/TLAS and hardware RT | `HardwareAccel`, HWTLAS, BLAS/TLAS update/refit paths, RT shader pipeline, Raycore compatibility | EXISTS UPSTREAM | Optional capability lane, fail-closed; not a prerequisite for the first certified raster vertical slice. |
-| Hikari/Raycore integration | Raycore source entry and Hikari-oriented integration/tests/examples | EXISTS UPSTREAM | Evidence that RT is viable, not evidence that a WGE gameplay renderer exists. Keep it behind an optional adapter. |
-| Profiling and diagnostics | state dumps, logging, validation configuration, memory counters, phase timing, profiling hooks | EXISTS UPSTREAM + WGE BRIDGE | WGE promotes a capability-gated Vulkan graphics-frame timestamp plus bounded transfer/draw/compilation telemetry; avoid promoting opaque upstream logs as evidence. |
+| Hikari/Raycore integration | Raycore source entry and Hikari-oriented integration/tests/examples | EXISTS UPSTREAM | Evidence that RT is viable, not evidence that a Luxel gameplay renderer exists. Keep it behind an optional adapter. |
+| Profiling and diagnostics | state dumps, logging, validation configuration, memory counters, phase timing, profiling hooks | EXISTS UPSTREAM + Luxel BRIDGE | Luxel promotes a capability-gated Vulkan graphics-frame timestamp plus bounded transfer/draw/compilation telemetry; avoid promoting opaque upstream logs as evidence. |
 | API stability | upstream README calls compute stable and graphics/RT functional but evolving | PARTIAL | Pin the exact commit and isolate all upstream API use in a narrow Julia adapter. |
-| Dependency reproducibility | `Project.toml` and the committed `Manifest.toml` pin Lava, Raycore, Vulkan, and VulkanCore revisions, including the resolved git trees | EXISTS IN WGE | Keep the manifest and source declarations synchronized; a dependency change requires a fresh adapter/provenance audit. |
-| Test reproducibility | tiered test harness distinguishes SPIR-V/no-GPU/GPU, but requires an umbrella environment and warns that plain `Pkg.test` is insufficient | PARTIAL | WGE needs capability probes and explicit `indeterminate` results; “test suite ran” is not a GPU certification. |
-| Capture/replay | upstream capture/replay tests cover compute command replay; no WGE visual-capture receipt or graphics replay contract | PARTIAL | WGE must add deterministic graphics capture, scene identity, camera identity, device identity, and Rust revalidation. |
+| Dependency reproducibility | `Project.toml` and the committed `Manifest.toml` pin Lava, Raycore, Vulkan, and VulkanCore revisions, including the resolved git trees | EXISTS IN Luxel | Keep the manifest and source declarations synchronized; a dependency change requires a fresh adapter/provenance audit. |
+| Test reproducibility | tiered test harness distinguishes SPIR-V/no-GPU/GPU, but requires an umbrella environment and warns that plain `Pkg.test` is insufficient | PARTIAL | Luxel needs capability probes and explicit `indeterminate` results; “test suite ran” is not a GPU certification. |
+| Capture/replay | upstream capture/replay tests cover compute command replay; no Luxel visual-capture receipt or graphics replay contract | PARTIAL | Luxel must add deterministic graphics capture, scene identity, camera identity, device identity, and Rust revalidation. |
 | Device/vendor robustness | lavapipe and self-hosted GPU paths exist; known RADV RT device-loss and BDA validation blind spots remain | PARTIAL | Treat device capability and known-driver hazards as first-class gates. Never silently fall back to a different semantic result. |
 
 ### Upstream hazards that affect adoption
 
 1. **The initial upstream revision was not a complete lock.** The first audit
-   found Lava's transitive Raycore source pointed at `master`. WGE now overrides
+   found Lava's transitive Raycore source pointed at `master`. Luxel now overrides
    that source explicitly and commits the resolved `Manifest.toml` entries for
    Lava, Raycore, Vulkan, and VulkanCore. Any source or manifest drift is a
    provenance change and must invalidate renderer identity until re-audited.
 
-2. **The public graphics/RT API is explicitly evolving.** WGE must have one
-   narrow adapter module. No semantic WGE code may import Lava types directly.
+2. **The public graphics/RT API is explicitly evolving.** Luxel must have one
+   narrow adapter module. No semantic Luxel code may import Lava types directly.
 
 3. **GPU-assisted validation is not a complete memory-safety oracle.** The
    upstream known-issues record documents that BDA out-of-bounds writes can
-   escape validation. WGE therefore needs bounds/layout checks before dispatch,
+   escape validation. Luxel therefore needs bounds/layout checks before dispatch,
    deterministic sentinels, and Rust-side result validation.
 
 4. **RT has a documented RADV device-loss sequence.** The failure follows many
@@ -112,9 +112,9 @@ our own reproducible probes and Rust-owned receipts.
    cause a supervised restart plus an indeterminate/failed receipt rather than
    a successful-looking capture.
 
-5. **The graphics pipeline cache is not a WGE asset identity system.** Julia
+5. **The graphics pipeline cache is not a Luxel asset identity system.** Julia
    function/type/state hashing is useful for process-local reuse but is not by
-   itself a durable content address. WGE will bind shader source/specification,
+   itself a durable content address. Luxel will bind shader source/specification,
    material intent, pipeline state, Lava revision, device identity, and compiler
    configuration into a canonical identity.
 
@@ -126,45 +126,45 @@ our own reproducible probes and Rust-owned receipts.
    Julia. Upgrading the terrain environment is not authorized by this audit.
 
 7. **Window rendering is not evidence rendering.** A swapchain and GLFW window
-   are useful for probes, but WGE certification needs headless/offscreen,
+   are useful for probes, but Luxel certification needs headless/offscreen,
    fixed-size, fixed-camera, fixed-seed captures with independent validation.
 
-## WGE capability and assumption matrix
+## Luxel capability and assumption matrix
 
-The current WGE authority split is documented in
+The current Luxel authority split is documented in
 [`docs/archive/2026-09_native-graphics-checkpoints/native-convergence-report.md`](native-convergence-report.md): Julia
 owns numerical terrain fields, Rust owns the certified world and reference
 runtime, and Bevy is an inspection renderer rather than semantic authority.
 
-| WGE concern | Current evidence | Status | Lava/native consequence |
+| Luxel concern | Current evidence | Status | Lava/native consequence |
 | --- | --- | --- | --- |
-| Semantic world artifact | Rust `wge.world-artifact/v1` contains validated layout, Julia provenance, terrain fields, collision, navigation, spawns, and encounters | EXISTS IN WGE | This remains the canonical scene input. Lava consumes a lowered packet, never authors it. |
-| Julia numerical ownership | `terrain_lab` produces typed terrain/erosion/placement outputs; recent hardening removed hot-loop `Any` vectors and tightened fail-closed policies | EXISTS IN WGE | Preserve this boundary. Graphics Julia must not become a second semantic solver. |
-| Rust authority/revalidation | reference runtime validates artifacts, gameplay, and capture provenance | EXISTS IN WGE | Rust owns native receipt promotion and must independently revalidate graphics evidence. |
-| Bevy inspection path | `world_viewer` loads the certified artifact and presents native worlds; it has terrain shaders, materials, foliage projection, HUD, and PNG provenance | EXISTS IN WGE | Keep Bevy as a regression/inspection oracle, not as Lava’s representation or a canonical scene graph. |
+| Semantic world artifact | Rust `luxel.world-artifact/v1` contains validated layout, Julia provenance, terrain fields, collision, navigation, spawns, and encounters | EXISTS IN Luxel | This remains the canonical scene input. Lava consumes a lowered packet, never authors it. |
+| Julia numerical ownership | `terrain_lab` produces typed terrain/erosion/placement outputs; recent hardening removed hot-loop `Any` vectors and tightened fail-closed policies | EXISTS IN Luxel | Preserve this boundary. Graphics Julia must not become a second semantic solver. |
+| Rust authority/revalidation | reference runtime validates artifacts, gameplay, and capture provenance | EXISTS IN Luxel | Rust owns native receipt promotion and must independently revalidate graphics evidence. |
+| Bevy inspection path | `world_viewer` loads the certified artifact and presents native worlds; it has terrain shaders, materials, foliage projection, HUD, and PNG provenance | EXISTS IN Luxel | Keep Bevy as a regression/inspection oracle, not as Lava’s representation or a canonical scene graph. |
 | Engine-neutral visual evidence | Rust reference runtime produces deterministic PPM-style captures and validates metrics/bytes; Bevy produces PNG plus provenance | PARTIAL | Extend the same authority boundary to Lava captures. Do not replace the existing gates with screenshots. |
-| Native terrain geometry | Rust builds a one-metre inspection mesh from the certified f32 heightfield | EXISTS IN WGE | Lower the same semantic terrain into a Lava GPU mesh; preserve field digest and coordinate convention. |
+| Native terrain geometry | Rust builds a one-metre inspection mesh from the certified f32 heightfield | EXISTS IN Luxel | Lower the same semantic terrain into a Lava GPU mesh; preserve field digest and coordinate convention. |
 | Terrain material intent | Bevy native/compiled paths have splat/grass/road/rock/snow/wetland inputs and a terrain shader | PARTIAL | The intent is present in a backend-specific form. Extract a small canonical material packet before writing Lava shaders. |
 | Mesh/material/texture asset contract | glTF/GLB placements and renderer-relative texture paths exist, but there is no unified engine-neutral GPU asset graph | PARTIAL | Define asset identities, formats, coordinate systems, color spaces, mip policy, and source provenance. |
 | Lighting and camera | fixed inspection views, camera transforms, ambient/sky lighting and Bevy capture identity exist | PARTIAL | Define engine-neutral camera/light/capture intent and lower it to both Bevy and Lava for parity testing. |
 | Gameplay-visible rendering | reference runtime owns collision/navigation/spawns/encounters/traversal; viewer displays the world and overlays but is not a complete gameplay renderer | PARTIAL | The first Lava slice must render at least terrain, route, spawn/encounter markers, and a gameplay-relevant camera state. |
-| Navigation/collision semantics | Rust-owned artifact and runtime already validate these | EXISTS IN WGE | Lava must consume visual projections of them; it must not recompute authoritative traversal. |
-| Capture provenance | Bevy sidecar binds PNG to world/spatial/camera/view/renderer identity; Rust reference capture validates bytes and metrics | EXISTS IN WGE | Add a Lava renderer identity, packet digest, shader/material identities, device capabilities, and capture digest. |
-| Reference runtime | deterministic Rust runtime can run the current world/gameplay checks | EXISTS IN WGE | Keep as a semantic oracle. A Lava frame cannot make a runtime failure pass. |
-| Python ownership | Python is transport/orchestration glue; no new semantic behavior is authorized | EXISTS IN WGE | Graphics protocol must be Rust-owned/Julia-owned typed data; Python remains out of semantic authority. |
+| Navigation/collision semantics | Rust-owned artifact and runtime already validate these | EXISTS IN Luxel | Lava must consume visual projections of them; it must not recompute authoritative traversal. |
+| Capture provenance | Bevy sidecar binds PNG to world/spatial/camera/view/renderer identity; Rust reference capture validates bytes and metrics | EXISTS IN Luxel | Add a Lava renderer identity, packet digest, shader/material identities, device capabilities, and capture digest. |
+| Reference runtime | deterministic Rust runtime can run the current world/gameplay checks | EXISTS IN Luxel | Keep as a semantic oracle. A Lava frame cannot make a runtime failure pass. |
+| Python ownership | Python is transport/orchestration glue; no new semantic behavior is authorized | EXISTS IN Luxel | Graphics protocol must be Rust-owned/Julia-owned typed data; Python remains out of semantic authority. |
 | Bevy canonical leakage | viewer code has explicit native separation and comments rejecting Bevy as authoring authority | PARTIAL | Audit every new packet and receipt for Bevy-specific types, shader assumptions, or asset paths. |
-| Target-engine export | external delivery adapters are outside the native graphics path | DO NOT NEED | This goal is the native WGE graphics path, not external-engine parity. |
+| Target-engine export | external delivery adapters are outside the native graphics path | DO NOT NEED | This goal is the native Luxel graphics path, not external-engine parity. |
 | Rigging/skinning/retargeting | intentionally deferred by the current certification goal | DO NOT NEED | Keep the supplied bad GLB as a permanent negative control in the asset/receipt suite. |
 
-## What Lava gives WGE, and what it does not
+## What Lava gives Luxel, and what it does not
 
-Lava is a credible candidate for WGE’s native GPU substrate because it already
+Lava is a credible candidate for Luxel’s native GPU substrate because it already
 solves difficult low-level problems: a Julia-to-SPIR-V path, Vulkan resource
 ownership, unified device buffers, queue synchronization, offscreen graphics,
 and optional hardware RT. That is the part that was standing in the corner
 looking suspiciously overqualified.
 
-It does not give WGE the game-development harness by itself. In particular, it
+It does not give Luxel the game-development harness by itself. In particular, it
 does not define:
 
 - a semantic project/specification intake;
@@ -177,7 +177,7 @@ does not define:
 - a quality bar or comparison oracle for a real game scene.
 
 The architectural conclusion is therefore **Lava as a supervised native
-backend**, not “replace WGE’s semantic authority with Lava.”
+backend**, not “replace Luxel’s semantic authority with Lava.”
 
 ## Required native work after this audit
 
@@ -219,7 +219,7 @@ Completed:
 - pinned and inspected the exact upstream Lava revision;
 - inspected upstream graphics, runtime, compiler, texture, RT, test, and issue
   surfaces;
-- mapped WGE’s existing semantic, reference-runtime, Bevy, and provenance
+- mapped Luxel’s existing semantic, reference-runtime, Bevy, and provenance
   boundaries;
 - recorded adoption hazards and the Julia-version split;
 - produced this implementation matrix before starting renderer construction;
@@ -243,7 +243,7 @@ lock, engine-neutral packet boundary, and Bevy-as-oracle rule.
 The first executable adapter slice exposed a dependency compatibility fault in
 the upstream composition: Lava `11c7e31` calls Vulkan 1.4 cooperative-matrix
 types that are absent from the registered Vulkan `0.6.30` / VulkanCore `1.3.1`
-pair. WGE therefore pins the matching upstream wrapper revisions explicitly:
+pair. Luxel therefore pins the matching upstream wrapper revisions explicitly:
 
 | Dependency | Revision |
 | --- | --- |
@@ -328,7 +328,7 @@ mandatory capability probe absorbs device initialization before promotion, but
 the first frame may still pay lazy scene-pipeline compilation under the same
 bounded response deadline. These contract and shader-basis corrections are
 recorded as adapter revision
-`wge.lava-adapter/v6`; v4/v5 benchmark receipts remain historical evidence,
+`luxel.lava-adapter/v6`; v4/v5 benchmark receipts remain historical evidence,
 not current renderer identity.
 
 The native visual gate is authority-owned rather than appearance-shaped: Rust

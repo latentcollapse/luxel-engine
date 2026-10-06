@@ -106,7 +106,7 @@ send a keypress. Everything else below was verified by running it.
      are derived or source artifacts (§6).
    - 3b. Measure radial monotonicity and symmetry residual on real Gaea output to
      calibrate the gates against erosion rather than synthetic noise.
-4. **Author the WGE graph** in the GUI — basin macro-shape, symmetric composite
+4. **Author the Luxel graph** in the GUI — basin macro-shape, symmetric composite
    *before* erosion, exposed variables, marked height export.
 5. The driver, then symmetry (§5.1), then lane routing (§5.2) with the edit
    budget in place *before* the first edit.

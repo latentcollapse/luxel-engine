@@ -1,9 +1,9 @@
-# WGE MVP roadmap
+# Luxel MVP roadmap
 
 > **Historical roadmap.** This 2026-07-31 document predates the native
 > engine-neutral convergence and is retained as a decision record. It is not
 > the current MVP definition. Use [`../ACTIVE_ARCHITECTURE.md`](../../platform/active-architecture.md)
-> and [`../WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md`](demo-ready-mega-sprint.md)
+> and [`../LUXEL_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md`](demo-ready-mega-sprint.md)
 > for the active demo-ready native engine roadmap.
 
 Written 2026-07-31, from the [debt ledger](../../platform/debt-ledger.md), the
@@ -15,7 +15,7 @@ Written 2026-07-31, from the [debt ledger](../../platform/debt-ledger.md), the
 **A map a player can walk around in, exported to a real engine, produced from
 concept art by a model without hand-holding.**
 
-That definition is deliberate. Today WGE produces a *certified, renderable*
+That definition is deliberate. Today Luxel produces a *certified, renderable*
 world — terrain, materials, placements, roads, all hash-bound and gated. What it
 does not produce is a world anything can *move through*: no collision, no
 navigation surface, no spawns. The gap between "renders" and "playable" is the
@@ -71,7 +71,7 @@ with no path forward — an opaque number, or silence. Both are cheap.
 
 ## Phase 1 — Traversability (the actual MVP substance)
 
-This is WGE work, it is derivable from data the spec already carries, and it
+This is Luxel work, it is derivable from data the spec already carries, and it
 does **not** depend on the backend or netcode decisions. This is the phase that
 converts "renders" into "playable".
 
@@ -239,7 +239,7 @@ it.
 | 2.5 | **Close the border.** A straight rectangular mountain wall at the map perimeter; the space freed between it and the lanes becomes jungle and mob camps. Target: `boundary_plan.json` reports `enclosed: true`, then turn on `--require-enclosed` | O | Orange |
 
 **2.5 is a design decision already made, and revised 2026-07-31.** Matt chose
-geometry over invisible walls — WGE's model is that geometry *is* the boundary,
+geometry over invisible walls — Luxel's model is that geometry *is* the boundary,
 and an invisible wall would be a per-backend hack re-authored for every target
 engine. The revision: rather than bordering mountains hugging the outsides of
 the top and bottom lanes, a **straight rectangular border wall at the map
@@ -299,7 +299,7 @@ Sidhe** (see [G8](../../platform/missing-inventory.md) for the reasoning and the
 behind it). 4.2-4.4 are unblocked.
 
 The decision splits by product rather than resolving to one engine, and the
-artifact layer is what makes that legitimate — WGE emits engine-neutral certified
+artifact layer is what makes that legitimate — Luxel emits engine-neutral certified
 artifacts, so `spawn transform` and `region volume` serialise once and each
 adapter reads them. Do **not** let Unity-shaped assumptions leak back into the
 compiler; the moment they do, the Sidhe path costs a rewrite rather than an

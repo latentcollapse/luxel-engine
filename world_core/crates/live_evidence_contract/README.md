@@ -1,4 +1,4 @@
-# WGE live evidence contract
+# Luxel live evidence contract
 
 This standalone crate defines the typed identity and session-state contract for
 Campaign 1's two-tier evidence model. It is a scheduling and binding layer, not
@@ -7,7 +7,7 @@ a certification authority or renderer.
 Tier A requests bind project, session, packet/capability identity, sample
 window, and normalized triggers. A Tier A result can move the session into
 `certified` only when its request identity matches. The supplied snapshot value
-is an identity reference to a result already validated by WGE's native
+is an identity reference to a result already validated by Luxel's native
 certification registry. This crate does not validate that receipt or grant its
 status.
 

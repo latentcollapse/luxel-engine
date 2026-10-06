@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.terrain-layer-set-manifest/v1",
+  "schema_version": "luxel.terrain-layer-set-manifest/v1",
   "set_id": "converge0-meadow",
   "provider": "polyhaven.com",
   "license": "CC0-1.0",

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use serde::Deserialize;
-use wge_gameplay_contract::{FailureCode, GameFailure, GameSnapshot, ReplayTrace, run_replay};
+use luxel_gameplay_contract::{FailureCode, GameFailure, GameSnapshot, ReplayTrace, run_replay};
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,7 +37,7 @@ fn main() -> ExitCode {
 }
 
 fn print_usage() {
-    eprintln!("usage: wge-gameplay-contract run FIXTURE.json OUTPUT.json");
+    eprintln!("usage: luxel-gameplay-contract run FIXTURE.json OUTPUT.json");
 }
 
 fn execute(input_path: &Path, output_path: &Path) -> Result<String, GameFailure> {

@@ -2,14 +2,14 @@
 """Read and edit Gaea `.terrain` graphs without opening Gaea.
 
 `.terrain` is plain JSON -- a Newtonsoft-serialised object graph using `$id` /
-`$ref` reference tracking -- which is what makes WGE able to drive Gaea as an
+`$ref` reference tracking -- which is what makes Luxel able to drive Gaea as an
 adapter target rather than a plugin host (open decisions item 9).
 
 **Why this exists at all.** A Gaea graph only produces files for nodes that
 carry a `SaveDefinition`. Only 3 of the 59 bundled examples have one, and a
 graph without one builds successfully and writes nothing, which looks exactly
 like a failure. More to the point, the examples that *do* export save colour
-renders (`Cartography`, `Shade`), and WGE needs the **heightfield**.
+renders (`Cartography`, `Shade`), and Luxel needs the **heightfield**.
 
 A `SaveDefinition` is small and entirely writable:
 

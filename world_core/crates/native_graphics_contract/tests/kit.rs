@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     Campaign2Inputs, Campaign2View, GraphicsScenePacket, KitSet, ParityContent, ParityPolicyCandidate,
     canonical_json, load_kit_set, lower_campaign2_packet_inputs, validate_scene_packet,
 };
@@ -100,7 +100,7 @@ fn the_kit_costs_at_most_24_mb_of_packet() {
 #[test]
 #[ignore = "needs the built kit (python3 tools/build_kit.py)"]
 fn a_tampered_kit_glb_is_refused() {
-    let dir = std::env::temp_dir().join(format!("wge-kit-tamper-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("luxel-kit-tamper-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("artifacts/kit/kit1")).unwrap();
     std::fs::create_dir_all(dir.join("tools/kit")).unwrap();
     for name in ["ruin", "rock_a", "rock_b", "tree", "fern"] {

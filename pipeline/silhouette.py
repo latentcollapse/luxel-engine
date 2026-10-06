@@ -1,6 +1,6 @@
 """Silhouette complexity: an honest target for the geometry knobs.
 
-Tooling item 5 (see WGE/docs/platform/tooling-upgrades.md). `spine_count` and the jitters
+Tooling item 5 (see Luxel/docs/platform/tooling-upgrades.md). `spine_count` and the jitters
 reach the heightfield and demonstrably move it, but the only authority ever
 *measured* for `spine_count` was over `water_fraction` -- drainage, not skyline
 (+79.7%, sensitivity matrix 2026-07-31). Every metric that sounds like it should

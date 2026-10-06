@@ -1,17 +1,17 @@
-# WGE Demo-Ready Native Engine Mega-Sprint
+# Luxel Demo-Ready Native Engine Mega-Sprint
 
 Status: **canonical execution roadmap; demo contract provisional until Campaign 0 freezes it**  
 Date: 2026-09-30  
-Scope: shortest credible path from the current certified native engine spine to an unattended, visually impressive, playable WGE vertical slice
+Scope: shortest credible path from the current certified native engine spine to an unattended, visually impressive, playable Luxel vertical slice
 
-This document is the execution-focused successor to the broader [Game Development Harness Roadmap](game-dev-harness-roadmap.md) and [WGE Generality Bridge](../../content-sdk/generality-bridge.md). It is deliberately narrower than either. It optimizes for a proof that WGE can make a real game, not for general-purpose engine parity or completion of every long-term research direction.
+This document is the execution-focused successor to the broader [Game Development Harness Roadmap](game-dev-harness-roadmap.md) and [Luxel Generality Bridge](../../content-sdk/generality-bridge.md). It is deliberately narrower than either. It optimizes for a proof that Luxel can make a real game, not for general-purpose engine parity or completion of every long-term research direction.
 
 Execution tasks belong in the Tether board. This document defines campaign boundaries, dependencies, exit gates, and non-negotiable doctrine; it is not a Markdown ticket backlog.
 
 ## 1. Product doctrine
 
 ```text
-WGE IS THE GAME ENGINE.
+Luxel IS THE GAME ENGINE.
 
 The shipped game does not depend on:
   Unreal Engine
@@ -29,13 +29,13 @@ Preferred core dependency envelope:
 Blender + MCP is an optional build-time DCC/provider.
 ```
 
-Blender may model, UV, rig, weight, animate, retarget, bake, and condition assets during construction. It owns no WGE project truth, gameplay semantics, certification, or finished-game runtime. A Blender result must return through a typed WGE import boundary and be independently validated.
+Blender may model, UV, rig, weight, animate, retarget, bake, and condition assets during construction. It owns no Luxel project truth, gameplay semantics, certification, or finished-game runtime. A Blender result must return through a typed Luxel import boundary and be independently validated.
 
 The governing rule is:
 
-> Heavy tools may extend WGE. They must never constitute WGE.
+> Heavy tools may extend Luxel. They must never constitute Luxel.
 
-Repeated dependence on an external operation is evidence that the operation may eventually deserve a native WGE capability. It is not by itself a reason to recreate the entire external tool.
+Repeated dependence on an external operation is evidence that the operation may eventually deserve a native Luxel capability. It is not by itself a reason to recreate the entire external tool.
 
 ## 2. North-star demo
 
@@ -62,11 +62,11 @@ The actual proof is the construction procedure:
 
 ```text
 concept art + master brief
-    -> fresh Luna/Cyan through WGE semantic operations
+    -> fresh Luna/Cyan through Luxel semantic operations
     -> intent/specification and capability plan
     -> world, asset, style, and gameplay construction
     -> optional bounded Blender provider jobs
-    -> native WGE world and runtime
+    -> native Luxel world and runtime
     -> native Julia/Lava renderer
     -> inspect -> criticize -> repair
     -> verified packaged game
@@ -76,11 +76,11 @@ The final proof permits no human source edits, no manual shader repair, and no s
 
 ## 3. Definition of demo-ready
 
-WGE is demo-complete only when all of the following are true:
+Luxel is demo-complete only when all of the following are true:
 
 - a fresh model can begin from the frozen brief, concept references, and constraints;
 - it can plan and build through the AI-native semantic surface without searching Rust internals;
-- the result launches in a native WGE window;
+- the result launches in a native Luxel window;
 - the player can move, collide, fight, interact, and finish a short objective;
 - at least one real imported production asset is used;
 - at least one rigged/skinned animated character renders natively;
@@ -221,7 +221,7 @@ Move from transactional primitives to a model-facing construction surface that l
 #### C1.1 — Rust-owned capability registry seed
 
 Status: **implemented read-only seed** in
-`world_core/crates/wge_control_plane/src/capability_registry.rs`, with
+`world_core/crates/luxel_control_plane/src/capability_registry.rs`, with
 `capabilities`/`capability-explain` CLI discovery and transport mappings. The
 remaining C1 work is plan validation, style lowering, semantic execution, and
 promotion integration.
@@ -241,7 +241,7 @@ Each entry has identity, schema, preconditions, executor, validator, determinism
 #### C1.2 — StyleProfile and StylePlan execution slice
 
 Status: **typed semantic slice implemented** in
-`world_core/crates/wge_control_plane/src/style_profile.rs`, with native
+`world_core/crates/luxel_control_plane/src/style_profile.rs`, with native
 validation/lowering commands and `style_compile` transport mapping. Renderer
 execution and broader capability coverage remain open.
 
@@ -250,7 +250,7 @@ Implement the first typed style intent and lowering path over geometry, surfaces
 #### C1.3 — ConstructionPlan
 
 Status: **typed Rust resolution slice implemented** in
-`world_core/crates/wge_control_plane/src/construction_plan.rs`, with
+`world_core/crates/luxel_control_plane/src/construction_plan.rs`, with
 `project-plan` / `construction-validate` commands and corresponding
 transport/MCP mappings. Execution and promotion remain open.
 
@@ -267,7 +267,7 @@ Add a project-level plan that answers:
 #### C1.4 — Semantic facade
 
 Status: **read-only discovery slice implemented** in
-`world_core/crates/wge_control_plane/src/semantic_facade.rs`, with
+`world_core/crates/luxel_control_plane/src/semantic_facade.rs`, with
 `facade` / `facade-explain` commands and transport/MCP mappings. Planned
 verbs remain explicitly non-callable; semantic execution remains open.
 
@@ -343,8 +343,8 @@ Define Rust-owned identity, references, transforms, roles, collision, materials,
 #### C2.2 — GLB conditioning and source identity
 
 Status: **initial neutral conditioning implemented** in
-`wge-asset-contract/src/render.rs`, with a native `prepare-render` CLI seam and
-`wge-native-graphics-contract::project_render_asset` bridge.
+`luxel-asset-contract/src/render.rs`, with a native `prepare-render` CLI seam and
+`luxel-native-graphics-contract::project_render_asset` bridge.
 
 The current slice covers deterministic topology/attribute conditioning,
 normal/tangent generation, UV requirements, bounded PBR role extraction,
@@ -357,7 +357,7 @@ with a versioned deterministic mip-chain payload.
 
 #### C2.2b — Scene render-package binding
 
-Status: **implemented** in `wge-project-ledger`.
+Status: **implemented** in `luxel-project-ledger`.
 `SceneObject` may carry an optional content-addressed render package and mesh
 identity. The render-bound sealing/validation path independently validates the
 package, matches its source asset identity, and requires the selected mesh to
@@ -373,7 +373,7 @@ remain open.
 
 #### C2.3 — Bounded provider job boundary
 
-Make Blender/MCP provider jobs explicit, digest-bound, and optional. Provider output re-enters WGE through ordinary asset validation. No provider-local object or path becomes WGE identity.
+Make Blender/MCP provider jobs explicit, digest-bound, and optional. Provider output re-enters Luxel through ordinary asset validation. No provider-local object or path becomes Luxel identity.
 
 #### C2.4 — Real asset vertical slice
 
@@ -387,7 +387,7 @@ independently revalidates the runtime/render receipts, recomposes the exact
 bound packet, promotes the Lava capture through Rust authority, restarts the
 worker, and proves byte-identical capture plus deterministic certification
 receipt replay. The saved 640x480 capture bundle is under
-`/home/mattc/Pictures/WGE/c2.4-real-asset/`. This closes the permanent static
+`/home/mattc/Pictures/Luxel/c2.4-real-asset/`. This closes the permanent static
 asset C2.4 integration slice.
 
 #### C2.5 — Imported-asset authored inspection fidelity
@@ -402,7 +402,7 @@ Rust derives a deterministic
 promotion. The GPU proof renders a context frame and close frame, restarts the
 worker, repeats the warm-up context frame, and replays the close frame with
 byte-identical capture and deterministic receipt. Evidence is preserved in
-`/home/mattc/Pictures/WGE/c2.5-imported-asset/`; the checkpoint is
+`/home/mattc/Pictures/Luxel/c2.5-imported-asset/`; the checkpoint is
 `docs/archive/2026-09_native-graphics-checkpoints/c2-5-imported-asset-inspection-handoff.md`.
 
 This closes technical imported-asset inspection, not production asset quality:
@@ -448,7 +448,7 @@ The checkpoint handoff is
 #### C2.8 — GPU mip residency and sampler LOD
 
 Status: **implemented and green**. The adapter seam is now
-`wge.lava-adapter/v7` on both sides. The Lava adapter builds one Vulkan image
+`luxel.lava-adapter/v7` on both sides. The Lava adapter builds one Vulkan image
 per texture with the full mip chain, a whole-chain view, and a sampler whose
 `maxLod` spans the uploaded levels, and every frame reports
 `texture_residency` telemetry mirroring the Rust `expected_texture_residency`
@@ -534,7 +534,7 @@ Keep live frames cheap. Periodically and at semantic events, freeze a snapshot a
 
 ### Exit gate
 
-WGE launches a native window, accepts continuous input, traverses the current world, collides/interacts, renders through Lava, and preserves the two-tier evidence model without per-frame certification readback destroying the loop.
+Luxel launches a native window, accepts continuous input, traverses the current world, collides/interacts, renders through Lava, and preserves the two-tier evidence model without per-frame certification readback destroying the loop.
 
 ## 11. Campaign 4 — “This looks like a game” graphics
 
@@ -610,7 +610,7 @@ Bind the character to input, collision, abilities, enemy policy, damage/effects,
 
 ### Exit gate
 
-A Blender-prepared character is independently validated, animated natively, controlled by WGE, rendered in Lava, and participates in gameplay with zero Blender runtime dependency.
+A Blender-prepared character is independently validated, animated natively, controlled by Luxel, rendered in Lava, and participates in gameplay with zero Blender runtime dependency.
 
 ## 13. Campaign 6 — Make the world worthy of the renderer
 
@@ -686,7 +686,7 @@ Prove the whole thesis in a fresh run.
 
 #### C8.1 — Clean-room construction run
 
-Fresh environment, fresh Luna-class model, frozen concept images, master brief, constraints, and WGE semantic surface. No hidden source-tree instructions.
+Fresh environment, fresh Luna-class model, frozen concept images, master brief, constraints, and Luxel semantic surface. No hidden source-tree instructions.
 
 #### C8.2 — Failure-injection run
 
@@ -702,7 +702,7 @@ Measure and improve Julia sysimage/precompile, shader/pipeline cache, persistent
 
 #### C8.5 — Construction-leverage benchmark
 
-Run the same task through WGE and an ordinary model-accessible stack only if the benchmark is ready. Compare model/tool cost, time, repair, manual intervention, evidence, determinism, and quality vector. This is not a Unity/Unreal/Godot product gate.
+Run the same task through Luxel and an ordinary model-accessible stack only if the benchmark is ready. Compare model/tool cost, time, repair, manual intervention, evidence, determinism, and quality vector. This is not a Unity/Unreal/Godot product gate.
 
 ### Exit gate
 
@@ -710,7 +710,7 @@ The full demo-ready definition in Section 3 passes from a fresh run, including a
 
 ## 16. Permanent friction-elimination mandate
 
-Every WGE implementation campaign also observes the system as a model user. Repeated model friction is research evidence. Record it in [`docs/platform/friction-ledger.md`](../../platform/friction-ledger.md).
+Every Luxel implementation campaign also observes the system as a model user. Repeated model friction is research evidence. Record it in [`docs/platform/friction-ledger.md`](../../platform/friction-ledger.md).
 
 Track at minimum:
 

@@ -14,9 +14,9 @@ use crate::{
     validate_scene_packet,
 };
 
-pub const VISUAL_QUALITY_EVIDENCE_SCHEMA: &str = "wge.visual-quality-evidence/v1";
-pub const VISUAL_QUALITY_PROFILE_SCHEMA: &str = "wge.visual-quality-profile/v1";
-pub const CAMPAIGN2_VISUAL_EVIDENCE_SCHEMA: &str = "wge.campaign2-visual-evidence/v1";
+pub const VISUAL_QUALITY_EVIDENCE_SCHEMA: &str = "luxel.visual-quality-evidence/v1";
+pub const VISUAL_QUALITY_PROFILE_SCHEMA: &str = "luxel.visual-quality-profile/v1";
+pub const CAMPAIGN2_VISUAL_EVIDENCE_SCHEMA: &str = "luxel.campaign2-visual-evidence/v1";
 
 const MAX_TERRAIN_GRID_SIDE: u16 = 257;
 const MAX_QUALITY_OVERLAYS: usize = 8192;

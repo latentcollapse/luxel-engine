@@ -20,13 +20,13 @@ from asset_intake import (  # noqa: E402
 
 BENCHMARK_ASSET = Path(
     os.environ.get(
-        "WGE_ASSET_BENCHMARK",
+        "LUXEL_ASSET_BENCHMARK",
         "/home/mattc/Pictures/Generated 2D Images/"
         "sample_2026-09-26T091412.074.glb",
     )
 )
 EXPECTED_INPUT_SHA256 = "858fa104880822d081405579fb5b39d533d3b3b341d38aa1490a44b634f5e2b4"
-EXPECTED_REPORT_SHA256 = "14301dc1dc20272b7d35e270a3d0221a310b3376470c0cc025f97f8d06638f71"
+EXPECTED_REPORT_SHA256 = "b8ed0169c3ffa3ddc8ba9eb5f80903fb34451f73a7f3449fa617dad6e3fed874"
 
 
 @unittest.skipUnless(BENCHMARK_ASSET.is_file(), "the external GLB benchmark is unavailable")

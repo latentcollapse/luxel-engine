@@ -81,7 +81,7 @@ impl JuliaFieldRequest {
 
 pub fn spatial_fields_sha256(fields: &NumericalFields) -> String {
     let mut digest = Sha256::new();
-    digest.update(b"wge.julia-spatial-fields/v1\0");
+    digest.update(b"luxel.julia-spatial-fields/v1\0");
     digest.update((fields.resolution as u64).to_le_bytes());
     for value in &fields.heights_m {
         digest.update(value.to_le_bytes());

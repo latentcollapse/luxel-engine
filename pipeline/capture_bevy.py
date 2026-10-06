@@ -158,7 +158,7 @@ def main(argv: Iterable[str] | None = None) -> int:
     batch = arguments.batch.resolve()
     # The reference renderer ships with the engine, so this is one level up
     # from pipeline/ -- not two, which pointed above the engine entirely once
-    # WGE moved out of the game it used to live inside (D8).
+    # Luxel moved out of the game it used to live inside (D8).
     world_core = Path(__file__).resolve().parents[1] / "world_core"
     viewer = (
         arguments.viewer_bin.resolve()

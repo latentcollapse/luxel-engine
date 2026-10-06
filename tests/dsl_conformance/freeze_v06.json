@@ -1,6 +1,6 @@
 {
-  "schema": "wge.contract-freeze/1",
-  "contract": "wge.model-native-language/core-0.6",
+  "schema": "luxel.contract-freeze/1",
+  "contract": "luxel.model-native-language/core-0.6",
   "frozen_at": "2026-08-04",
   "scope": "core_implementation_contract",
   "excludes": [
@@ -10,7 +10,7 @@
     "production_compiler_host_selection"
   ],
   "verification": {
-    "command": "python3 -m unittest tests.test_wge_language_contract tests.test_worldbuilder_dsl",
+    "command": "python3 -m unittest tests.test_luxel_language_contract tests.test_worldbuilder_dsl",
     "expected_tests": 38,
     "result": "pass",
     "independent_reviewer": "cursor",
@@ -18,12 +18,17 @@
     "independent_verdict": "freeze_yes"
   },
   "sha256": {
-    "docs/DSL docs/WGE_LANGUAGE_SPEC.md": "83de9283ec24e04780958cc4772b128fb5bf1ca9e0a0bb58b1abef594d9709f7",
-    "docs/DSL docs/LANGUAGE_SPEC_FREEZE_VERIFICATION_01.md": "cf4e911782d3470d67623c61d5d3dfe01e9ed1a64ffc15028f58dd9ba4b672c9",
-    "tests/dsl_conformance/closure_v06.json": "adfacae3be9308689df908da29f50faf9db759435e8d65ab9758fe5831400c2e",
-    "tests/dsl_conformance/migration_worldbuilder_v1.json": "b7e5f1e5ccba0a72aa90f36d4b82c47f4e1cc804a9629a1c5fa4991f17b323a7",
-    "tests/test_wge_language_contract.py": "3acd2d59ee9b90d853abd0e0f06377d3f545f538dd337395a036636c7a10d6c1",
+    "docs/DSL docs/LUXEL_LANGUAGE_SPEC.md": "aae8b33d9d3dd89b2df1d15b3e68796eadc8f066507beb1a866fac1739d3fd82",
+    "docs/DSL docs/LANGUAGE_SPEC_FREEZE_VERIFICATION_01.md": "2e5d69e9e5673d969e4f8f5b084cdb1cb0755fe6a9f48d1482a25b34165fff03",
+    "tests/dsl_conformance/closure_v06.json": "e0588e8fb45135f17a6db691d38e0d2393d6c72e5cd45366b69fc8f9d92f7475",
+    "tests/dsl_conformance/migration_worldbuilder_v1.json": "e4d73bd4bc743a112b5f1061dc3c7810cf3094ec5134d4137f09b6b473e6f992",
+    "tests/test_luxel_language_contract.py": "b393809039dc14ae64be80799978f961fadda3f7876c7f322beabaa6324f0ead",
     "tests/test_worldbuilder_dsl.py": "d6f04735c58affa9ac8580167bb6a8597288f57f2095f095800c285afb6b4cd6",
     "pipeline/worldbuilder_dsl.py": "3bb12cd97623433c6be772983133088a66951c5f40bb52b24661c0e89ceeec68"
+  },
+  "refrozen": {
+    "at": "2026-10-06",
+    "reason": "engine renamed WGE -> Luxel: namespace, extension, schema ids and file names only; no semantic change",
+    "verification": "python3 -m unittest tests.test_luxel_language_contract tests.test_worldbuilder_dsl -> 38 tests OK"
   }
 }

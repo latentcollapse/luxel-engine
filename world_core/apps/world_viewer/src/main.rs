@@ -227,7 +227,7 @@ impl ViewerConfig {
                 "-h" | "--help" => {
                     println!(
                         "usage: codeweald-world-viewer --batch <concept-batch-directory> \
-                         | --native-world <wge.world-artifact.json> \
+                         | --native-world <luxel.world-artifact.json> \
                          [--worlds-root <directory>]... \
                          [--surround <landform-batch> [--surround-offset x,y,z]] \
                          [--capture <png-path>] \
@@ -778,7 +778,7 @@ struct PreviewWorld {
 /// assumptions. Bevy consumes the already-certified Rust/Julia world bytes
 /// and can only render the fields and semantic metadata that artifact owns.
 struct NativeWorld {
-    world: wge_reference_runtime::WorldArtifact,
+    world: luxel_reference_runtime::WorldArtifact,
     mesh: Mesh,
     terrain_size_m: Vec2,
     relief_m: f32,
@@ -1181,7 +1181,7 @@ fn capture_certified_world(
                 return;
             }
         };
-        let world: wge_reference_runtime::WorldArtifact = match serde_json::from_slice(&world_bytes)
+        let world: luxel_reference_runtime::WorldArtifact = match serde_json::from_slice(&world_bytes)
         {
             Ok(world) => world,
             Err(error) => {
@@ -1190,7 +1190,7 @@ fn capture_certified_world(
                 return;
             }
         };
-        if let Err(error) = wge_reference_runtime::validate_world_artifact(&world) {
+        if let Err(error) = luxel_reference_runtime::validate_world_artifact(&world) {
             capture.requested = false;
             eprintln!("native capture provenance failed: native world changed: {error}");
             return;
@@ -1230,11 +1230,11 @@ fn capture_certified_world(
                 let result = (|| -> Result<()> {
                     let image = fs::read(&path)
                         .with_context(|| format!("cannot reread capture {}", path.display()))?;
-                    let provenance = wge_reference_runtime::build_bevy_capture_provenance(
+                    let provenance = luxel_reference_runtime::build_bevy_capture_provenance(
                         world,
                         &image,
                         capture_view.clone(),
-                        wge_reference_runtime::BevyRendererIdentity {
+                        luxel_reference_runtime::BevyRendererIdentity {
                             renderer_id: "bevy".into(),
                             viewer_package: env!("CARGO_PKG_NAME").into(),
                             viewer_version: env!("CARGO_PKG_VERSION").into(),
@@ -2077,7 +2077,7 @@ fn load_world(config: &ViewerConfig, signature: u64) -> Result<LoadedWorld> {
     }
 }
 
-/// Load the engine-neutral WGE world artifact and nothing else.
+/// Load the engine-neutral Luxel world artifact and nothing else.
 ///
 /// The artifact is revalidated from its embedded layout, Julia provenance,
 /// collision, spawns, and navigation before a mesh is built. This keeps Bevy
@@ -2087,11 +2087,11 @@ fn load_native_world(config: &ViewerConfig, signature: u64) -> Result<NativeWorl
         .native_world
         .as_ref()
         .context("native world mode has no world artifact path")?;
-    let world: wge_reference_runtime::WorldArtifact = serde_json::from_slice(
+    let world: luxel_reference_runtime::WorldArtifact = serde_json::from_slice(
         &fs::read(path).with_context(|| format!("cannot read native world {}", path.display()))?,
     )
     .context("native world artifact is not valid JSON")?;
-    wge_reference_runtime::validate_world_artifact(&world)
+    luxel_reference_runtime::validate_world_artifact(&world)
         .map_err(|error| anyhow::anyhow!("native world validation failed: {error}"))?;
     let layout = &world.body.authored_layout;
     let resolution = layout.resolution;
@@ -3251,11 +3251,11 @@ mod tests {
         // caledonia_v1 is *Codeweald's* content, not the engine's (D23), and the
         // path to it stopped being `../../../godot_renderer` when the engine was
         // split out of the game -- that climb resolved inside Codeweald and now
-        // resolves inside WGE. Same shape as the four path assumptions the split
+        // resolves inside Luxel. Same shape as the four path assumptions the split
         // already removed: a location derived by climbing from something merely
         // adjacent. Resolved through the documented override instead, matching
         // `tests/reference_content.py`.
-        let content_root = std::env::var("WGE_REFERENCE_CONTENT")
+        let content_root = std::env::var("LUXEL_REFERENCE_CONTENT")
             .map(PathBuf::from)
             .unwrap_or_else(|_| {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -3270,7 +3270,7 @@ mod tests {
             // cannot fail.
             eprintln!(
                 "SKIP source_signature_names_the_missing_file_instead_of_hanging: \
-                 reference content not found under {}; set WGE_REFERENCE_CONTENT",
+                 reference content not found under {}; set LUXEL_REFERENCE_CONTENT",
                 content_root.display()
             );
             return;
@@ -3459,7 +3459,7 @@ mod tests {
     }
 
     fn temporary_directory(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("wge_viewer_{name}_{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("luxel_viewer_{name}_{}", std::process::id()));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).unwrap();
         path

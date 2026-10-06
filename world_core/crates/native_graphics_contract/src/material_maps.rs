@@ -378,32 +378,32 @@ pub fn build_material_maps(kind: MaterialKind, size: usize, revision: &str) -> M
     let slug = kind.slug();
     MaterialMapSet {
         albedo: procedural_texture(
-            &format!("wge-hero-{slug}-albedo"),
-            &format!("procedural-wge-hero-{slug}-albedo-{revision}"),
+            &format!("luxel-hero-{slug}-albedo"),
+            &format!("procedural-luxel-hero-{slug}-albedo-{revision}"),
             TextureColorSpace::Srgb,
             size as u32,
             size as u32,
             albedo,
         ),
         normal: procedural_texture(
-            &format!("wge-hero-{slug}-normal"),
-            &format!("procedural-wge-hero-{slug}-normal-{revision}"),
+            &format!("luxel-hero-{slug}-normal"),
+            &format!("procedural-luxel-hero-{slug}-normal-{revision}"),
             TextureColorSpace::NormalMap,
             size as u32,
             size as u32,
             normal,
         ),
         roughness: procedural_texture(
-            &format!("wge-hero-{slug}-roughness"),
-            &format!("procedural-wge-hero-{slug}-roughness-{revision}"),
+            &format!("luxel-hero-{slug}-roughness"),
+            &format!("procedural-luxel-hero-{slug}-roughness-{revision}"),
             TextureColorSpace::Data,
             size as u32,
             size as u32,
             roughness,
         ),
         occlusion: procedural_texture(
-            &format!("wge-hero-{slug}-occlusion"),
-            &format!("procedural-wge-hero-{slug}-occlusion-{revision}"),
+            &format!("luxel-hero-{slug}-occlusion"),
+            &format!("procedural-luxel-hero-{slug}-occlusion-{revision}"),
             TextureColorSpace::Data,
             size as u32,
             size as u32,
@@ -709,7 +709,7 @@ mod tests {
             };
             let normal = material.normal_texture_id.clone().expect("mapped has a normal");
             assert!(
-                normal.starts_with("wge-hero-"),
+                normal.starts_with("luxel-hero-"),
                 "material {} points at {normal}",
                 material.material_id
             );

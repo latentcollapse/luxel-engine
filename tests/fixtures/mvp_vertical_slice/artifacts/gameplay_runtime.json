@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.gameplay-runtime/v1",
+  "schema_version": "luxel.gameplay-runtime/v1",
   "runtime_id": "gate-run-gameplay",
   "objective_id": "obelisk",
   "start_entity_id": "player",

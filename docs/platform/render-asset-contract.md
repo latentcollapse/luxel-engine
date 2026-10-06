@@ -1,14 +1,14 @@
-# WGE Neutral Render-Asset Conditioning Contract
+# Luxel Neutral Render-Asset Conditioning Contract
 
 Status: **C2.7 deterministic mip-chain conditioning implemented; GPU residency remains open**, 2026-09-30  
-Owner: Rust `wge-asset-contract`  
-Downstream: Rust `wge-project-ledger` and `wge-native-graphics-contract`
+Owner: Rust `luxel-asset-contract`  
+Downstream: Rust `luxel-project-ledger` and `luxel-native-graphics-contract`
 
 ## Purpose
 
 This contract turns a self-contained GLB into a deterministic,
 backend-neutral render package. It is the seam between ordinary authored or
-provider-produced assets and WGE scene/graphics composition.
+provider-produced assets and Luxel scene/graphics composition.
 
 ```text
 GLB bytes
@@ -26,7 +26,7 @@ target selection remains separate: the active path uses the Rust-native
 
 ## Rust-owned inputs and outputs
 
-`RenderConditioningRequest` (`wge.render-asset-request/v1`) explicitly binds:
+`RenderConditioningRequest` (`luxel.render-asset-request/v1`) explicitly binds:
 
 - meters per unit;
 - source vertical axis;
@@ -36,7 +36,7 @@ target selection remains separate: the active path uses the Rust-native
   `generate_cpu_chain`);
 - maximum decoded texture dimension.
 
-`RenderAssetPackage` (`wge.render-asset-package/v2`) contains:
+`RenderAssetPackage` (`luxel.render-asset-package/v2`) contains:
 
 - source asset identity and conditioning transform;
 - deterministic mesh buffers with positions, normals, tangents, UV0, and indices;
@@ -49,7 +49,7 @@ target selection remains separate: the active path uses the Rust-native
   for the conditioned primitive;
 - producer, source, request, and inspection provenance.
 
-`RenderConditioningReceipt` (`wge.render-asset-receipt/v2`) is content
+`RenderConditioningReceipt` (`luxel.render-asset-receipt/v2`) is content
 addressed over the complete typed result. A rejected result carries findings;
 a status-only or re-sealed result is not sufficient for promotion.
 
@@ -83,7 +83,7 @@ a status-only or re-sealed result is not sufficient for promotion.
 The asset-contract binary exposes:
 
 ```text
-wge-asset-contract prepare-render ASSET.glb REQUEST.json
+luxel-asset-contract prepare-render ASSET.glb REQUEST.json
 ```
 
 Exit status `0` means the typed receipt is `Ready`; status `3` means the

@@ -273,7 +273,7 @@ def foliage_material(gltf, models_manifest, model, document, material_index):
     """The source material, conditioned: RGBA base colour (diff + alpha map) at
     512 px averaged in linear light, normals at 512 px renormalised, the ARM map
     (R = AO, G = roughness, B = metal; glTF reads G and B) at 256 px. MASK keeps
-    its cutoff; BLEND becomes MASK at 0.5 (WGE does not blend)."""
+    its cutoff; BLEND becomes MASK at 0.5 (Luxel does not blend)."""
     from fetch_models import file_path
 
     source = document["materials"][material_index]
@@ -319,7 +319,7 @@ def wet_albedo(albedo01):
 class Gltf:
     def __init__(self):
         self.bin = bytearray()
-        self.doc = {"asset": {"version": "2.0", "generator": "wge build_calibration_glb.py"},
+        self.doc = {"asset": {"version": "2.0", "generator": "luxel build_calibration_glb.py"},
                     "scene": 0, "scenes": [{"nodes": []}], "nodes": [], "meshes": [], "materials": [],
                     "textures": [], "images": [], "samplers": [{"magFilter": 9729, "minFilter": 9987, "wrapS": 10497, "wrapT": 10497}],
                     "accessors": [], "bufferViews": [], "buffers": []}
@@ -440,7 +440,7 @@ def main():
             "occlusionTexture": {"index": gltf.texture(f"{asset}_ao", ao)},
         })
 
-    layout = {"schema_version": "wge.calibration-layout/v1", "plinth_top_m": PLINTH_TOP_M, "columns": [], "meshes": []}
+    layout = {"schema_version": "luxel.calibration-layout/v1", "plinth_top_m": PLINTH_TOP_M, "columns": [], "meshes": []}
 
     def emit(name, mesh, material, column, role):
         gltf.mesh(name, mesh, material)

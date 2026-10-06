@@ -4,7 +4,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 use serde_json::{Value, json};
-use wge_asset_contract::{
+use luxel_asset_contract::{
     AssetPreparationReceipt, AssetPreparationRequest, PreparationStatus, RuntimeFindingCode,
     inspect_glb, prepare_asset,
 };
@@ -52,7 +52,7 @@ fn fixture(name: &str) -> RuntimeFixture {
         value["request"] = base["request"].clone();
     }
     let fixture: RuntimeFixture = serde_json::from_value(value).expect("fixture JSON is typed");
-    assert_eq!(fixture.schema_version, "wge.asset-runtime-test-fixture/v1");
+    assert_eq!(fixture.schema_version, "luxel.asset-runtime-test-fixture/v1");
     fixture
 }
 
@@ -163,7 +163,7 @@ fn make_glb(source: &SourceFixture) -> Vec<u8> {
         json!([
             {"name": "root", "children": [1]},
             {"name": "hand_r"},
-            {"name": "weapon_mount", "extras": {"wge_socket": true}},
+            {"name": "weapon_mount", "extras": {"luxel_socket": true}},
             {"name": "body_lod0_node", "mesh": 0, "skin": 0, "children": [2]},
             {"name": "body_lod1_node", "mesh": 1, "skin": 0}
         ])
@@ -171,13 +171,13 @@ fn make_glb(source: &SourceFixture) -> Vec<u8> {
         json!([
             {"name": "root", "children": [1]},
             {"name": "hand_r", "children": [2]},
-            {"name": "weapon_mount", "extras": {"wge_socket": true}},
+            {"name": "weapon_mount", "extras": {"luxel_socket": true}},
             {"name": "body_lod0_node", "mesh": 0, "skin": 0},
             {"name": "body_lod1_node", "mesh": 1, "skin": 0}
         ])
     };
     let document = json!({
-        "asset": {"version": "2.0", "generator": "wge-runtime-fixture"},
+        "asset": {"version": "2.0", "generator": "luxel-runtime-fixture"},
         "scene": 0,
         "scenes": [{"nodes": scene_roots}],
         "nodes": nodes,
@@ -373,7 +373,7 @@ fn socket_parent_must_be_a_valid_joint_and_the_declared_direct_parent() {
 #[test]
 fn unsupported_required_gltf_extension_is_rejected() {
     let mut case = fixture("good_character");
-    case.source.required_extensions = vec!["EXT_unimplemented_wge_test".into()];
+    case.source.required_extensions = vec!["EXT_unimplemented_luxel_test".into()];
     let (_, receipt) = run_custom_case(case);
     assert_eq!(receipt.status, PreparationStatus::Rejected);
     assert!(
@@ -423,7 +423,7 @@ fn native_cli_exits_green_for_ready_and_red_for_rejected_packages() {
         ("required_extension", 3),
     ] {
         let (fixture, bytes) = source_pinned_fixture(name);
-        let stem = format!("wge-asset-runtime-{}-{name}", std::process::id());
+        let stem = format!("luxel-asset-runtime-{}-{name}", std::process::id());
         let asset_path = std::env::temp_dir().join(format!("{stem}.glb"));
         let request_path = std::env::temp_dir().join(format!("{stem}.json"));
         fs::write(&asset_path, bytes).expect("temporary fixture GLB is writable");
@@ -433,7 +433,7 @@ fn native_cli_exits_green_for_ready_and_red_for_rejected_packages() {
         )
         .expect("temporary request is writable");
 
-        let output = Command::new(env!("CARGO_BIN_EXE_wge-asset-contract"))
+        let output = Command::new(env!("CARGO_BIN_EXE_luxel-asset-contract"))
             .arg("prepare")
             .arg(&asset_path)
             .arg(&request_path)
@@ -468,6 +468,6 @@ fn fixtures_are_not_accidentally_empty() {
         "missing_collision",
     ] {
         let fixture = fixture(name);
-        assert_eq!(fixture.schema_version, "wge.asset-runtime-test-fixture/v1");
+        assert_eq!(fixture.schema_version, "luxel.asset-runtime-test-fixture/v1");
     }
 }

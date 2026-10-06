@@ -1,4 +1,4 @@
-# WGE Native Graphics Benchmark
+# Luxel Native Graphics Benchmark
 
 Status: adapter-v6 native backend and Campaign 2 authored-frame checkpoint
 measured; registered visual-quality certification is green, while broader
@@ -6,16 +6,16 @@ production visual quality remains open, 2026-09-29
 
 This report measures the current engine-neutral Riverwatch vertical slice. It
 is a substrate and evidence report, not a claim of AAA visual parity. External
-engines are reference literature only and are not a WGE comparison axis.
+engines are reference literature only and are not a Luxel comparison axis.
 
 ## Test subject
 
 - Host GPU: NVIDIA GeForce RTX 5060.
 - Native graphics backend: Julia 1.12, Lava.jl pinned at
   `11c7e31bdf62408d22bf379e9e59510f69d2103e`, Vulkan offscreen rendering.
-- Rust authority: `wge-native-graphics-contract` and the reference runtime.
+- Rust authority: `luxel-native-graphics-contract` and the reference runtime.
 - World: `riverwatch.layout.json`, lowered to graphics packet
-  `wge.graphics-scene-packet/v6`.
+  `luxel.graphics-scene-packet/v6`.
 - Native packet contents: deterministic terrain, one gameplay-critical
   obstacle instance in the Riverwatch fixture, thirty background foliage
   instances, route/spawn/
@@ -23,8 +23,8 @@ engines are reference literature only and are not a WGE comparison axis.
   authored mesh UV0 channels, a semantic objective beacon with a distinct
   emissive role, directional shadow map, linear HDR resolve, and semantic
   visibility telemetry.
-- Material contract: `wge.graphics-scene-packet/v6`, adapter identity
-  `wge.lava-adapter/v6`, with digest-bound albedo, normal, roughness,
+- Material contract: `luxel.graphics-scene-packet/v6`, adapter identity
+  `luxel.lava-adapter/v6`, with digest-bound albedo, normal, roughness,
   occlusion, and emissive roles, including a beacon-specific albedo/emissive
   pair plus bounded clearcoat response.
 - Capture: deterministic 320x240 PPM for the native Lava path; the Bevy
@@ -45,13 +45,13 @@ the terrain-coverage requirement by relabeling themselves as terrain.
 
 This is a deterministic technical floor, not an aesthetic, AAA, or imported
 hero-asset claim. The visual artifact is preserved under
-`/home/mattc/Pictures/WGE/native-world-showcase-certified-2026-09-29.png`.
+`/home/mattc/Pictures/Luxel/native-world-showcase-certified-2026-09-29.png`.
 
 The same profile was then run against the distinct non-fixture
 `cedar_saddle_relay` layout. It passed with `2,571 bp` terrain coverage,
 `3,255 bp` combined content coverage, `529 bp` spatial edges, `28/314`
 luminance/RGB bins, and `33/64` varied tiles. The capture is preserved at
-`/home/mattc/Pictures/WGE/cedar-world-showcase-certified-2026-09-29.png`.
+`/home/mattc/Pictures/Luxel/cedar-world-showcase-certified-2026-09-29.png`.
 
 ## Campaign 2 authored-frame measurement
 
@@ -60,10 +60,10 @@ the same Riverwatch input. `live-twelfth` is the final current-binary run and
 `live-eleventh` is the clean replay. The exact command was:
 
 ```text
-world_core/target/debug/wge-native-graphics-contract render-campaign2-layout \
+world_core/target/debug/luxel-native-graphics-contract render-campaign2-layout \
   world_core/crates/reference_runtime/examples/riverwatch.layout.json \
   /home/mattc/.juliaup/bin/julia terrain_lab graphics_lab \
-  graphics_lab/bin/wge_graphics_worker.jl artifacts/campaign2/live-twelfth
+  graphics_lab/bin/luxel_graphics_worker.jl artifacts/campaign2/live-twelfth
 ```
 
 All three cuts passed the Rust-registered `campaign2-authored-frame` profile
@@ -99,7 +99,7 @@ non-deterministic runtime receipt/timing identity. This is recorded rather than
 folded into deterministic provenance.
 
 The final PNG/PPM/evidence bundle is available at
-`/home/mattc/Pictures/WGE/campaign2-2026-09-29/`. This campaign did not add an
+`/home/mattc/Pictures/Luxel/campaign2-2026-09-29/`. This campaign did not add an
 external-engine comparison gate.
 
 ## Current adapter-v6 close sample
@@ -285,59 +285,59 @@ the quality-gap report records what is still missing for production breadth.
 From `world_core`:
 
 ```text
-cargo run -q -p wge-reference-runtime -- build \
+cargo run -q -p luxel-reference-runtime -- build \
   --layout crates/reference_runtime/examples/riverwatch.layout.json \
-  --output-dir /tmp/wge-bench-riverwatch
+  --output-dir /tmp/luxel-bench-riverwatch
 
-cargo run -q -p wge-reference-runtime -- verify \
-  --bundle /tmp/wge-bench-riverwatch
+cargo run -q -p luxel-reference-runtime -- verify \
+  --bundle /tmp/luxel-bench-riverwatch
 
-cargo run -q -p wge-native-graphics-contract -- render-layout \
+cargo run -q -p luxel-native-graphics-contract -- render-layout \
   crates/reference_runtime/examples/riverwatch.layout.json \
   /home/mattc/.juliaup/bin/julia \
-  "/mnt/d/Code Projects/WGE/terrain_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
-  /tmp/wge-riverwatch-native.ppm
+  "/mnt/d/Code Projects/luxel-engine/terrain_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab/bin/luxel_graphics_worker.jl" \
+  /tmp/luxel-riverwatch-native.ppm
 
-cargo run -q -p wge-native-graphics-contract -- render-close-layout \
+cargo run -q -p luxel-native-graphics-contract -- render-close-layout \
   crates/reference_runtime/examples/riverwatch.layout.json \
   /home/mattc/.juliaup/bin/julia \
-  "/mnt/d/Code Projects/WGE/terrain_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
-  /tmp/wge-riverwatch-objective-close.ppm
+  "/mnt/d/Code Projects/luxel-engine/terrain_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab/bin/luxel_graphics_worker.jl" \
+  /tmp/luxel-riverwatch-objective-close.ppm
 
-cargo run -q -p wge-native-graphics-contract -- render-showcase-layout \
+cargo run -q -p luxel-native-graphics-contract -- render-showcase-layout \
   crates/reference_runtime/examples/riverwatch.layout.json \
   /home/mattc/.juliaup/bin/julia \
-  "/mnt/d/Code Projects/WGE/terrain_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
-  /tmp/wge-riverwatch-native-showcase.ppm
+  "/mnt/d/Code Projects/luxel-engine/terrain_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab/bin/luxel_graphics_worker.jl" \
+  /tmp/luxel-riverwatch-native-showcase.ppm
 
-cargo run -q -p wge-native-graphics-contract -- render-world-showcase-layout \
+cargo run -q -p luxel-native-graphics-contract -- render-world-showcase-layout \
   crates/reference_runtime/examples/riverwatch.layout.json \
   /home/mattc/.juliaup/bin/julia \
-  "/mnt/d/Code Projects/WGE/terrain_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
-  /tmp/wge-riverwatch-native-world-showcase.ppm
+  "/mnt/d/Code Projects/luxel-engine/terrain_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab/bin/luxel_graphics_worker.jl" \
+  /tmp/luxel-riverwatch-native-world-showcase.ppm
 
-cargo run -q -p wge-native-graphics-contract -- benchmark-layout \
+cargo run -q -p luxel-native-graphics-contract -- benchmark-layout \
   crates/reference_runtime/examples/riverwatch.layout.json \
   /home/mattc/.juliaup/bin/julia \
-  "/mnt/d/Code Projects/WGE/terrain_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
+  "/mnt/d/Code Projects/luxel-engine/terrain_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab/bin/luxel_graphics_worker.jl" \
   30
 
-cargo run -q -p wge-native-graphics-contract -- benchmark-dense-layout \
+cargo run -q -p luxel-native-graphics-contract -- benchmark-dense-layout \
   crates/reference_runtime/examples/riverwatch.layout.json \
   /home/mattc/.juliaup/bin/julia \
-  "/mnt/d/Code Projects/WGE/terrain_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab" \
-  "/mnt/d/Code Projects/WGE/graphics_lab/bin/wge_graphics_worker.jl" \
+  "/mnt/d/Code Projects/luxel-engine/terrain_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab" \
+  "/mnt/d/Code Projects/luxel-engine/graphics_lab/bin/luxel_graphics_worker.jl" \
   2 512
 ```
 
@@ -346,8 +346,8 @@ reference-runtime build:
 
 ```text
 cargo run -q -p codeweald-world-viewer -- \
-  --native-world /tmp/wge-bench-riverwatch/world_artifact.json \
-  --capture /tmp/wge-bevy-riverwatch.png \
+  --native-world /tmp/luxel-bench-riverwatch/world_artifact.json \
+  --capture /tmp/luxel-bevy-riverwatch.png \
   --view overview
 ```
 

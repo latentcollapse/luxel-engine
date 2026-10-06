@@ -1,4 +1,4 @@
-# WGE ConstructionPlan Contract
+# Luxel ConstructionPlan Contract
 
 Status: **typed Rust planning slice implemented; semantic execution remains open**, 2026-09-30  
 Scope: resolving a model's game-construction intent into an explicit, deterministic, authority-bound build plan.
@@ -55,10 +55,10 @@ unsupported hard requirement cannot be hidden behind a successful JSON shape.
 ## Current native commands
 
 ```bash
-cargo run --manifest-path world_core/Cargo.toml --offline -p wge-control-plane -- \
+cargo run --manifest-path world_core/Cargo.toml --offline -p luxel-control-plane -- \
   project-plan DRAFT.json STYLE_PLAN.json
 
-cargo run --manifest-path world_core/Cargo.toml --offline -p wge-control-plane -- \
+cargo run --manifest-path world_core/Cargo.toml --offline -p luxel-control-plane -- \
   construction-validate PLAN.json STYLE_PLAN.json
 ```
 

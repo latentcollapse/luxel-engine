@@ -1,6 +1,6 @@
 """Where a body may go, and what the world looks like past it.
 
-MVP roadmap 1.2 (see WGE/docs/archive/2026-09_roadmaps-and-audits/mvp-roadmap.md). WGE emits a heightfield that
+MVP roadmap 1.2 (see Luxel/docs/archive/2026-09_roadmaps-and-audits/mvp-roadmap.md). Luxel emits a heightfield that
 stops dead at the world bounds: the terrain mesh ends at the data edge and
 beyond it is skybox. That is two separate defects wearing one costume.
 
@@ -20,7 +20,7 @@ quietly fencing them.
 
 That distinction is the whole point. A synthetic barrier over a leak would make
 the map playable today and make the defect invisible forever, which is exactly
-the failure mode WGE exists to catch. Roadmap 2.5 closes these leaks with
+the failure mode Luxel exists to catch. Roadmap 2.5 closes these leaks with
 landform -- geometry is the boundary -- and this artifact is what tells 2.5
 where to put it.
 
@@ -72,7 +72,7 @@ APRON_FALLOFF_GRADE = 0.06
 # Semantics that mark "somewhere a player is known to start". Wherever a player
 # starts is by definition inside the playable region, so these seed the fill.
 #
-# WGE is a general-purpose world compiler, not a MOBA tool. This list used to be
+# Luxel is a general-purpose world compiler, not a MOBA tool. This list used to be
 # the single value "faction_keep" and the build *refused* a world without one --
 # so a dungeon, a race track, or an open-world zone could not compile at all.
 # A world with no declared start is still a world; it falls back to its largest

@@ -1,5 +1,5 @@
 use serde_json::json;
-use wge_asset_contract::{
+use luxel_asset_contract::{
     AssetIdentity, AssetPreparationReceipt, AssetProvenance, AssetUse, Axis, CollisionMetadata,
     CollisionShape, LodMetadata, PreparationStatus, ProducerIdentity, RENDER_ASSET_PACKAGE_SCHEMA,
     RenderAlphaMode, RenderAssetPackage, RenderAssetProvenance, RenderMaterial, RenderMesh,
@@ -7,7 +7,7 @@ use wge_asset_contract::{
     RenderTransform, RuntimeAssetPackage, RuntimeTarget, RuntimeTransform,
     validate_render_asset_package,
 };
-use wge_project_ledger::{
+use luxel_project_ledger::{
     CollisionPolicy, GameplayReference, MaterialAssignment, SCENE_ARTIFACT_SCHEMA,
     SCENE_OBJECT_SCHEMA, SceneArtifactBody, SceneImportance, SceneLodLevel, SceneLodPolicy,
     SceneObject, SceneObjectProvenance, SceneProvenance, SceneTransform, SceneVisibilityPolicy,
@@ -23,7 +23,7 @@ fn ready_asset_receipt() -> AssetPreparationReceipt {
     };
     let mut package = RuntimeAssetPackage {
         package_id: String::new(),
-        schema_version: "wge.runtime-asset-package/v1".into(),
+        schema_version: "luxel.runtime-asset-package/v1".into(),
         target: RuntimeTarget::Native,
         asset_use: AssetUse::StaticMesh,
         source_identity: source_identity.clone(),
@@ -61,12 +61,12 @@ fn ready_asset_receipt() -> AssetPreparationReceipt {
     };
     let mut package_value = serde_json::to_value(&package).unwrap();
     package_value.as_object_mut().unwrap().remove("package_id");
-    let package_digest = wge_project_ledger::sha256_hex(
-        wge_project_ledger::canonical_json(&package_value).as_bytes(),
+    let package_digest = luxel_project_ledger::sha256_hex(
+        luxel_project_ledger::canonical_json(&package_value).as_bytes(),
     );
     package.package_id = format!("runtime_asset_sha256_{package_digest}");
     let mut receipt = AssetPreparationReceipt {
-        schema_version: "wge.asset-runtime-receipt/v1".into(),
+        schema_version: "luxel.asset-runtime-receipt/v1".into(),
         status: PreparationStatus::Ready,
         source_identity,
         request_sha256: "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd".into(),
@@ -83,8 +83,8 @@ fn ready_asset_receipt() -> AssetPreparationReceipt {
         .as_object_mut()
         .unwrap()
         .remove("receipt_sha256");
-    receipt.receipt_sha256 = wge_project_ledger::sha256_hex(
-        wge_project_ledger::canonical_json(&receipt_value).as_bytes(),
+    receipt.receipt_sha256 = luxel_project_ledger::sha256_hex(
+        luxel_project_ledger::canonical_json(&receipt_value).as_bytes(),
     );
     receipt
 }
@@ -119,7 +119,7 @@ fn scene_body(receipt: &AssetPreparationReceipt) -> SceneArtifactBody {
                 scale_xyz: [1.0, 1.0, 1.0],
             },
             collision: CollisionPolicy::Static {
-                shape: wge_project_ledger::SceneCollisionShape::Box,
+                shape: luxel_project_ledger::SceneCollisionShape::Box,
             },
             material_assignments: vec![MaterialAssignment {
                 slot: 0,
@@ -227,7 +227,7 @@ fn ready_render_package(source_identity: &AssetIdentity) -> RenderAssetPackage {
     value.as_object_mut().unwrap().remove("package_id");
     package.package_id = format!(
         "render_asset_sha256_{}",
-        wge_project_ledger::sha256_hex(wge_project_ledger::canonical_json(&value).as_bytes())
+        luxel_project_ledger::sha256_hex(luxel_project_ledger::canonical_json(&value).as_bytes())
     );
     validate_render_asset_package(&package).unwrap();
     package
@@ -320,7 +320,7 @@ fn render_binding_requires_matching_package_identity_and_mesh() {
     value.as_object_mut().unwrap().remove("package_id");
     wrong_source.package_id = format!(
         "render_asset_sha256_{}",
-        wge_project_ledger::sha256_hex(wge_project_ledger::canonical_json(&value).as_bytes())
+        luxel_project_ledger::sha256_hex(luxel_project_ledger::canonical_json(&value).as_bytes())
     );
     assert!(
         validate_scene_against_asset_receipts_and_render_assets(

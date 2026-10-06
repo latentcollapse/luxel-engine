@@ -94,7 +94,7 @@ class ProbeTests(unittest.TestCase):
 class RecordedIncidentTests(unittest.TestCase):
     """The guard has to reproduce the failures that motivated it.
 
-    These are the observations from WGE/docs/platform/tooling-upgrades.md item 6. If the
+    These are the observations from Luxel/docs/platform/tooling-upgrades.md item 6. If the
     guard cannot rediscover them, it is not measuring what it claims to.
     """
 

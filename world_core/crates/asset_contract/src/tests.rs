@@ -24,7 +24,7 @@ fn triangle_glb() -> Vec<u8> {
     let json_length = binary.len();
     binary.resize((binary.len() + 3) & !3, 0);
     let document = json!({
-        "asset": {"version": "2.0", "generator": "wge-test"},
+        "asset": {"version": "2.0", "generator": "luxel-test"},
         "scene": 0,
         "scenes": [{"nodes": [0]}],
         "nodes": [{"name": "triangle", "mesh": 0}],

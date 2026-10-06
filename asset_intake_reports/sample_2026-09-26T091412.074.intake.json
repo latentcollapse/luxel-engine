@@ -548,5 +548,5 @@
     "scene_count": 1,
     "skin_count": 0
   },
-  "schema_version": "wge.asset-intake/v1"
+  "schema_version": "luxel.asset-intake/v1"
 }

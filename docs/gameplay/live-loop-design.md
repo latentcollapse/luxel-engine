@@ -4,7 +4,7 @@ Status: standalone contract slice; not integrated into the renderer or superviso
 
 ## Boundary
 
-`wge-live-evidence-contract` supplies a small Rust state machine for WGE's
+`luxel-live-evidence-contract` supplies a small Rust state machine for Luxel's
 two-tier evidence design. It schedules Tier A sample requests, carries their
 packet-bound identities, records bounded Tier B frame telemetry, and describes
 session transitions. It does not certify a project, validate a receipt, capture

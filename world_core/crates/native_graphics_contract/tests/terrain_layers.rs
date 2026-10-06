@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::{
     Campaign2View, GraphicsScenePacket, LayerCoverage, ParityContent, ParityPolicyCandidate,
     TerrainSurfacePolicy, apply_terrain_layers, build_terrain_layer_set, load_terrain_layer_set,
     lower_campaign2_packet_with, seal_scene_packet, validate_scene_packet, validate_terrain_layers,
@@ -110,9 +110,9 @@ fn macro_variation_without_layers_is_refused() {
 #[test]
 fn every_validation_rule_fires() {
     let good = synthetic_set();
-    let check = |layers: &wge_native_graphics_contract::TerrainLayers,
-                 materials: &[wge_native_graphics_contract::MaterialIntent],
-                 textures: &[wge_native_graphics_contract::TextureReference]| {
+    let check = |layers: &luxel_native_graphics_contract::TerrainLayers,
+                 materials: &[luxel_native_graphics_contract::MaterialIntent],
+                 textures: &[luxel_native_graphics_contract::TextureReference]| {
         validate_terrain_layers(layers, materials, textures)
     };
     check(&good.layers, &good.materials, &good.textures).expect("good set validates");
@@ -156,9 +156,9 @@ fn applying_a_set_twice_is_refused() {
 
 #[test]
 fn the_manifest_loader_verifies_every_pin() {
-    let dir = std::env::temp_dir().join(format!("wge-terrain-layers-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("luxel-terrain-layers-{}", std::process::id()));
     let cache = dir.join("cache");
-    let write_png = |layer: &str, name: &str, image: &wge_native_graphics_contract::SquareRgba8| -> serde_json::Value {
+    let write_png = |layer: &str, name: &str, image: &luxel_native_graphics_contract::SquareRgba8| -> serde_json::Value {
         let folder = cache.join(layer);
         std::fs::create_dir_all(&folder).unwrap();
         let path = folder.join(name);
@@ -188,7 +188,7 @@ fn the_manifest_loader_verifies_every_pin() {
         }));
     }
     let manifest = |license: &str| serde_json::json!({
-        "schema_version": "wge.terrain-layer-set-manifest/v1", "set_id": "loader-test", "provider": "test",
+        "schema_version": "luxel.terrain-layer-set-manifest/v1", "set_id": "loader-test", "provider": "test",
         "license": license, "cache_dir": "cache",
         "texture_sizes_px": { "albedo": 64, "normal_gl": 32, "roughness": 16, "ao": 16 },
         "layers": layers, "macro": { "size_px": 32, "seed": 7 }

@@ -1,5 +1,5 @@
 {
-  "schema_version": "wge.calibration-material-manifest/v1",
+  "schema_version": "luxel.calibration-material-manifest/v1",
   "set_id": "calibration1",
   "provider": "polyhaven.com",
   "license": "CC0-1.0",

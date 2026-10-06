@@ -1,6 +1,0 @@
-from wge.world import lane, place
-from wge.geometry import path, rect
-
-central_lane = lane(id="central", footprint=rect(x0=0, y0=40, x1=100, y1=60))
-safe_keep = place(id="keep", footprint=rect(x0=40, y0=0, x1=70, y1=20))
-long_route = path(id="route", x0=0, y0=0, x1=100, y1=0, budget=50)

@@ -203,7 +203,7 @@ class SeedingTests(unittest.TestCase):
         self.assertEqual(["citadel_of_dawn"], plan["playable"]["seeds"])
 
     def test_a_world_with_no_declared_start_still_compiles(self) -> None:
-        # WGE is a general-purpose world compiler. This used to raise, so a
+        # Luxel is a general-purpose world compiler. This used to raise, so a
         # dungeon, a race track or an open-world zone -- none of which have
         # faction keeps -- could not compile at all. A world with no declared
         # start is still a world; it falls back to its largest standable region

@@ -24,7 +24,7 @@ sys.path.insert(0, str(PIPELINE))
 
 from zone_compiler import ZONE_SPEC_VERSION, ZoneCompileError
 from zone_rasterizer import MAX_SPINE_COUNT, rasterize_zone_spec, write_raster
-from wge_critic import detect_no_ops, load_terrain_manifests
+from luxel_critic import detect_no_ops, load_terrain_manifests
 from worldbuilder_dsl import _PATTERN_SCALARS
 
 RESOLUTION = 129

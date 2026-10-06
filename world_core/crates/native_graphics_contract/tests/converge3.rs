@@ -6,8 +6,8 @@
 
 use std::path::PathBuf;
 
-use wge_native_graphics_contract::still_water::{POOL_RADII_XZ_M, TerrainSurface};
-use wge_native_graphics_contract::{
+use luxel_native_graphics_contract::still_water::{POOL_RADII_XZ_M, TerrainSurface};
+use luxel_native_graphics_contract::{
     BufferPayload, Campaign2Inputs, Campaign2View, GraphicsScenePacket, KitSet, ParityContent, ParityPolicyCandidate,
     StandingWater, TerrainWetZone, canonical_json, load_kit_set, lower_campaign2_packet_inputs, seal_scene_packet,
     validate_scene_packet,
@@ -94,7 +94,7 @@ fn w1_still_water_replaces_the_disc_and_its_rings() {
                 .any(|m| m.material_id == "campaign2-wet" || m.material_id == "campaign2-hero-glow")
         );
         assert!(
-            !body.textures.iter().any(|t| t.texture_id == "wge-campaign2-wet-albedo"),
+            !body.textures.iter().any(|t| t.texture_id == "luxel-campaign2-wet-albedo"),
             "orphan ripple albedo"
         );
         assert!(
@@ -115,7 +115,7 @@ fn w1_still_water_replaces_the_disc_and_its_rings() {
         let converge2 = lower(ParityPolicyCandidate::Converge2, &kit_set("kit1"), view);
         // L-2a: converge3's policy is converge2's plus foliage coverage.
         let mut expected = converge2.body.render_policy.clone().expect("converge2 policy");
-        expected.foliage_coverage = Some(wge_native_graphics_contract::FoliageCoveragePolicy { samples: 4 });
+        expected.foliage_coverage = Some(luxel_native_graphics_contract::FoliageCoveragePolicy { samples: 4 });
         assert_eq!(body.render_policy, Some(expected));
         assert_eq!(body.camera, converge2.body.camera);
         assert_eq!(heights(&packet), heights(&converge2), "W-1 does not move the ground");

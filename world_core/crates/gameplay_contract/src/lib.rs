@@ -37,10 +37,10 @@ pub use runtime::{
     RuntimeEntity, RuntimeState, Transition, run_replay, verify_replay,
 };
 
-pub const GAMEPLAY_SNAPSHOT_SCHEMA: &str = "wge.gameplay-snapshot/v1";
-pub const GAMEPLAY_TRACE_SCHEMA: &str = "wge.gameplay-trace/v1";
-pub const GAMEPLAY_RECEIPT_SCHEMA: &str = "wge.gameplay-receipt/v1";
-pub const GAMEPLAY_SESSION_SNAPSHOT_SCHEMA: &str = "wge.gameplay-session-snapshot/v1";
+pub const GAMEPLAY_SNAPSHOT_SCHEMA: &str = "luxel.gameplay-snapshot/v1";
+pub const GAMEPLAY_TRACE_SCHEMA: &str = "luxel.gameplay-trace/v1";
+pub const GAMEPLAY_RECEIPT_SCHEMA: &str = "luxel.gameplay-receipt/v1";
+pub const GAMEPLAY_SESSION_SNAPSHOT_SCHEMA: &str = "luxel.gameplay-session-snapshot/v1";
 /// Every accepted gameplay input advances exactly one deterministic simulation tick.
 pub const GAMEPLAY_FIXED_TICK_RATE_HZ: u32 = 30;
 pub const MAX_REPLAY_EVENTS: usize = 100_000;

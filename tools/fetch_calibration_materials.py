@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fetch and size the scanned CC0 material sets of the CALIBRATION-1 scene.
 
-WGE is source only (see .gitignore), so the material sets are committed as a
+Luxel is source only (see .gitignore), so the material sets are committed as a
 MANIFEST (source URL, byte size, sha256, provider md5, licence, physical size)
 and the files land in the ignored artifacts tree, exactly like the N-4 terrain
 layers (tools/fetch_terrain_layers.py). No file enters the scene without a
@@ -58,7 +58,7 @@ def md5_of(path):
 
 
 def api_json(path):
-    request = urllib.request.Request(f"{API}/{path}", headers={"User-Agent": "wge-calibration-fetch"})
+    request = urllib.request.Request(f"{API}/{path}", headers={"User-Agent": "luxel-calibration-fetch"})
     with urllib.request.urlopen(request) as response:
         return json.load(response)
 
@@ -133,7 +133,7 @@ def main():
             os.makedirs(os.path.dirname(path), exist_ok=True)
             if not os.path.exists(path) or (not args.pin and sha256_of(path) != entry.get("sha256")):
                 print("fetch", entry["url"])
-                request = urllib.request.Request(entry["url"], headers={"User-Agent": "wge-calibration-fetch"})
+                request = urllib.request.Request(entry["url"], headers={"User-Agent": "luxel-calibration-fetch"})
                 with urllib.request.urlopen(request) as response, open(path, "wb") as out:
                     out.write(response.read())
             size, digest, md5 = os.path.getsize(path), sha256_of(path), md5_of(path)

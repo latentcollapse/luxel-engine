@@ -1,7 +1,7 @@
-# WGE Friction Ledger
+# Luxel Friction Ledger
 
 Status: **active evidence ledger**, initialized 2026-09-30  
-Purpose: record repeated model/operator friction and the evidence needed to turn it into better WGE machinery
+Purpose: record repeated model/operator friction and the evidence needed to turn it into better Luxel machinery
 
 This is not a task backlog. Tether owns task status, dependencies, assignment, and integration state. This ledger records observations, hypotheses, before/after evidence, and whether a friction fix earned promotion.
 
@@ -63,7 +63,7 @@ These are starting hypotheses from the current roadmap and must be reproduced be
 | FR-0003 | Scene, asset, world, gameplay, and graphics identities require manual correlation | real imported-asset slice trace | scene/object contract |
 | FR-0004 | Live runtime choreography is not yet one semantic operation | native session trace | runtime surface |
 | FR-0005 | Visual evidence does not yet independently judge all grounding/lighting/atmosphere axes | Campaign 4 evidence comparison | visual authority |
-| FR-0006 | Provider jobs may require manual coordination between WGE intent and Blender output | bounded provider job trace | provider surface |
+| FR-0006 | Provider jobs may require manual coordination between Luxel intent and Blender output | bounded provider job trace | provider surface |
 | FR-0007 | Repeated receipt/replay/rebuild steps are expensive or context-heavy | C8 construction trace | orchestration/runtime |
 
 ## Reproduced observations
@@ -90,10 +90,10 @@ before_metrics:
 after_metrics:
   default_gate_seconds: 96.75
   default_gate_result: pass
-  gpu_tests: "still available through python3 pipeline/wge_native_gate.py --gpu"
+  gpu_tests: "still available through python3 pipeline/luxel_native_gate.py --gpu"
 tests:
-  - python3 pipeline/wge_native_gate.py
-  - python3 pipeline/wge_native_gate.py --fences-only
+  - python3 pipeline/luxel_native_gate.py
+  - python3 pipeline/luxel_native_gate.py --fences-only
 decision: keep
 ```
 
@@ -114,7 +114,7 @@ symptom: "`Lava.checkopen(win) || break` exits the loop on every iteration becau
 repeated_behavior: an agent writing the natural loop guard silently presents zero frames; the error mode is an empty result, not an exception
 responsible_layer: provider
 workaround: loop on `Base.isopen(win)` (handle alive and no close request); adapter now encodes this in `render_window_frames!` with a comment at the call site
-proposed_improvement: Lava could name the predicate (`isopen`) and the assertion differently so autocomplete and reading the signature disambiguate them; WGE-side, the presented-session handoff documents the distinction for the pinned Lava revision
+proposed_improvement: Lava could name the predicate (`isopen`) and the assertion differently so autocomplete and reading the signature disambiguate them; Luxel-side, the presented-session handoff documents the distinction for the pinned Lava revision
 expected_leverage: diagnosis
 authority_impact: none
 before_metrics:
@@ -187,10 +187,10 @@ first_seen: 2026-10-02
 last_seen: 2026-10-02
 campaign: cross-cutting
 operation: running the native graphics certification ladder
-symptom: "`cargo test -p wge-native-graphics-contract <filter> <second-filter>` is rejected (one positional filter); the serial `native_graphics` suite exceeds 10 minutes, so an unfiltered run times out and leaves no per-test evidence"
+symptom: "`cargo test -p luxel-native-graphics-contract <filter> <second-filter>` is rejected (one positional filter); the serial `native_graphics` suite exceeds 10 minutes, so an unfiltered run times out and leaves no per-test evidence"
 repeated_behavior: every graphics verification session rediscovers the one-filter limit and the per-test serial invocation pattern
 responsible_layer: orchestration
-workaround: one positional filter plus repeated `--skip`, or `--exact` per test with `--test-threads=1`; package is `wge-native-graphics-contract` (crate path `native_graphics_contract`)
+workaround: one positional filter plus repeated `--skip`, or `--exact` per test with `--test-threads=1`; package is `luxel-native-graphics-contract` (crate path `native_graphics_contract`)
 proposed_improvement: encode the full ladder (session, presented_session, native_graphics per-test, lib, fmt, clippy) as one gate script so fresh agents run one command
 expected_leverage: latency | context
 authority_impact: none
@@ -199,7 +199,7 @@ before_metrics:
 after_metrics:
   per_test: "lower 6.5s–275s each, all 7 green; lib 19/19; session 5/5; presented_session 2/2"
 tests:
-  - cargo test -p wge-native-graphics-contract --test native_graphics -- <test> --exact
+  - cargo test -p luxel-native-graphics-contract --test native_graphics -- <test> --exact
 decision: keep
 ```
 
@@ -224,7 +224,7 @@ before_metrics:
 after_metrics:
   session_tests: "5/5 stable across repeated runs"
 tests:
-  - cargo test -p wge-native-graphics-contract --test session
+  - cargo test -p luxel-native-graphics-contract --test session
 decision: keep
 ```
 

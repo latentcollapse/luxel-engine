@@ -1,6 +1,6 @@
-# Final integrity review — WGE model-native language specification
+# Final integrity review — Luxel model-native language specification
 
-**Reviewed document:** `WGE_LANGUAGE_SPEC.md`, draft 0.5, 2026-08-03  
+**Reviewed document:** `LUXEL_LANGUAGE_SPEC.md`, draft 0.5, 2026-08-03  
 **Review date:** 2026-08-03  
 **Reviewer:** Codex (GPT-5.6 Sol, xhigh)  
 **Ticket:** `REVIEW-3`  
@@ -278,11 +278,11 @@ digest schema, or stable cache format.
 
 ## Execution-backend boundary, including Taichi
 
-Nothing in these findings requires the WGE source language to become an
+Nothing in these findings requires the Luxel source language to become an
 executable numerical language. The stable boundary should remain:
 
 ```text
-model-authored WGE source
+model-authored Luxel source
     -> parsed and validated semantic IR
     -> bounded construction/spatial plan
     -> selected numerical backend (Taichi/Odin/Julia/other)
@@ -295,7 +295,7 @@ model-facing semantic language because executing model-authored Taichi/Python
 would violate the parsed-never-executed invariant and would expose backend
 execution details as product meaning. Backend choice and capability/determinism
 grade belong in the execution manifest; semantic asset and world intent remain
-in WGE IR.
+in Luxel IR.
 
 ## Verification performed
 
@@ -303,7 +303,7 @@ in WGE IR.
 - Rechecked every K4 and C5 finding against the current normative sections.
 - Inspected `pipeline/worldbuilder_dsl.py` and migration-relevant tests.
 - Ran `python3 -m unittest tests.test_worldbuilder_dsl`: **27 tests passed**.
-- Did not edit `WGE_LANGUAGE_SPEC.md`, the prototype compiler, registries, or
+- Did not edit `LUXEL_LANGUAGE_SPEC.md`, the prototype compiler, registries, or
   tests.
 - Did not execute the proposed new conformance fixtures; they do not exist yet.
 

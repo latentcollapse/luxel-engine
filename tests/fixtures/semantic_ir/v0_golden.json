@@ -2,8 +2,8 @@
   "vectors": [
     {
       "name": "lane_place",
-      "source_fixture": "semantic_kernel/repaired.wge",
-      "canonical_sha256": "sha256:f08d7d783789e299033fb3b2db78cf3f7ba1575b4e3bd43658ce485f6d66f224",
+      "source_fixture": "semantic_kernel/repaired.luxel",
+      "canonical_sha256": "sha256:37d0a85bb7d0d5f73d7a27aa755c054c527a8ff5de002f42776a1f73a2872cbb",
       "expected": {
         "declarations": [
           {
@@ -22,14 +22,14 @@
           }
         ],
         "module_id": "spike.lane.world",
-        "registry_digest": "sha256:efb28a4b8cdb17c375fe51d82ed7e3e9377c4702a69ff470b6f0869c5c1e6ab8",
-        "schema": "wge.semantic-ir/v0"
+        "registry_digest": "sha256:908b36603302d36aefd0ddbad6b5d046e744b0f873ca88a59e858585718af98a",
+        "schema": "luxel.semantic-ir/v0"
       }
     },
     {
       "name": "lane_place_path",
-      "source_fixture": "semantic_kernel/path_repaired.wge",
-      "canonical_sha256": "sha256:582a72749bda5aacb4df7570f5ce4e5e682f10e586ad8bb2c09ce0322d1384fc",
+      "source_fixture": "semantic_kernel/path_repaired.luxel",
+      "canonical_sha256": "sha256:f5fa5b98591ed29c520361db55beeecbd8c9bc946a4287edb202bf48120829a8",
       "expected": {
         "declarations": [
           {
@@ -59,8 +59,8 @@
           }
         ],
         "module_id": "spike.lane.world",
-        "registry_digest": "sha256:efb28a4b8cdb17c375fe51d82ed7e3e9377c4702a69ff470b6f0869c5c1e6ab8",
-        "schema": "wge.semantic-ir/v0"
+        "registry_digest": "sha256:908b36603302d36aefd0ddbad6b5d046e744b0f873ca88a59e858585718af98a",
+        "schema": "luxel.semantic-ir/v0"
       }
     }
   ]

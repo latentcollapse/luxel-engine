@@ -17,7 +17,7 @@
 //!
 //! HOW CONTENT ENTERS
 //! ------------------
-//! WGE is source only (see `.gitignore`). A layer set is a committed MANIFEST
+//! Luxel is source only (see `.gitignore`). A layer set is a committed MANIFEST
 //! (URL, byte size, sha256, licence, physical size) whose files are fetched
 //! into the ignored artifacts tree. [`load_terrain_layer_set`] re-verifies every
 //! digest before a byte is decoded. The resulting [`TerrainLayerSet`] is an
@@ -542,7 +542,7 @@ struct ManifestMacro {
     seed: u32,
 }
 
-pub const TERRAIN_LAYER_MANIFEST_SCHEMA: &str = "wge.terrain-layer-set-manifest/v1";
+pub const TERRAIN_LAYER_MANIFEST_SCHEMA: &str = "luxel.terrain-layer-set-manifest/v1";
 
 /// Which channel of a decoded scan feeds a scalar map.
 #[derive(Clone, Copy)]

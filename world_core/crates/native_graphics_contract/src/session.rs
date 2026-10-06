@@ -11,14 +11,14 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use wge_reference_runtime::{WorldArtifact, validate_world_artifact};
+use luxel_reference_runtime::{WorldArtifact, validate_world_artifact};
 
 use crate::{
     GraphicsCamera, GraphicsContractError, GraphicsScenePacket, GraphicsWorkerError,
     GraphicsWorkerSupervisor, PromotedFrame, seal_scene_packet,
 };
 
-pub const PRESENTED_SESSION_REQUEST_SCHEMA: &str = "wge.presented-session-request/v1";
+pub const PRESENTED_SESSION_REQUEST_SCHEMA: &str = "luxel.presented-session-request/v1";
 
 /// Typed request to open a persistent presented session. The window extent is
 /// the session's fixed camera extent: every frame, presented or captured, uses
@@ -103,7 +103,7 @@ impl WindowFrameReport {
     }
 }
 
-/// A persistent presented WGE session. Rust owns the packet, the camera, the
+/// A persistent presented Luxel session. Rust owns the packet, the camera, the
 /// session tick, and every evidence claim; the worker only ever receives the
 /// validated packet plus a typed camera override and reports presented frames.
 #[derive(Debug)]

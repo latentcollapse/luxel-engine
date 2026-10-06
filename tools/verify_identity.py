@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Re-render every frozen reference and prove each capture is byte-identical.
 
-WGE's regression discipline is "absent axis = same bytes": a change that adds
+Luxel's regression discipline is "absent axis = same bytes": a change that adds
 an axis must leave every existing frame exactly as it was. This renders each
 reference set with the current build and compares capture digests, view by
 view, against the reference summaries. Any mismatch, missing view or failed
@@ -27,7 +27,7 @@ import sys
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 JULIA = "/home/mattc/.juliaup/bin/julia"
 LAYOUT = "world_core/crates/reference_runtime/examples/riverwatch.layout.json"
-WORKER = "graphics_lab/bin/wge_graphics_worker.jl"
+WORKER = "graphics_lab/bin/luxel_graphics_worker.jl"
 
 PARITY = [
     # (reference dir, policy)
@@ -46,7 +46,7 @@ CALIBRATION = [
 ]
 # Variables that select arms or content; authorization reads them from the
 # environment, so they are cleared before every render and set explicitly.
-SELECTORS = ("WGE_PARITY_RENDER_POLICY", "WGE_TERRAIN_LAYER_SET", "WGE_PARITY_CONTENT", "WGE_KIT_SET", "WGE_BACKDROP_SET")
+SELECTORS = ("LUXEL_PARITY_RENDER_POLICY", "LUXEL_TERRAIN_LAYER_SET", "LUXEL_PARITY_CONTENT", "LUXEL_KIT_SET", "LUXEL_BACKDROP_SET")
 
 
 def clean_env(**extra):
@@ -92,7 +92,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("out")
     parser.add_argument("--only", choices=("parity", "calibration"))
-    parser.add_argument("--bin", default="world_core/target/release/wge-native-graphics-contract")
+    parser.add_argument("--bin", default="world_core/target/release/luxel-native-graphics-contract")
     args = parser.parse_args()
     os.makedirs(os.path.join(REPO, args.out), exist_ok=True)
     failures, frames = 0, 0
@@ -100,13 +100,13 @@ def main():
         for reference, policy in PARITY:
             name = os.path.basename(reference)
             out = os.path.join(args.out, name)
-            extra = {"WGE_PARITY_RENDER_POLICY": policy} if policy else {}
+            extra = {"LUXEL_PARITY_RENDER_POLICY": policy} if policy else {}
             if policy in ("converge0", "converge1", "converge2", "converge3"):
-                extra["WGE_TERRAIN_LAYER_SET"] = "tools/terrain_layers/converge0.json"
+                extra["LUXEL_TERRAIN_LAYER_SET"] = "tools/terrain_layers/converge0.json"
             if policy == "converge2":
-                extra["WGE_KIT_SET"] = "tools/kit/kit1.lock.json"
+                extra["LUXEL_KIT_SET"] = "tools/kit/kit1.lock.json"
             if policy == "converge3":
-                extra["WGE_KIT_SET"] = "tools/kit/kit2.lock.json"
+                extra["LUXEL_KIT_SET"] = "tools/kit/kit2.lock.json"
             command = [args.bin, "render-campaign2-layout", LAYOUT, JULIA, "terrain_lab", "graphics_lab", WORKER, out]
             code = run(command, clean_env(**extra), os.path.join(REPO, out + ".log"))
             reference_digests = parity_digests(os.path.join(REPO, reference))

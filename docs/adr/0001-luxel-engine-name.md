@@ -5,31 +5,40 @@
 ## Decision
 
 The engine's name is **Luxel Engine** ("Luxel" in running text). "WGE" and
-"WorldGen Engine" were internal development codenames and are retired as
-names. In any doc written before this date, read "WGE" as Luxel.
+"WorldGen Engine" were internal development codenames and are retired.
+The internal identifier prefix is `luxel`. The GitHub repository is
+`latentcollapse/luxel-engine` and the local checkout is
+`Code Projects/luxel-engine/`.
 
-## What changes now
+## The migration (one change, 2026-10-06)
 
-The name people read: `README.md`, `docs/README.md`, `docs/roadmap.md`, and
-every doc written from here on. Archived docs, closed contracts and quoted
-reviews keep their original wording; they are records.
+Everything that ships in the repository was renamed together:
 
-## What deliberately keeps the `wge` prefix, for now
+| Kind | Before | After |
+|---|---|---|
+| Prose and names | WGE | Luxel |
+| Schema ids (packets, receipts, locks, specs) | `wge.*` | `luxel.*` |
+| Crates, binaries | `wge-*`, `wge_control_plane` | `luxel-*`, `luxel_control_plane` |
+| Python modules and tests | `pipeline/wge_*.py`, `tests/test_wge_*.py` | `pipeline/luxel_*.py`, `tests/test_luxel_*.py` |
+| Julia package | `WGEGraphics` | `LuxelGraphics` |
+| Env vars | `WGE_*` | `LUXEL_*` |
+| DSL namespace and source extension | `wge.world`, `.wge` | `luxel.world`, `.luxel` |
+| Unity adapter types | `WgeMvp*` | `LuxelMvp*` |
+| MCP server | `wgeGaea` | `luxelGaea` |
 
-These are identifiers, not names, and renaming them is not free:
+Archived docs were renamed along with everything else: the repository has one
+name. Two kinds of text were deliberately left alone: the names of real files
+outside the repository (`WGE-checkpoint-*.zip`), and `codeweald.*` identifiers,
+which belong to the game, not the engine.
 
-| Identifier | Why it stays |
-|---|---|
-| Schema ids inside packets and receipts (`wge.kit-lock/v1`, `wge.native-graphics-campaign2/v1`, ...) | They are hashed into packet and receipt digests. Renaming changes every digest, so all 131 identity references (`tools/verify_identity.py`) would have to be re-baselined in the same change. |
-| `pipeline/worldbuilder_dsl.py`, `tests/test_wge_language_contract.py`, `docs/DSL docs/` | SHA-pinned by the language contract freeze (`tests/dsl_conformance/freeze_v06.json`). Renaming means a re-freeze. |
-| Crate and module names (`wge-native-graphics-contract`, `wge_control_plane`, `pipeline/wge_*.py`) | Mechanical, but they touch imports, Cargo manifests and scripts across the tree. |
-| Env vars (`WGE_PARITY_RENDER_POLICY`, `WGE_KIT_SET`, `WGE_BACKDROP_SET`, ...) | Read by scripts, tests and saved run logs. |
-| The repo directory `Code Projects/WGE/` | Absolute paths in `.mcp.json`, `tools/parity_ab_policy.sh`, `tools/verify_identity.py`, and the Claude Code project memory path. |
+## What it cost, and how it was verified
 
-## If the identifiers are renamed later
-
-Do it as one deliberate migration, not piecemeal: rename schema ids, crates,
-modules, env vars and the directory together; re-baseline the identity
-references in the same commit; re-freeze the language contract with its
-verifier; and keep a one-release alias for the env vars. Until then, `wge` in
-an identifier is the engine's internal prefix and does not need explaining.
+- **The language contract was re-frozen.** `tests/dsl_conformance/freeze_v06.json`
+  pins its evidence files by SHA-256; their names and contents changed (the
+  namespace and extension are part of the language), so the digests were
+  recomputed and the re-freeze recorded in the file. No semantic change.
+- **Hashed packets and receipts changed digest** wherever a schema id is
+  inside them. Captures did not: the identity check compares rendered pixels,
+  and the 131 reference frames re-render byte-identical under the new names.
+- **Locally built assets** that embed generator strings were rebuilt and
+  their locks re-pinned.

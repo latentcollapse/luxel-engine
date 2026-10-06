@@ -1,27 +1,27 @@
-# WGE Capability Registry Design
+# Luxel Capability Registry Design
 
 Status: **seed implemented; execution/planning slices remain**, 2026-09-30  
 Scope: model-facing discovery, selection, execution, validation, and promotion of reusable game-construction capabilities
 
-This document turns recurring model procedures into a registry concept. It does not authorize a new semantic authority plane and does not make Julia, Lava, Blender, an external provider, or a renderer backend canonical WGE state.
+This document turns recurring model procedures into a registry concept. It does not authorize a new semantic authority plane and does not make Julia, Lava, Blender, an external provider, or a renderer backend canonical Luxel state.
 
 Related sources:
 
-- [WGE Generality Bridge](../content-sdk/generality-bridge.md)
+- [Luxel Generality Bridge](../content-sdk/generality-bridge.md)
 - [Autonomous Game-Construction Forensics](../archive/2026-09_roadmaps-and-audits/autonomous-game-construction-forensics.md)
-- [WGE Native Graphics Architecture](native-graphics-architecture.md)
-- [WGE Gameplay Kit Architecture](../gameplay/gameplay-kit-architecture.md)
+- [Luxel Native Graphics Architecture](native-graphics-architecture.md)
+- [Luxel Gameplay Kit Architecture](../gameplay/gameplay-kit-architecture.md)
 - [Authority Reclamation](../archive/2026-09_roadmaps-and-audits/authority-reclamation-001.md)
 
 ## Current implementation slice
 
 The first read-only registry is implemented in
-`world_core/crates/wge_control_plane/src/capability_registry.rs` and is
+`world_core/crates/luxel_control_plane/src/capability_registry.rs` and is
 exposed through the Rust control-plane commands:
 
 ```bash
-cargo run --manifest-path world_core/Cargo.toml --offline -p wge-control-plane -- capabilities
-cargo run --manifest-path world_core/Cargo.toml --offline -p wge-control-plane -- capability-explain graphics.scene.packet/v1
+cargo run --manifest-path world_core/Cargo.toml --offline -p luxel-control-plane -- capabilities
+cargo run --manifest-path world_core/Cargo.toml --offline -p luxel-control-plane -- capability-explain graphics.scene.packet/v1
 ```
 
 The transport surface exposes the same discovery as `capability_list` and
@@ -53,7 +53,7 @@ The registry is therefore not a plugin marketplace and not a bag of executable p
 | --- | --- | --- |
 | Rust semantic plane | capability identity, versions, inputs, outputs, plans, constraints, canonical state, validators, receipts, promotion | backend handles, GPU objects, provider-local mutable state |
 | Julia / Lava | numerical lowering, GPU execution, buffer/resource lifetime, renderer implementation, measurable runtime telemetry | semantic identity, project truth, promotion decisions |
-| External providers | bounded asset/rig/material/tool transformations | WGE identity, gameplay semantics, certification |
+| External providers | bounded asset/rig/material/tool transformations | Luxel identity, gameplay semantics, certification |
 | Python / transport glue | orchestration, process supervision, transport, provider invocation | semantic behavior, evidence authority, canonical state |
 | Model | intent interpretation, plan proposal, project-specific code/content, repair proposal | direct evidence promotion or unvalidated canonical mutation |
 
@@ -84,8 +84,8 @@ version: 1
 class: graphics
 status: experimental | candidate | certified | retired
 owner: rust-authority
-intent_schema: wge.material-intent/v1
-output_schema: wge.material-plan/v1
+intent_schema: luxel.material-intent/v1
+output_schema: luxel.material-plan/v1
 preconditions:
   - texture_identity_available
   - linear_color_space
@@ -96,7 +96,7 @@ dependencies:
 executor:
   kind: julia_lava_packet
   entrypoint: typed-operation-name
-  packet_schema: wge.graphics-scene-packet/v6
+  packet_schema: luxel.graphics-scene-packet/v6
 determinism:
   mode: deterministic
   seed_fields: [project_seed, asset_identity]
@@ -258,7 +258,7 @@ An entry is not `certified` until it has passed at least two materially differen
 
 ## Initial registry inventory
 
-The first inventory should point at machinery WGE already has rather than inventing parallel systems:
+The first inventory should point at machinery Luxel already has rather than inventing parallel systems:
 
 - certified world/layout lowering;
 - terrain/spatial field generation;

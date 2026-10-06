@@ -1,4 +1,4 @@
-# WGE Graphical Parity Audit
+# Luxel Graphical Parity Audit
 
 Status: **audit complete; gap register open; no renderer change made by this audit**, 2026-10-02
 Method: source inventory of the shipped render path + direct measurement of the promoted Campaign 2 captures + diff against PS4/Xbox One-era (2013–2015) visual expectations.
@@ -14,7 +14,7 @@ Two structural gaps sit above the feature list. Fixing features without fixing t
 
 ### 0.1 The style compiler has a vocabulary and no executor. **[M]**
 
-`world_core/crates/wge_control_plane/src/style_profile.rs` is real, typed, and good: nine policy groups, ~45 basis-point signals with `source_kind` (observed / inferred / assumed / requested / repaired), provenance records, region references, conflict lists, content digests, and an authority-validated `StylePlan::lower` over the registered capability catalog. This is the best-designed piece of the graphics stack and it should not be rewritten.
+`world_core/crates/luxel_control_plane/src/style_profile.rs` is real, typed, and good: nine policy groups, ~45 basis-point signals with `source_kind` (observed / inferred / assumed / requested / repaired), provenance records, region references, conflict lists, content digests, and an authority-validated `StylePlan::lower` over the registered capability catalog. This is the best-designed piece of the graphics stack and it should not be rewritten.
 
 But trace it forward:
 
@@ -61,7 +61,7 @@ So: the three axes that a PS4-era image actually wins on are the three the engin
 
 ## 1. What the shipped renderer actually is
 
-`graphics_lab/src/LavaAdapter.jl`, 4,045 lines, `ADAPTER_REVISION = "wge.lava-adapter/v7"`, bound to Lava `11c7e31b…` and Vulkan API 1.4.351 on an RTX 5060. **[M]**
+`graphics_lab/src/LavaAdapter.jl`, 4,045 lines, `ADAPTER_REVISION = "luxel.lava-adapter/v7"`, bound to Lava `11c7e31b…` and Vulkan API 1.4.351 on an RTX 5060. **[M]**
 
 ### 1.1 The whole frame graph is ten pipelines. **[M]**
 
@@ -142,12 +142,12 @@ The imported-tangent path is real (C2.5/C2.6/C2.7/C2.8 all closed) and **complet
 
 ```
 riverwatch-terrain-albedo-v4    128x128   mips=1   srgb
-wge-campaign2-terrain-albedo    160x160   mips=1   srgb
-wge-campaign2-wet-albedo         32x32    mips=1   srgb
-wge-campaign2-emissive           32x32    mips=1   srgb
+luxel-campaign2-terrain-albedo    160x160   mips=1   srgb
+luxel-campaign2-wet-albedo         32x32    mips=1   srgb
+luxel-campaign2-emissive           32x32    mips=1   srgb
 riverwatch-beacon-emissive       16x16    mips=1   srgb
 riverwatch-{stone,foliage,beacon}-albedo, normal, roughness, occlusion, emissive
-wge-campaign2-{foliage,bark,hero-stone,hero-metal,hero-glow}-albedo
+luxel-campaign2-{foliage,bark,hero-stone,hero-metal,hero-glow}-albedo
                                  8x8      mips=1   ...
 ```
 
@@ -164,7 +164,7 @@ struct MeshPacket
     mesh_id, positions_m, normals, uv0, indices, material_id, tangents
 end
 ```
-`WGEGraphics.jl:88`. No joints, no weights, no bone indices, no blend shapes, no animation channels, no morph targets. This is not a renderer gap. It is a schema gap, and it blocks characters *and* TetCageRT in the product path simultaneously. See §3, GP-09.
+`LuxelGraphics.jl:88`. No joints, no weights, no bone indices, no blend shapes, no animation channels, no morph targets. This is not a renderer gap. It is a schema gap, and it blocks characters *and* TetCageRT in the product path simultaneously. See §3, GP-09.
 
 ---
 
@@ -246,7 +246,7 @@ Severity: **S1** = blocks the C4 exit gate or the demo's credibility · **S2** =
 | GP-06 | post | no dither — measurable sky banding (959/959 identical pixels) | **S2** | §2.3 | 1 |
 | GP-07 | lighting | exactly one directional light; point lights throw | **S2** | `:2420`, `:2426` | 2 |
 | GP-08 | materials | `alpha_mode != :opaque` is a hard validator refusal | **S2** | `:2441` | 3 |
-| GP-09 | animation | `MeshPacket` has no joints/weights/clips; zero skinning; also blocks TetCage in-product | **S1** | `WGEGraphics.jl:88` | 3 |
+| GP-09 | animation | `MeshPacket` has no joints/weights/clips; zero skinning; also blocks TetCage in-product | **S1** | `LuxelGraphics.jl:88` | 3 |
 | GP-10 | terrain | region/slope ignored; 1.67 texels/m; no splat, detail or macro layer | **S2** | `:737`, `:818` | 1 |
 | GP-11 | post | post chain is a tonemap; no bloom/grade/vignette/sharpen/FXAA/TAA | **S3** | `:1123`, `:202` | 1 |
 | GP-12 | geometry | full triangle-soup expansion; per-triangle tangents; no index reuse | **S3** | `:2906`, 22,824 submitted | 1 |
@@ -268,7 +268,7 @@ Ordered by perceived gain ÷ risk, with dependencies made explicit. Tier 0 first
 
 ### Tier 0 — falsifiability and attribution (do first, it is small)
 
-- **0.1 · Depth into the capture contract.** `render_depth_probe` (`:1538`) already proves the depth attachment works; the packet sets `include_depth = false` (`lib.rs:2777`, `:5501`) and Julia *requires* it false (`WGEGraphics.jl:1153`). Flip it behind a flag: capture depth, bind it into the receipt, and `grounding_contact` stops being indeterminate. **[M]** the capability is proven; only the contract refuses it.
+- **0.1 · Depth into the capture contract.** `render_depth_probe` (`:1538`) already proves the depth attachment works; the packet sets `include_depth = false` (`lib.rs:2777`, `:5501`) and Julia *requires* it false (`LuxelGraphics.jl:1153`). Flip it behind a flag: capture depth, bind it into the receipt, and `grounding_contact` stops being indeterminate. **[M]** the capability is proven; only the contract refuses it.
 - **0.2 · A registered reference comparator.** Deterministic, integer thresholds, registered in the same catalog as `terrain_reference_v1`. It does not need to be SSIM; it needs to answer "did this change move the frame toward the brief, and by how much." Register the *target* the same way profiles are registered, so the threshold cannot be re-derived from the measurement it consumes (FR-0016).
 - **0.3 · Attribute the frame cost.** Instrumented vs uninstrumented, with and without the readback fence, with and without named timestamps. Establish which of the two clocks means anything. Then set the 16.6 ms budget against the number that is real.
 - **0.4 · Self-asserting calibrations.** Every new threshold in 0.1–0.2 must prove it can fail on a known-bad control before it is allowed to gate a known-good one.
@@ -325,5 +325,5 @@ The four fronts are not independent, and this audit mostly lands on **ease**.
 
 1. **P1 evidence is contract-level only, and this audit hardens that.** `LavaAdapter.jl` has zero references to `deformation` and zero compute pipelines. TetCageRT is currently a schema with a proven kernel behind a quarantined lab. It contributes nothing to graphical parity until 3.1 and 3.3 land.
 2. **`dispatch_calls = 0` is a literal.** `:1532` and `:3701`. Currently true, silently false the moment compute ships. This is a "telemetry that cannot fail" candidate for the friction ledger — same family as FR-0016, where a derived value disabled the check that consumed it.
-3. **A slice that changes a shared contract type owes the workspace gate, not its own crate's suite.** `wge-certification-authority` was already broken at HEAD once (missing `texture_residency` in two tests) and had to be repaired. Tier 3.1 changes `MeshPacket` and `GraphicsScenePacketBody` on both the Rust and Julia sides — that is the exact shape of change that broke it. Whoever does 3.1 runs the full workspace gate.
+3. **A slice that changes a shared contract type owes the workspace gate, not its own crate's suite.** `luxel-certification-authority` was already broken at HEAD once (missing `texture_residency` in two tests) and had to be repaired. Tier 3.1 changes `MeshPacket` and `GraphicsScenePacketBody` on both the Rust and Julia sides — that is the exact shape of change that broke it. Whoever does 3.1 runs the full workspace gate.
 4. **The visual-quality gate cannot close C4.** C4's exit is human review of commercial plausibility; the authority has no plausibility opinion. Either the comparator in 0.2 becomes real, or C4's exit stays a human judgement forever. That is a decision, not an implementation detail, and it should be made explicitly rather than discovered at C4.

@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use wge_intake_repair_contract as intake;
+use luxel_intake_repair_contract as intake;
 
 use crate::{
     ArtifactNode, AssetBinding, BriefSpec, ClaimEvidence, ClaimKind, DesignConstraint,
@@ -15,7 +15,7 @@ use crate::{
     sha256_prefixed, validate_relative_path, validate_spec,
 };
 
-pub const PROJECT_TEMPLATE_SCHEMA: &str = "wge.project-template/v1";
+pub const PROJECT_TEMPLATE_SCHEMA: &str = "luxel.project-template/v1";
 
 /// The template supplies design and build decisions that source interpretation
 /// cannot choose. Source paths are keyed by the intake's stable source IDs.
@@ -593,7 +593,7 @@ fn nonempty(label: &str, value: &str) -> Result<(), LedgerError> {
 mod tests {
     use std::{collections::BTreeMap, fs, path::PathBuf};
 
-    use wge_intake_repair_contract::{
+    use luxel_intake_repair_contract::{
         AssumptionDraft, ClaimDraft, ConflictDraft, EpistemicKind, EvidenceLinkDraft, IntakeDraft,
         ProviderInterpretation, ProviderProvenance, SemanticIntake, SourceBundleDraft, SourceDraft,
         SourceProvenance as IntakeSourceProvenance, normalize_intake, parse_json,
@@ -792,8 +792,8 @@ mod tests {
                 ("concept".to_owned(), concept_bytes.clone()),
             ]);
             let source_draft = SourceBundleDraft {
-                schema_version: wge_intake_repair_contract::SOURCE_BUNDLE_DRAFT_SCHEMA.into(),
-                request_id: format!("fresh-wge6-{}", brief_text.len()),
+                schema_version: luxel_intake_repair_contract::SOURCE_BUNDLE_DRAFT_SCHEMA.into(),
+                request_id: format!("fresh-luxel6-{}", brief_text.len()),
                 sources: vec![
                     SourceDraft {
                         source_ref: "brief".into(),
@@ -849,7 +849,7 @@ mod tests {
                 .source_id
                 .clone();
             let interpretation = ProviderInterpretation {
-                schema_version: wge_intake_repair_contract::PROVIDER_INTERPRETATION_SCHEMA.into(),
+                schema_version: luxel_intake_repair_contract::PROVIDER_INTERPRETATION_SCHEMA.into(),
                 source_bundle_id: bundle.source_bundle_id.clone(),
                 claims: vec![ClaimDraft {
                     claim_ref: "route".into(),
@@ -876,12 +876,12 @@ mod tests {
             };
             let response_bytes = serde_json::to_vec(&interpretation).unwrap();
             let draft = IntakeDraft {
-                schema_version: wge_intake_repair_contract::INTAKE_DRAFT_SCHEMA.into(),
+                schema_version: luxel_intake_repair_contract::INTAKE_DRAFT_SCHEMA.into(),
                 source_bundle_id: bundle.source_bundle_id.clone(),
                 provider: ProviderProvenance {
                     provider_id: "fresh-test.interpreter".into(),
                     provider_version: "1".into(),
-                    protocol: wge_intake_repair_contract::PROVIDER_INTERPRETATION_SCHEMA.into(),
+                    protocol: luxel_intake_repair_contract::PROVIDER_INTERPRETATION_SCHEMA.into(),
                     request_source_bundle_id: bundle.source_bundle_id.clone(),
                     response_sha256: sha256_prefixed(&response_bytes),
                 },

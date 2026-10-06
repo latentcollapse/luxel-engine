@@ -1,4 +1,4 @@
-# WGE Native Graphics Capability Matrix
+# Luxel Native Graphics Capability Matrix
 
 Status: engine-neutral Lava checkpoint; adapter-v6 adversarial audit, C2.5
 imported-asset inspection, and C2.7 authority-side mip conditioning closed,
@@ -11,7 +11,7 @@ complete for a commercial game.
 
 | Capability | Status | Evidence / boundary |
 | --- | --- | --- |
-| Rust-owned graphics packet | green | Closed `wge.graphics-scene-packet/v6`; exact-key parsing and Rust lowering |
+| Rust-owned graphics packet | green | Closed `luxel.graphics-scene-packet/v6`; exact-key parsing and Rust lowering |
 | Rust receipt promotion | green | Native supervisor independently validates packet, backend identity, capture, measurements, and telemetry |
 | Persistent Julia process | green | Typed worker protocol and persistent `LavaBackend` resource caches |
 | Pinned Lava/Vulkan device | green | Lava commit and device identity are bound into the native receipt |

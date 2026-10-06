@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MCP server that lets an agent drive Gaea through WGE's own driver.
+"""MCP server that lets an agent drive Gaea through Luxel's own driver.
 
 Landscape parity plan P1 (`docs/world/landscape-parity-plan.md`).
 Community Gaea MCP servers exist; this one is used instead because it routes
@@ -28,7 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gaea_build  # noqa: E402
 import gaea_terrain  # noqa: E402
 
-SERVER_INFO = {"name": "wge-gaea", "version": "1.0.0"}
+SERVER_INFO = {"name": "luxel-gaea", "version": "1.0.0"}
 SUPPORTED_PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
 

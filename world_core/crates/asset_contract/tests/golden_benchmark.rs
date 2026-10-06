@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use serde_json::Value;
-use wge_asset_contract::{
+use luxel_asset_contract::{
     AcceptanceStatus, AssetUse, evaluate_structural_acceptance, inspect_file,
 };
 
@@ -11,7 +11,7 @@ const EXPECTED_PYTHON_REPORT_SHA256: &str =
     "14301dc1dc20272b7d35e270a3d0221a310b3376470c0cc025f97f8d06638f71";
 
 fn benchmark_path() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("WGE_ASSET_BENCHMARK") {
+    if let Some(path) = std::env::var_os("LUXEL_ASSET_BENCHMARK") {
         return Some(PathBuf::from(path));
     }
     let default =
