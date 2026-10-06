@@ -5,7 +5,7 @@
   "license": "CC0-1.0",
   "cache_dir": "artifacts/models",
   "resolution": "1k",
-  "note": "WGE_CONVERGE2_CONTRACTS.md N-5 hero kit sources. tools/build_kit.py conditions them: fort pieces composed into a ruin, rocks decimated, the tree's trunk and branches decimated and its leaves rebuilt as cluster cards from the leaves_alpha map, the fern as ground cover.",
+  "note": "docs/world/converge/converge2-contracts.md N-5 hero kit sources. tools/build_kit.py conditions them: fort pieces composed into a ruin, rocks decimated, the tree's trunk and branches decimated and its leaves rebuilt as cluster cards from the leaves_alpha map, the fern as ground cover.",
   "models": [
     {
       "asset": "modular_fort_01",

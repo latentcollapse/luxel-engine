@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""N-6 acceptance (WGE_CONVERGE2_CONTRACTS.md §1): foliage silhouette vs distance.
+"""N-6 acceptance (docs/world/converge/converge2-contracts.md §1): foliage silhouette vs distance.
 
 Input: two `render-calibration` runs of the foliage views under the overcast
 rig (no sun, so nothing casts a shadow): one of `calibration2` (with the

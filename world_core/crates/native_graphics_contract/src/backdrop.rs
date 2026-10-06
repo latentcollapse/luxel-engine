@@ -1,4 +1,4 @@
-//! CONVERGE-4 N-3: the km-scale backdrop (`docs/design/wge-converge4-contracts.md` §1).
+//! CONVERGE-4 N-3: the km-scale backdrop (`docs/world/converge/converge4-contracts.md` §1).
 //!
 //! WHY THIS EXISTS
 //! ---------------
@@ -6,7 +6,7 @@
 //! ridge-contrast target (far ridge at <= 40% of the foreground's contrast) has
 //! been unmet since CONVERGE-1 because nothing in the frame is far enough away
 //! for the atmosphere to act on. The backdrop is a Gaea-built mountain field,
-//! 16 km across, that the world is seated in (GAEA_PROGRAMME.md §1: terrain is
+//! 16 km across, that the world is seated in (docs/integrations/gaea-programme.md §1: terrain is
 //! generated without reference to the play space, then the play space is
 //! placed into it).
 //!

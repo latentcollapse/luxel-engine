@@ -1,4 +1,4 @@
-//! CONVERGE-0 gates (WGE_GRAPHICS_CONVERGENCE_AUDIT.md §H).
+//! CONVERGE-0 gates (docs/world/graphics-convergence-audit.md §H).
 //!
 //! Every gate here has a CONTROL: the measurement is shown to fire on the arm
 //! that has the defect before it is trusted to pass on the arm that fixes it.

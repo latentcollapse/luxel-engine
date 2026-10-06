@@ -1,4 +1,4 @@
-//! CONVERGE-2 N-5 hero kit gates (`WGE_CONVERGE2_CONTRACTS.md` §2).
+//! CONVERGE-2 N-5 hero kit gates (`docs/world/converge/converge2-contracts.md` §2).
 //!
 //! The always-on tests need no built kit. The `#[ignore]`d ones load the real
 //! kit from `artifacts/kit/kit1/` (build it with `python3 tools/build_kit.py`)

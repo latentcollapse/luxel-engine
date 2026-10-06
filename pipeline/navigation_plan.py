@@ -1,6 +1,6 @@
 """The navigation surface: where a body can actually go, and what connects.
 
-MVP roadmap 1.3 (see WGE/docs/MVP_ROADMAP.md). `traversal_probe` already knows
+MVP roadmap 1.3 (see WGE/docs/archive/2026-09_roadmaps-and-audits/mvp-roadmap.md). `traversal_probe` already knows
 how to decide whether ground is walkable, but only ever used it to pass or fail
 a build. Nothing was emitted, so nothing downstream could path, spawn, or check
 that the map's required routes exist.

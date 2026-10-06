@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Condition the CONVERGE-2 N-5 hero kit into one GLB per asset (WGE_CONVERGE2_CONTRACTS.md §2).
+"""Condition the CONVERGE-2 N-5 hero kit into one GLB per asset (docs/world/converge/converge2-contracts.md §2).
 
 Input: the pinned Poly Haven sources of tools/models/kit1.json (fetched with
 tools/fetch_models.py; every file is re-verified here).

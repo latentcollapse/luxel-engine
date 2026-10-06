@@ -1,6 +1,6 @@
 """Rebuild a tree's leaf geometry as cluster cards (a billboard cloud).
 
-Used by tools/build_kit.py for CONVERGE-2 N-5 (WGE_CONVERGE2_CONTRACTS.md §2).
+Used by tools/build_kit.py for CONVERGE-2 N-5 (docs/world/converge/converge2-contracts.md §2).
 A scanned tree carries millions of alpha-tested leaf triangles; the packet can
 carry a few thousand. Thinning the leaves would leave a sparse tree with giant
 leaves, so instead:

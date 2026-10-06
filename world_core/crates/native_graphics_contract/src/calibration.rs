@@ -1,4 +1,4 @@
-//! CALIBRATION-1: the material calibration scene (WGE_CONVERGE1_CONTRACTS.md §3).
+//! CALIBRATION-1: the material calibration scene (docs/world/converge/converge1-contracts.md §3).
 //!
 //! The scene is an imported asset (`tools/build_calibration_glb.py`) and takes
 //! the authorized C2 route: GLB → `prepare_asset` + `condition_render_asset` →

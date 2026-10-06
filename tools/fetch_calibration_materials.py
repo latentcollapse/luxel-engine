@@ -8,7 +8,7 @@ layers (tools/fetch_terrain_layers.py). No file enters the scene without a
 manifest entry: tools/build_calibration_glb.py reads only what this tool wrote,
 and refuses a set whose source digests do not match the manifest.
 
-Sizing (WGE_CONVERGE1_CONTRACTS.md §3 budget): albedo and normal at 512 px,
+Sizing (docs/world/converge/converge1-contracts.md §3 budget): albedo and normal at 512 px,
 roughness / AO / metal at 256 px, from the 1K sources by EXACT box filters
 (2x2 and 4x4), in numpy, so the output is deterministic on any machine:
   * albedo is averaged in linear light, then re-encoded sRGB;

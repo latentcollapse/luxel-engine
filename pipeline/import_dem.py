@@ -7,7 +7,7 @@ landforms have been laser-scanned. Trying to *synthesise* them is strictly worse
 than downloading them: a generator approximates the character of a U-valley,
 while a DEM is the valley.
 
-So the split GAEA_PROGRAMME.md 5.7a arrives at extends one step further.
+So the split docs/integrations/gaea-programme.md 5.7a arrives at extends one step further.
 **Gaea is for terrain that has to be fictional or has to satisfy gameplay
 constraints. Real references come in as real data.** Everything downstream --
 the importer, the metrics, the cropper, the viewer -- already consumes a

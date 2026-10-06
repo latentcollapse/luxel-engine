@@ -392,7 +392,7 @@ def insert_basin(graph: dict, source_id: int, ratio: float = 0.5) -> dict:
 
     **Placement is the whole point.** The basin goes *upstream of erosion*, so
     the rim is carved by drainage rather than being the final word on amplitude.
-    That is precisely the condition GAEA_PROGRAMME.md 5.5 sets for a basin not
+    That is precisely the condition docs/integrations/gaea-programme.md 5.5 sets for a basin not
     being the abandoned massif defect in polar form -- the erosion has to be
     strong enough to break the monotonicity the bias imposes, and putting the
     bias before the solver is what gives it the chance.

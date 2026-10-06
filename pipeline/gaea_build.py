@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a Gaea `.terrain` graph headlessly and pin what it produced.
 
-This is the driver from GAEA_PROGRAMME.md section 8 step 5. It owns the
+This is the driver from docs/integrations/gaea-programme.md section 8 step 5. It owns the
 invocation traps recorded in section 3.3 so no caller has to remember them:
 
 - Swarm only parses a graph given as a full `Z:` path with no spaces in it. The
@@ -348,7 +348,7 @@ def _build_staged(
             f"Swarm {reason} after {elapsed:.0f}s and wrote nothing to {build_path}. "
             "The graph passed preflight (it has an export and a build Type), so "
             "this is a Gaea-side failure; Swarm's console is not observable from "
-            "here (GAEA_PROGRAMME.md 3.3), so rebuild it at a real terminal to see why."
+            "here (docs/integrations/gaea-programme.md 3.3), so rebuild it at a real terminal to see why."
         )
     if code is None:
         raise GaeaBuildError(

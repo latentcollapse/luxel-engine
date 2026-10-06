@@ -10,7 +10,7 @@ by 7.7 m -- and no lane on the map runs end to end (D13).
 score never contained a term for "do not block the route". Adding one is the
 fix; nudging the scatter's spacing is not.
 
-Two roles, two rules, and the reason [S14](SYSTEMS_ROADMAP.md) had to split them
+Two roles, two rules, and the reason [S14](docs/world/systems-roadmap.md) had to split them
 apart first:
 
 - **settlements** are dressing. They want flat, sheltered, well-drained ground

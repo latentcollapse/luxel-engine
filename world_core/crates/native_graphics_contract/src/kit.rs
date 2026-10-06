@@ -1,4 +1,4 @@
-//! CONVERGE-2 N-5: the hero kit (WGE_CONVERGE2_CONTRACTS.md §2).
+//! CONVERGE-2 N-5: the hero kit (docs/world/converge/converge2-contracts.md §2).
 //!
 //! The kit is an explicit, digest-verified input to Campaign 2 lowering, the
 //! same seam N-4 uses for terrain layers: `load_kit_set` reads the committed

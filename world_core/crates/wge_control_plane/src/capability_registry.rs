@@ -196,7 +196,7 @@ impl CapabilityCatalog {
                 &["stale_source_digest", "non_finite_field", "uphill_flow"],
                 &["wge.validator.world-traversal/v1"],
                 &["world.terrain.remeasure"],
-                "WGE_NATIVE_CONVERGENCE_REPORT.md",
+                "docs/archive/2026-09_native-graphics-checkpoints/native-convergence-report.md",
             ),
             descriptor(
                 "world.navigation.traversal",
@@ -214,7 +214,7 @@ impl CapabilityCatalog {
                 &["disconnected_route", "slope_violation", "stale_world"],
                 &["wge.validator.world-traversal/v1"],
                 &["world.navigation.repair_route"],
-                "AUTHORITY_RECLAMATION_001.md",
+                "docs/archive/2026-09_roadmaps-and-audits/authority-reclamation-001.md",
             ),
             descriptor(
                 "world.layout.lowering",
@@ -235,7 +235,7 @@ impl CapabilityCatalog {
                     "wge.validator.world-traversal/v1",
                 ],
                 &["world.layout.repair"],
-                "WGE_REPOSITORY_TOPOLOGY.md",
+                "docs/platform/repository-topology.md",
             ),
             descriptor(
                 "asset.intake.validate",
@@ -261,7 +261,7 @@ impl CapabilityCatalog {
                 ],
                 &["wge.validator.asset-preparation/v1"],
                 &["asset.reimport_from_source"],
-                "WGE_NATIVE_CAPABILITY_MATRIX.md",
+                "docs/platform/native-capability-matrix.md",
             ),
             descriptor(
                 "asset.negative-control.reject",
@@ -279,7 +279,7 @@ impl CapabilityCatalog {
                 &["bad_control_accepted", "control_digest_changed"],
                 &["wge.validator.asset-preparation/v1"],
                 &["asset.restore_known_bad_control"],
-                "AUTHORITY_RECLAMATION_001.md",
+                "docs/archive/2026-09_roadmaps-and-audits/authority-reclamation-001.md",
             ),
             descriptor(
                 "gameplay.kit.compose",
@@ -301,7 +301,7 @@ impl CapabilityCatalog {
                 &["unknown_ability", "dependency_cycle", "silent_effect"],
                 &["wge.validator.gameplay-replay/v1"],
                 &["gameplay.kit.repair"],
-                "docs/WGE_gameplay_kit_architecture.md",
+                "docs/gameplay/gameplay-kit-architecture.md",
             ),
             descriptor(
                 "graphics.scene.packet",
@@ -334,7 +334,7 @@ impl CapabilityCatalog {
                     "graphics.scene.reduce_budget",
                     "graphics.scene.rebuild_packet",
                 ],
-                "WGE_NATIVE_GRAPHICS_ARCHITECTURE.md",
+                "docs/platform/native-graphics-architecture.md",
             ),
             descriptor(
                 "graphics.authored-frame.campaign2",
@@ -352,7 +352,7 @@ impl CapabilityCatalog {
                 &["flat_surface", "camera_out_of_bounds", "budget_exceeded"],
                 &["wge.validator.visual-quality/v1"],
                 &["graphics.authored-frame.recompose"],
-                "WGE_GRAPHICS_CAMPAIGN_2_REPORT.md",
+                "docs/archive/2026-10_graphics-sprint-reports/graphics-campaign-2-report.md",
             ),
             descriptor(
                 "graphics.capture.reference",
@@ -370,7 +370,7 @@ impl CapabilityCatalog {
                 &["truncated_capture", "stale_packet", "camera_mismatch"],
                 &["wge.validator.visual-reference/v1"],
                 &["graphics.capture.rebind_camera"],
-                "WGE_NATIVE_GRAPHICS_BENCHMARK.md",
+                "docs/world/native-graphics-benchmark.md",
             ),
             descriptor(
                 "graphics.visual-quality.evidence",
@@ -404,7 +404,7 @@ impl CapabilityCatalog {
                 ],
                 &["wge.validator.visual-quality/v1"],
                 &["graphics.visual-quality.diagnose"],
-                "WGE_NATIVE_QUALITY_GAPS.md",
+                "docs/world/native-quality-gaps.md",
             ),
             descriptor(
                 "runtime.reference.deterministic",
@@ -429,7 +429,7 @@ impl CapabilityCatalog {
                     "wge.validator.world-traversal/v1",
                 ],
                 &["runtime.replay_from_checkpoint"],
-                "WGE_NATIVE_CONVERGENCE_REPORT.md",
+                "docs/archive/2026-09_native-graphics-checkpoints/native-convergence-report.md",
             ),
             descriptor(
                 "repair.evidence-bounded",
@@ -450,7 +450,7 @@ impl CapabilityCatalog {
                 &["unauthorized_edit", "unchanged_candidate", "stale_receipt"],
                 &["wge.validator.evidence-repair/v1"],
                 &["repair.propose_bounded_delta"],
-                "AUTHORITY_RECLAMATION_001.md",
+                "docs/archive/2026-09_roadmaps-and-audits/authority-reclamation-001.md",
             ),
             descriptor(
                 "style.profile.compile",
@@ -472,7 +472,7 @@ impl CapabilityCatalog {
                 &["unsupported_axis", "unresolved_conflict", "budget_exceeded"],
                 &["wge.validator.semantic-spec/v1"],
                 &["style.profile.resolve_conflict"],
-                "WGE_STYLE_PROFILE_CONTRACT.md",
+                "docs/world/style-profile-contract.md",
             ),
             descriptor(
                 "project.construction-plan",
@@ -507,7 +507,7 @@ impl CapabilityCatalog {
                 ],
                 &["wge.validator.semantic-spec/v1"],
                 &["project.plan.reconcile"],
-                "WGE_CONSTRUCTION_PLAN_CONTRACT.md",
+                "docs/content-sdk/construction-plan-contract.md",
             ),
             descriptor(
                 "provider.character.blender-boundary",
@@ -525,7 +525,7 @@ impl CapabilityCatalog {
                 &["provider_timeout", "missing_skinning", "bad_joint_index"],
                 &["wge.validator.asset-preparation/v1"],
                 &["provider.character.reimport"],
-                "WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md",
+                "docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md",
             ),
         ];
         Self::new(NATIVE_CAPABILITY_REGISTRY_ID, capabilities)

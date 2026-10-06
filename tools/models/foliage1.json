@@ -5,7 +5,7 @@
   "license": "CC0-1.0",
   "cache_dir": "artifacts/models",
   "resolution": "1k",
-  "note": "WGE_CONVERGE2_CONTRACTS.md N-6 foliage row. The glTF base colour is a JPEG without alpha; the Alpha map is merged into an RGBA base colour by tools/build_calibration_glb.py. grass_medium_01 is authored BLEND and is conditioned to MASK at 0.5.",
+  "note": "docs/world/converge/converge2-contracts.md N-6 foliage row. The glTF base colour is a JPEG without alpha; the Alpha map is merged into an RGBA base colour by tools/build_calibration_glb.py. grass_medium_01 is authored BLEND and is conditioned to MASK at 0.5.",
   "models": [
     {
       "asset": "fern_02",

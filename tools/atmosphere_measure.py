@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Atmospheric-depth measurement for CONVERGE-1 N-1 (WGE_CONVERGE1_CONTRACTS.md §1).
+"""Atmospheric-depth measurement for CONVERGE-1 N-1 (docs/world/converge/converge1-contracts.md §1).
 
 Acceptance (measured): "in the wide view, the backdrop ridge's luminance
 contrast against the sky <= 40% of the foreground's contrast against terrain".

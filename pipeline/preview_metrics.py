@@ -11,7 +11,7 @@ What is left when you remove everything that needs a plan, a placement or a
 ZoneSpec is still worth measuring, because it is exactly the class of property
 the last two terrain attempts got wrong while their other metrics improved:
 
-**Radial monotonicity** is the important one (GAEA_PROGRAMME.md 5.5). The massif
+**Radial monotonicity** is the important one (docs/integrations/gaea-programme.md 5.5). The massif
 carve made relief a monotonic function of distance from the lanes, so a nearer
 summit could never be taller than a farther one and foothills in front of peaks
 were mathematically forbidden. The Gaea programme's basin macro-shape is the same

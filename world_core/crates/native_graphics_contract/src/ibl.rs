@@ -1,4 +1,4 @@
-//! N-2: prefiltered image-based lighting (WGE_CONVERGE1_CONTRACTS.md §2).
+//! N-2: prefiltered image-based lighting (docs/world/converge/converge1-contracts.md §2).
 //!
 //! Baked in Rust, never in a shader, from the packet's own environment: the
 //! sky the renderer draws (gradient, or the N-1 analytic sky, plus its sun

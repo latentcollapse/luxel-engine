@@ -1,4 +1,4 @@
-//! N-2 gates (WGE_CONVERGE1_CONTRACTS.md §2): bake determinism, cross-language
+//! N-2 gates (docs/world/converge/converge1-contracts.md §2): bake determinism, cross-language
 //! sky parity, white furnace, energy, and packet binding of the baked textures.
 
 use std::path::PathBuf;

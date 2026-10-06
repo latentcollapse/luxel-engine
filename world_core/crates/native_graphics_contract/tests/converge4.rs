@@ -1,4 +1,4 @@
-//! CONVERGE-4 gates (`docs/design/wge-converge4-contracts.md`).
+//! CONVERGE-4 gates (`docs/world/converge/converge4-contracts.md`).
 //!
 //! N-3 km-scale backdrop. Tests that lower `converge4` need the built kit2,
 //! like the CONVERGE-3 ones: `python3 tools/build_kit.py --set kit2`, then

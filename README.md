@@ -2,8 +2,8 @@
 
 **Concept art in. A playable, faithful 3D map out.**
 
-> **Fresh-agent orientation:** read [ACTIVE_ARCHITECTURE.md](ACTIVE_ARCHITECTURE.md) and
-> [WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md](WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md) first.
+> **Fresh-agent orientation:** read [docs/platform/active-architecture.md](docs/platform/active-architecture.md) and
+> [docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md](docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md) first.
 > They define the current native Rust/Julia/Lava path, authority boundaries, provider fence, and
 > campaign order. Older migration/status sections below are retained as historical context and are
 > not current instructions.
@@ -138,7 +138,7 @@ generated from any existing world.
 ## Current canonical status
 
 The active product target is the demo-ready native engine slice in
-[WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md](WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md), not
+[docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md](docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md), not
 the older Codeweald target-engine MVP described in the historical sections below.
 
 Green foundation: Rust-owned typed contracts, deterministic intake/project identity, registered
@@ -152,7 +152,7 @@ The supplied malformed GLB remains a permanent negative control. Blender is opti
 it is never a runtime or semantic authority dependency. Unity, Unreal, and Godot are compatibility
 or archaeological lanes only and are not demo gates.
 
-Use the focused commands in [ACTIVE_ARCHITECTURE.md](ACTIVE_ARCHITECTURE.md) and the gates named by
+Use the focused commands in [docs/platform/active-architecture.md](docs/platform/active-architecture.md) and the gates named by
 the current campaign. Do not infer present status from the dated snapshot that follows.
 
 The first reproducible native command is:

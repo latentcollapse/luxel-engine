@@ -1,6 +1,6 @@
 """Where a body may go, and what the world looks like past it.
 
-MVP roadmap 1.2 (see WGE/docs/MVP_ROADMAP.md). WGE emits a heightfield that
+MVP roadmap 1.2 (see WGE/docs/archive/2026-09_roadmaps-and-audits/mvp-roadmap.md). WGE emits a heightfield that
 stops dead at the world bounds: the terrain mesh ends at the data edge and
 beyond it is skybox. That is two separate defects wearing one costume.
 

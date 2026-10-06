@@ -80,7 +80,7 @@ impl SemanticFacadeCatalog {
                     "conflicting_constraint",
                     "missing_provenance",
                 ],
-                "WGE_GENERALITY_BRIDGE.md",
+                "docs/content-sdk/generality-bridge.md",
             ),
             operation(
                 "project.plan",
@@ -96,7 +96,7 @@ impl SemanticFacadeCatalog {
                     "stale_style_plan",
                     "runtime_provider_leak",
                 ],
-                "WGE_CONSTRUCTION_PLAN_CONTRACT.md",
+                "docs/content-sdk/construction-plan-contract.md",
             ),
             operation(
                 "capability.list",
@@ -108,7 +108,7 @@ impl SemanticFacadeCatalog {
                 &[],
                 &["capability.explain/v1", "capability.plan/v1"],
                 &["unknown_class", "unknown_status", "registry_tamper"],
-                "WGE_CAPABILITY_REGISTRY_DESIGN.md",
+                "docs/platform/capability-registry-design.md",
             ),
             operation(
                 "capability.explain",
@@ -120,7 +120,7 @@ impl SemanticFacadeCatalog {
                 &[],
                 &["capability.plan/v1"],
                 &["unknown_capability", "registry_tamper"],
-                "WGE_CAPABILITY_REGISTRY_DESIGN.md",
+                "docs/platform/capability-registry-design.md",
             ),
             operation(
                 "capability.plan",
@@ -136,7 +136,7 @@ impl SemanticFacadeCatalog {
                     "missing_validator",
                     "unsupported_requirement",
                 ],
-                "WGE_CAPABILITY_REGISTRY_DESIGN.md",
+                "docs/platform/capability-registry-design.md",
             ),
             operation(
                 "style.compile",
@@ -148,7 +148,7 @@ impl SemanticFacadeCatalog {
                 &["style.profile.compile/v1"],
                 &["project.plan/v1", "quality.inspect/v1"],
                 &["unsupported_axis", "unresolved_conflict", "budget_exceeded"],
-                "WGE_STYLE_PROFILE_CONTRACT.md",
+                "docs/world/style-profile-contract.md",
             ),
             operation(
                 "world.construct",
@@ -164,7 +164,7 @@ impl SemanticFacadeCatalog {
                     "invalid_spawn",
                     "disconnected_route",
                 ],
-                "WGE_NATIVE_CONVERGENCE_REPORT.md",
+                "docs/archive/2026-09_native-graphics-checkpoints/native-convergence-report.md",
             ),
             operation(
                 "scene.compose",
@@ -180,7 +180,7 @@ impl SemanticFacadeCatalog {
                     "identity_mismatch",
                     "collision_policy_missing",
                 ],
-                "WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md",
+                "docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md",
             ),
             operation(
                 "asset.prepare",
@@ -196,7 +196,7 @@ impl SemanticFacadeCatalog {
                     "unsupported_extension",
                     "missing_collision",
                 ],
-                "WGE_NATIVE_CAPABILITY_MATRIX.md",
+                "docs/platform/native-capability-matrix.md",
             ),
             operation(
                 "character.prepare",
@@ -208,7 +208,7 @@ impl SemanticFacadeCatalog {
                 &["provider.character.blender-boundary/v1"],
                 &["scene.compose/v1", "runtime.launch/v1"],
                 &["missing_skinning", "bad_joint_index", "provider_timeout"],
-                "WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md",
+                "docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md",
             ),
             operation(
                 "gameplay.compose",
@@ -220,7 +220,7 @@ impl SemanticFacadeCatalog {
                 &["gameplay.kit.compose/v1"],
                 &["runtime.launch/v1", "project.verify/v1"],
                 &["unknown_ability", "dependency_cycle", "silent_effect"],
-                "docs/WGE_gameplay_kit_architecture.md",
+                "docs/gameplay/gameplay-kit-architecture.md",
             ),
             operation(
                 "runtime.launch",
@@ -236,7 +236,7 @@ impl SemanticFacadeCatalog {
                     "input_unavailable",
                     "frame_budget_exceeded",
                 ],
-                "WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md",
+                "docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md",
             ),
             operation(
                 "quality.inspect",
@@ -251,7 +251,7 @@ impl SemanticFacadeCatalog {
                 ],
                 &["repair.propose/v1", "project.verify/v1"],
                 &["indeterminate_axis", "stale_capture", "artifact_rate"],
-                "WGE_NATIVE_QUALITY_GAPS.md",
+                "docs/world/native-quality-gaps.md",
             ),
             operation(
                 "repair.propose",
@@ -263,7 +263,7 @@ impl SemanticFacadeCatalog {
                 &["repair.evidence-bounded/v1"],
                 &["repair.apply/v1", "project.verify/v1"],
                 &["stale_receipt", "unauthorized_edit", "unchanged_candidate"],
-                "AUTHORITY_RECLAMATION_001.md",
+                "docs/archive/2026-09_roadmaps-and-audits/authority-reclamation-001.md",
             ),
             operation(
                 "repair.apply",
@@ -275,7 +275,7 @@ impl SemanticFacadeCatalog {
                 &["repair.evidence-bounded/v1"],
                 &["quality.inspect/v1", "project.verify/v1"],
                 &["scope_violation", "failed_remeasure", "stale_candidate"],
-                "AUTHORITY_RECLAMATION_001.md",
+                "docs/archive/2026-09_roadmaps-and-audits/authority-reclamation-001.md",
             ),
             operation(
                 "project.verify",
@@ -287,7 +287,7 @@ impl SemanticFacadeCatalog {
                 &[],
                 &["project.package/v1", "repair.propose/v1"],
                 &["failed_gate", "stale_evidence", "status_only_evidence"],
-                "WGE_NATIVE_CONVERGENCE_REPORT.md",
+                "docs/archive/2026-09_native-graphics-checkpoints/native-convergence-report.md",
             ),
             operation(
                 "project.package",
@@ -303,7 +303,7 @@ impl SemanticFacadeCatalog {
                     "runtime_dependency_leak",
                     "missing_provenance",
                 ],
-                "WGE_DEMO_READY_NATIVE_ENGINE_MEGA_SPRINT.md",
+                "docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md",
             ),
         ];
         let mut catalog = Self {

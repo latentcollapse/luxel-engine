@@ -1,6 +1,6 @@
 """Engine-neutral collision plan: what a body can stand on and what stops it.
 
-MVP roadmap 1.1 (see WGE/docs/MVP_ROADMAP.md). WGE compiles a world that
+MVP roadmap 1.1 (see WGE/docs/archive/2026-09_roadmaps-and-audits/mvp-roadmap.md). WGE compiles a world that
 renders; it does not yet compile one anything can move through. `collision`
 appears nowhere in any emitted artifact -- only in the intake brief, as stated
 intent. This closes that gap for terrain and placed instances.

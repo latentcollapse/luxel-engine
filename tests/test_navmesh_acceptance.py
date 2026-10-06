@@ -241,7 +241,7 @@ class RealBatchTests(unittest.TestCase):
     """The current map, as actually compiled. Roadmap 1.4's own acceptance
     criterion: if this gate passes on the map as it stands, the gate is
     wrong. It must fail today, and must fail specifically on the lanes that
-    are known broken (see WGE/docs/MVP_ROADMAP.md, roadmap 1.3 handoff)."""
+    are known broken (see WGE/docs/archive/2026-09_roadmaps-and-audits/mvp-roadmap.md, roadmap 1.3 handoff)."""
 
     def setUp(self) -> None:
         if not (REAL_BATCH / "collision_plan.json").is_file():

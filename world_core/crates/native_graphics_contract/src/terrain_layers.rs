@@ -1,4 +1,4 @@
-//! Terrain surface layers (N-4, `WGE_CONVERGE1_CONTRACTS.md` §4).
+//! Terrain surface layers (N-4, `docs/world/converge/converge1-contracts.md` §4).
 //!
 //! WHY THIS EXISTS
 //! ---------------

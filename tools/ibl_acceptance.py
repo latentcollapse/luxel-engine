@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""N-2 measured acceptance from a `render-calibration` summary (WGE_CONVERGE1_CONTRACTS.md §2).
+"""N-2 measured acceptance from a `render-calibration` summary (docs/world/converge/converge1-contracts.md §2).
 
   1. Chrome ball shows the sky and the ground: its upper half (reflecting sky)
      is brighter and bluer than its lower half (reflecting ground).

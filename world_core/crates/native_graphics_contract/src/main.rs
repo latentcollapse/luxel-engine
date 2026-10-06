@@ -787,7 +787,7 @@ fn run() -> Result<(), String> {
     }
 }
 
-/// CALIBRATION-1 (WGE_CONVERGE1_CONTRACTS.md §3): render the material
+/// CALIBRATION-1 (docs/world/converge/converge1-contracts.md §3): render the material
 /// calibration scene through the authorized bound-scene route, for each
 /// requested enumerated rig and derived view.
 fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
@@ -995,7 +995,7 @@ fn run_render_calibration(arguments: Vec<String>) -> Result<(), String> {
     }
     let summary = serde_json::json!({
         "schema_version": "wge.native-graphics-calibration/v1",
-        "contract": "WGE_CONVERGE1_CONTRACTS.md §3 CALIBRATION-1",
+        "contract": "docs/world/converge/converge1-contracts.md §3 CALIBRATION-1",
         "world_artifact_id": world.world.artifact_id,
         "glb_sha256": sha256_prefixed(&glb),
         "runtime_receipt_sha256": runtime_receipt.receipt_sha256,

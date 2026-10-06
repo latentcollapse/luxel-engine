@@ -4,7 +4,7 @@
   "provider": "polyhaven.com",
   "license": "CC0-1.0",
   "cache_dir": "artifacts/calibration/calibration2",
-  "note": "WGE_CONVERGE1_CONTRACTS.md \u00a73. Sources are the 1K JPGs; sized PNGs are exact box reductions (albedo in linear light, normals renormalised). Physical size comes from the provider's dimensions and sets the UV scale in tools/build_calibration_glb.py. calibration2 (WGE_CONVERGE2_CONTRACTS.md N-6) = calibration1 plus the foliage specimens; calibration1 stays the material reference.",
+  "note": "docs/world/converge/converge1-contracts.md \u00a73. Sources are the 1K JPGs; sized PNGs are exact box reductions (albedo in linear light, normals renormalised). Physical size comes from the provider's dimensions and sets the UV scale in tools/build_calibration_glb.py. calibration2 (docs/world/converge/converge2-contracts.md N-6) = calibration1 plus the foliage specimens; calibration1 stays the material reference.",
   "texture_sizes_px": {
     "albedo": 512,
     "normal_gl": 512,

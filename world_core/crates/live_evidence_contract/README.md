@@ -25,6 +25,6 @@ cargo test --manifest-path world_core/crates/live_evidence_contract/Cargo.toml
 cargo fmt --manifest-path world_core/crates/live_evidence_contract/Cargo.toml -- --check
 ```
 
-See [`CAMPAIGN1_LIVE_LOOP_DESIGN.md`](../../../docs/CAMPAIGN1_LIVE_LOOP_DESIGN.md)
+See [`docs/gameplay/live-loop-design.md`](../../../docs/gameplay/live-loop-design.md)
 for the intended supervisor integration and the intentionally unimplemented
 runtime pieces.

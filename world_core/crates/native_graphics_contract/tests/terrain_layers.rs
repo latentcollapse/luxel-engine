@@ -1,4 +1,4 @@
-//! N-4 terrain layer gates (`WGE_CONVERGE1_CONTRACTS.md` §4).
+//! N-4 terrain layer gates (`docs/world/converge/converge1-contracts.md` §4).
 //!
 //! Every refusal here is shown to fire on a concrete bad input; the positive
 //! cases use the synthetic set so the suite never needs the network.

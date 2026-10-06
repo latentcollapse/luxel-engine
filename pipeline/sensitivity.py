@@ -1,6 +1,6 @@
 """Sensitivity matrix: which knob actually moves which metric, and by how much.
 
-WGE tooling item 3 (see WGE/docs/TOOLING_UPGRADES.md). The critic once
+WGE tooling item 3 (see WGE/docs/platform/tooling-upgrades.md). The critic once
 attributed a 6.9x ``foreground_edge_density`` shortfall to landform
 composition and emitted jitter/spine repairs for it. Driving every composition
 scalar to its bound moved that metric by 0.3% -- while pushing further broke

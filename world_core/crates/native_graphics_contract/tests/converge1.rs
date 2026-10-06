@@ -1,5 +1,5 @@
 //! CONVERGE-1 N-1 gates: the analytic sky model and the exponential,
-//! height-dependent atmosphere (WGE_CONVERGE1_CONTRACTS.md §1).
+//! height-dependent atmosphere (docs/world/converge/converge1-contracts.md §1).
 //!
 //! The renderer-side behaviour (sun-side vs anti-sun horizon, haze integral)
 //! is gated in `graphics_lab/test/render_policy.jl`; byte identity of the

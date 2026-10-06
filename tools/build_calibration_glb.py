@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the CALIBRATION-1 material scene as one glTF binary (WGE_CONVERGE1_CONTRACTS.md §3).
+"""Build the CALIBRATION-1 material scene as one glTF binary (docs/world/converge/converge1-contracts.md §3).
 
 Input: the sized maps written by tools/fetch_calibration_materials.py. Every
 source digest is re-checked against the manifest first; a set that does not

@@ -10,7 +10,7 @@
 # RMS deviation from the best straight line. An intact wall reads straight and
 # flat; a broken one does not.
 #
-# Gate (restated 2026-10-05, see WGE_CONVERGE3_CONTRACTS.md R-1): relief >= 1.0 m
+# Gate (restated 2026-10-05, see docs/world/converge/converge3-contracts.md R-1): relief >= 1.0 m
 # and RMS from a line >= 0.2 m; the intact converge2 wall end is the control
 # and must fail both.
 #

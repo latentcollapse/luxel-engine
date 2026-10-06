@@ -4041,7 +4041,7 @@ pub enum ParityPolicyCandidate {
     /// landed (sprint F-4); leaving it would have kept a now-supported axis
     /// behind a refusal and made `full` weaker than it needs to be.
     FullUnsupported,
-    /// CONVERGE-0 (WGE_GRAPHICS_CONVERGENCE_AUDIT.md §H): `Full` plus the three
+    /// CONVERGE-0 (docs/world/graphics-convergence-audit.md §H): `Full` plus the three
     /// axes the converge0 content cannot render without — mesh repeat wrap
     /// (metric UVs), a view-relative shadow fit (extended world), and the
     /// view-direction sky. Selecting this arm also selects converge0 CONTENT;
@@ -4171,7 +4171,7 @@ pub const CONVERGE1_SKY: SkyPolicy = SkyPolicy {
 };
 
 /// CONVERGE-1 atmosphere (values are tuned by measurement; see
-/// WGE_CONVERGE1_CONTRACTS.md §1 implementation notes).
+/// docs/world/converge/converge1-contracts.md §1 implementation notes).
 pub const CONVERGE1_ATMOSPHERE: AtmospherePolicy = AtmospherePolicy {
     height_falloff_milli_per_m: 10,
     density_at_ground_bp: 45,
@@ -4355,7 +4355,7 @@ impl ParityPolicyCandidate {
     }
 }
 
-/// CONVERGE-0 scene content (WGE_GRAPHICS_CONVERGENCE_AUDIT.md §H steps 5-7).
+/// CONVERGE-0 scene content (docs/world/graphics-convergence-audit.md §H steps 5-7).
 ///
 /// Every change here is CONTENT, gated by `ParityContent::converge0`, so the
 /// null arm keeps the frozen bytes:

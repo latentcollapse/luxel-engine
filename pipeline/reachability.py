@@ -1,6 +1,6 @@
 """Reachability manifest: does every advertised parameter reach its artifact?
 
-WGE tooling item 2 (see WGE/docs/TOOLING_UPGRADES.md). Three no-op defects
+WGE tooling item 2 (see WGE/docs/platform/tooling-upgrades.md). Three no-op defects
 landed in a single day -- composition scalars the rasterizer never read,
 material textures the shader admitted only on steep faces, a generator with
 zero callers -- and every other signal stayed green through all of them: the
