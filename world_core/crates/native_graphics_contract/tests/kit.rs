@@ -31,7 +31,7 @@ fn lower(candidate: ParityPolicyCandidate, kit: Option<&KitSet>, view: Campaign2
     lower_campaign2_packet_inputs(
         &reference(),
         view,
-        &Campaign2Inputs { candidate, content: CONVERGE, terrain_layers: Some(&layers), kit },
+        &Campaign2Inputs { candidate, content: CONVERGE, terrain_layers: Some(&layers), kit, backdrop: None },
     )
     .map_err(|error| error.to_string())
 }
@@ -54,7 +54,7 @@ fn converge2_requires_a_kit_and_no_other_arm_accepts_one() {
     assert!(error.contains("requires a kit"), "{error}");
     let empty = KitSet { set_id: "empty".into(), lock_sha256: "sha256:0".into(), assets: Vec::new() };
     let error = lower(ParityPolicyCandidate::Converge1, Some(&empty), Campaign2View::Close).expect_err("kit refused");
-    assert!(error.contains("only valid with the converge2 or converge3"), "{error}");
+    assert!(error.contains("only valid with the converge2, converge3 or converge4 arm"), "{error}");
 }
 
 fn kit() -> KitSet {
@@ -88,7 +88,7 @@ fn converge2_replaces_the_shrine_and_tree_balls_with_the_kit() {
 fn the_kit_costs_at_most_24_mb_of_packet() {
     let kit = kit();
     let layers = synthetic_set();
-    let inputs = |candidate, kit| Campaign2Inputs { candidate, content: CONVERGE, terrain_layers: Some(&layers), kit };
+    let inputs = |candidate, kit| Campaign2Inputs { candidate, content: CONVERGE, terrain_layers: Some(&layers), kit, backdrop: None };
     let size = |packet: &GraphicsScenePacket| canonical_json(packet).expect("json").len();
     let with = lower_campaign2_packet_inputs(&reference(), Campaign2View::Wide, &inputs(ParityPolicyCandidate::Converge2, Some(&kit))).unwrap();
     let without = lower_campaign2_packet_inputs(&reference(), Campaign2View::Wide, &inputs(ParityPolicyCandidate::Converge1, None)).unwrap();

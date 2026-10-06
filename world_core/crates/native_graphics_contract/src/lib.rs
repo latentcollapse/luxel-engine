@@ -43,6 +43,7 @@ const REFERENCE_FOG_WEIGHT_AT_CAMERA: f64 = 0.16;
 const MAX_REFERENCE_FOG_DENSITY: f64 = 0.006;
 
 pub mod asset_projection;
+pub mod backdrop;
 pub mod calibration;
 pub mod deformation;
 pub mod ibl;
@@ -82,6 +83,7 @@ pub use asset_projection::{
 };
 pub use scene_composition::{compose_bound_scene, compose_bound_scene_with_camera, compose_bound_scene_with_view};
 pub use calibration::{CalibrationPlacement, CalibrationRig, CalibrationView};
+pub use backdrop::{BackdropSet, load_backdrop_set};
 pub use kit::{KitSet, load_kit_set};
 pub use still_water::TerrainSurface;
 pub use terrain_layers::{
@@ -4058,6 +4060,10 @@ pub enum ParityPolicyCandidate {
     /// CONVERGE-3: `Converge2` plus the CONVERGE-3 contracts as they land
     /// (W-1 still water first). Same kit seam; every earlier arm unchanged.
     Converge3,
+    /// CONVERGE-4: `Converge3` plus the CONVERGE-4 contracts as they land
+    /// (N-3 km-scale backdrop first). The backdrop is an explicit input like
+    /// the kit; converge3 and every earlier arm stay byte-identical.
+    Converge4,
 }
 
 /// Content flags for the parity experiments, orthogonal to the render policy.
@@ -4172,6 +4178,18 @@ pub const CONVERGE1_ATMOSPHERE: AtmospherePolicy = AtmospherePolicy {
     sun_scatter_gain_bp: 300,
 };
 
+/// CONVERGE-4 N-3 atmosphere: clear mountain air with valley haze. converge1's
+/// 45 bp / 100 m scale height (a ~0.7 km visual range) was tuned on a 480 m
+/// world; it put ~95% haze on a summit 10 km away, so the backdrop vanished
+/// into the sky. 6 bp with a 250 m scale height gives optical depth ~0.1 to the
+/// near ridge, ~1.0 to a 1.5 km summit at 10 km and ~3 along the valley floor
+/// at 5 km: peaks stand as hazy silhouettes while their feet dissolve.
+pub const CONVERGE4_ATMOSPHERE: AtmospherePolicy = AtmospherePolicy {
+    height_falloff_milli_per_m: 4,
+    density_at_ground_bp: 6,
+    sun_scatter_gain_bp: 300,
+};
+
 /// Shadow distance for the converge0 view-relative fit. 60 m covers every
 /// authored object in the wide view while keeping the 512² map at ~4 texels/m.
 pub const CONVERGE0_SHADOW_DISTANCE_M: i32 = 60;
@@ -4180,12 +4198,23 @@ impl ParityPolicyCandidate {
     /// Arms that render the converge0 world (extended terrain, metric UVs,
     /// layered scanned ground). Their content and policy are only valid together.
     pub fn uses_converge0_content(self) -> bool {
-        matches!(self, Self::Converge0 | Self::Converge1 | Self::Converge2 | Self::Converge3)
+        matches!(self, Self::Converge0 | Self::Converge1 | Self::Converge2 | Self::Converge3 | Self::Converge4)
     }
 
     /// Arms whose content includes the imported hero kit (N-5).
     pub fn uses_kit(self) -> bool {
-        matches!(self, Self::Converge2 | Self::Converge3)
+        matches!(self, Self::Converge2 | Self::Converge3 | Self::Converge4)
+    }
+
+    /// Arms that carry the CONVERGE-3 content (still water, damaged ruin,
+    /// scatter, kit2).
+    pub fn uses_converge3_content(self) -> bool {
+        matches!(self, Self::Converge3 | Self::Converge4)
+    }
+
+    /// Arms whose content includes the km-scale backdrop (CONVERGE-4 N-3).
+    pub fn uses_backdrop(self) -> bool {
+        matches!(self, Self::Converge4)
     }
 
     pub fn from_env() -> Self {
@@ -4201,6 +4230,7 @@ impl ParityPolicyCandidate {
             Ok("converge1") => Self::Converge1,
             Ok("converge2") => Self::Converge2,
             Ok("converge3") => Self::Converge3,
+            Ok("converge4") => Self::Converge4,
             _ => Self::Null,
         }
     }
@@ -4299,6 +4329,11 @@ impl ParityPolicyCandidate {
                     foliage_coverage: Some(FoliageCoveragePolicy { samples: 4 }),
                     ..converge1
                 })
+            }
+            // N-3: converge3's policy with an atmosphere for a km-scale world.
+            Self::Converge4 => {
+                let converge3 = Self::Converge3.policy().expect("Converge3 always carries a policy");
+                Some(RenderPolicy { atmosphere: Some(CONVERGE4_ATMOSPHERE), ..converge3 })
             }
             Self::HeroMaterials => Some(RenderPolicy::default()),
             Self::Terrain => Some(RenderPolicy {
@@ -4532,6 +4567,8 @@ pub struct Campaign2Inputs<'a> {
     pub content: ParityContent,
     pub terrain_layers: Option<&'a TerrainLayerSet>,
     pub kit: Option<&'a KitSet>,
+    /// CONVERGE-4 N-3: the km-scale backdrop, for the backdrop arms only.
+    pub backdrop: Option<&'a BackdropSet>,
 }
 
 /// `lower_campaign2_packet` with every input explicit (see `Campaign2Inputs`).
@@ -4540,7 +4577,15 @@ pub fn lower_campaign2_packet_inputs(
     view: Campaign2View,
     inputs: &Campaign2Inputs<'_>,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
-    lower_campaign2_packet_impl(packet, view, inputs.candidate, inputs.content, inputs.terrain_layers, inputs.kit)
+    lower_campaign2_packet_impl(
+        packet,
+        view,
+        inputs.candidate,
+        inputs.content,
+        inputs.terrain_layers,
+        inputs.kit,
+        inputs.backdrop,
+    )
 }
 
 /// `lower_campaign2_packet` with the parity arm passed explicitly instead of
@@ -4553,7 +4598,7 @@ pub fn lower_campaign2_packet_with(
     parity_content: ParityContent,
     terrain_layers: Option<&TerrainLayerSet>,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
-    lower_campaign2_packet_impl(packet, view, parity_candidate, parity_content, terrain_layers, None)
+    lower_campaign2_packet_impl(packet, view, parity_candidate, parity_content, terrain_layers, None, None)
 }
 
 fn lower_campaign2_packet_impl(
@@ -4563,20 +4608,29 @@ fn lower_campaign2_packet_impl(
     parity_content: ParityContent,
     terrain_layers: Option<&TerrainLayerSet>,
     kit: Option<&KitSet>,
+    backdrop: Option<&BackdropSet>,
 ) -> Result<GraphicsScenePacket, GraphicsContractError> {
     validate_scene_packet(packet)?;
-    // N-5: the kit is content of the kit arms (converge2, converge3) only.
+    // N-5: the kit is content of the kit arms (converge2 onward) only.
     if kit.is_some() != parity_candidate.uses_kit() {
         return Err(GraphicsContractError::provenance(if kit.is_some() {
-            "a kit is only valid with the converge2 or converge3 arm"
+            "a kit is only valid with the converge2, converge3 or converge4 arm"
         } else {
-            "this arm requires a kit (converge2: tools/kit/kit1.lock.json, converge3: tools/kit/kit2.lock.json)"
+            "this arm requires a kit (converge2: tools/kit/kit1.lock.json, converge3/converge4: tools/kit/kit2.lock.json)"
+        }));
+    }
+    // N-3: the backdrop is content of the backdrop arms only.
+    if backdrop.is_some() != parity_candidate.uses_backdrop() {
+        return Err(GraphicsContractError::provenance(if backdrop.is_some() {
+            "a backdrop is only valid with the converge4 arm"
+        } else {
+            "this arm requires a backdrop (converge4: tools/backdrop/backdrop1.lock.json)"
         }));
     }
     // Each kit arm renders exactly one kit set, so a run cannot be mislabelled:
-    // converge2 is N-5's kit1, converge3 is R-1's damaged kit2.
+    // converge2 is N-5's kit1, converge3 and converge4 are R-1's damaged kit2.
     if let Some(kit) = kit {
-        let expected = if parity_candidate == ParityPolicyCandidate::Converge3 { "kit2" } else { "kit1" };
+        let expected = if parity_candidate.uses_converge3_content() { "kit2" } else { "kit1" };
         if kit.set_id != expected {
             return Err(GraphicsContractError::provenance(format!(
                 "the {parity_candidate:?} arm renders kit set `{expected}`, not `{}`",
@@ -5441,7 +5495,7 @@ fn lower_campaign2_packet_impl(
     // CONVERGE-3 W-1: still water painted by the terrain replaces the disc and
     // its rings. Before the kit, so the kit's prune drops the glow material the
     // rings were the last users of.
-    let converge3 = parity_candidate == ParityPolicyCandidate::Converge3;
+    let converge3 = parity_candidate.uses_converge3_content();
     if converge3 {
         still_water::apply_still_water(&mut body, [pool_x, pool_z])?;
     }
@@ -5482,6 +5536,16 @@ fn lower_campaign2_packet_impl(
                 campaign2_terrain_height(packet, f64::from(x), f64::from(z)) + 0.02
             })?;
         }
+    }
+    // N-3: the backdrop seats under the world centre, BACKDROP_SEAT_DROP_M below
+    // the source terrain's mean height (the level the converge0 extension
+    // blends its hills from).
+    if let Some(set) = backdrop {
+        let BufferPayload::F32(source_heights) = &packet.body.terrain.heights_m.payload else {
+            return Err(GraphicsContractError::unsupported("the backdrop seat needs f32 source heights"));
+        };
+        let base_level = source_heights.iter().sum::<f32>() / source_heights.len() as f32;
+        backdrop::apply_backdrop(&mut body, set, base_level - backdrop::BACKDROP_SEAT_DROP_M)?;
     }
     if parity_content.hero_materials {
         let remapped = material_maps::apply_hero_material_set(&mut body);

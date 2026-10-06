@@ -51,6 +51,7 @@ fn lower(candidate: ParityPolicyCandidate, kit: &KitSet, view: Campaign2View) ->
             content: CONVERGE,
             terrain_layers: Some(&layers),
             kit: Some(kit),
+            backdrop: None,
         },
     )
     .expect("lowers")
@@ -194,6 +195,7 @@ fn w1_wet_zone_needs_layers_and_sane_values() {
             content: CONVERGE,
             terrain_layers: Some(&layers),
             kit: None,
+            backdrop: None,
         },
     )
     .unwrap();
@@ -250,6 +252,7 @@ fn r1_each_kit_arm_renders_its_own_kit_set() {
                 content: CONVERGE,
                 terrain_layers: Some(&layers),
                 kit: Some(kit),
+                backdrop: None,
             },
         )
     };

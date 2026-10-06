@@ -9,7 +9,7 @@ use wge_native_graphics_contract::{
     Campaign2View, GraphicsWorkerSupervisor, QualityOutcome, VisualQualityProfile,
     assess_campaign2_visual_evidence, assess_visual_quality,
     deterministic_certification_frame_receipt, load_terrain_layer_set,
-    lower_campaign2_packet_inputs, load_kit_set, Campaign2Inputs, ParityContent, ParityPolicyCandidate,
+    lower_campaign2_packet_inputs, load_kit_set, load_backdrop_set, Campaign2Inputs, ParityContent, ParityPolicyCandidate,
     lower_dense_benchmark_packet, lower_objective_close_packet, lower_reference_world,
     lower_showcase_packet, lower_world_showcase_packet, sha256_prefixed,
     validate_campaign2_visual_evidence,
@@ -483,7 +483,7 @@ fn run() -> Result<(), String> {
             // comes from the environment; its GLBs are digest-verified on load.
             let kit = if parity_candidate.uses_kit() {
                 let lock = env::var("WGE_KIT_SET").map_err(|_| {
-                    "converge2 and converge3 need WGE_KIT_SET=<lock>: tools/kit/kit1.lock.json \
+                    "converge2, converge3 and converge4 need WGE_KIT_SET=<lock>: tools/kit/kit1.lock.json \
                      or tools/kit/kit2.lock.json (build it first with tools/build_kit.py --set kit1|kit2)"
                         .to_owned()
                 })?;
@@ -495,11 +495,27 @@ fn run() -> Result<(), String> {
             } else {
                 None
             };
+            // N-3: converge4's backdrop, the same explicit-input seam.
+            let backdrop = if parity_candidate.uses_backdrop() {
+                let lock = env::var("WGE_BACKDROP_SET").map_err(|_| {
+                    "converge4 needs WGE_BACKDROP_SET=<lock>: tools/backdrop/backdrop1.lock.json \
+                     (build it first with tools/build_backdrop.py --set backdrop1)"
+                        .to_owned()
+                })?;
+                let root = env::current_dir().map_err(|error| error.to_string())?;
+                Some(
+                    load_backdrop_set(&PathBuf::from(lock), &root)
+                        .map_err(|error| format!("backdrop failed to load: {error}"))?,
+                )
+            } else {
+                None
+            };
             let inputs = Campaign2Inputs {
                 candidate: parity_candidate,
                 content: parity_content,
                 terrain_layers: terrain_layers.as_ref(),
                 kit: kit.as_ref(),
+                backdrop: backdrop.as_ref(),
             };
             let view_specs = [
                 ("close", Campaign2View::Close),

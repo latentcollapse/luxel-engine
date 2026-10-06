@@ -5109,6 +5109,10 @@ function _mesh_triangle_tangent(
     return Vec4f(tangent[1], tangent[2], tangent[3], handedness)
 end
 
+"""Instance-id prefix of the CONVERGE-4 N-3 backdrop tiles. Must match
+`BACKDROP_INSTANCE_PREFIX` in `world_core/crates/native_graphics_contract/src/backdrop.rs`."""
+const BACKDROP_INSTANCE_PREFIX = "backdrop-"
+
 function _mesh_resources!(
     state::LavaBackend,
     packet::WGEGraphics.GraphicsScenePacket,
@@ -5124,6 +5128,11 @@ function _mesh_resources!(
     groups = Dict{Tuple{String,String},Vector{WGEGraphics.InstancePacket}}()
     for instance in packet.instances
         _instance_visible(frame, packet, instance) || continue
+        # The mirrored pass clips terrain at the water plane but not meshes.
+        # The N-3 backdrop is sunk under the world, so its mirror image filled
+        # the pool; a puddle's mirrored rays from the authored cameras rise
+        # 10-14 degrees, which is sky, so the backdrop is simply not reflected.
+        cache === :reflection && startswith(instance.instance_id, BACKDROP_INSTANCE_PREFIX) && continue
         key = (instance.mesh_id, instance.material_id)
         instances = get!(groups, key) do
             WGEGraphics.InstancePacket[]

@@ -337,7 +337,7 @@ impl GraphicsWorkerSupervisor {
         self.render_and_promote_campaign2(
             packet,
             world,
-            &Campaign2Inputs { candidate, content, terrain_layers: Some(terrain_layers), kit: None },
+            &Campaign2Inputs { candidate, content, terrain_layers: Some(terrain_layers), kit: None, backdrop: None },
         )
     }
 

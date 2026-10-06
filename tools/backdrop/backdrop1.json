@@ -1,0 +1,30 @@
+{
+  "schema_version": "wge.backdrop-spec/v1",
+  "set_id": "backdrop1",
+  "gaea": {
+    "graph": "tools/backdrop/backdrop1.terrain",
+    "source_example": "Structure - Side Carved Mountains (Gaea 2.3.0.1), export on node 951, Terrain Width 16000 m / Height 4000 m",
+    "resolution": 1024,
+    "seed": 1
+  },
+  "masks": [
+    "Height_Wear.png",
+    "Height_Deposits.png"
+  ],
+  "extent_m": 16000,
+  "relief_m": 4000,
+  "seat_uv": [
+    0.36,
+    0.88
+  ],
+  "yaw_deg": 75,
+  "tiles": 2,
+  "cells_per_tile": 256,
+  "texture_px": 512,
+  "edge_margin": 0.06,
+  "clear_radius_m": 700,
+  "rise_radius_m": 2500,
+  "sink_m": 40,
+  "treeline_m": 1000,
+  "snowline_m": 1800
+}

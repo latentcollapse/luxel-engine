@@ -1,0 +1,13 @@
+{
+  "schema_version": "wge.backdrop-lock/v1",
+  "set_id": "backdrop1",
+  "spec_sha256": "sha256:d7a16131d4fabb46900ecad6d77d5c9da3f8518e22bb76914c58d5643c8ac3d3",
+  "gaea_pixels": {
+    "Height_Deposits.png": "ed1618bf4695a0186c428d26b987bf7159c14435a70c000c7f696c1669b5fe1f",
+    "Height_Out.png": "daecde2416baf0eb814c00fea1b4afae14bec5489e01b4d2448ef68abbd6cbe9",
+    "Height_Wear.png": "a934b4503251d8f3240b42f56172871f845aac52af57cb7200d4c02c20dfb32f"
+  },
+  "glb": "artifacts/backdrop/backdrop1/backdrop.glb",
+  "bytes": 15502116,
+  "sha256": "sha256:59f2be76ba6614c81ff900057500d2357767f24053c4b153aa417d43a6ea6e00"
+}

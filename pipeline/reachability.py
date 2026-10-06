@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -297,6 +298,25 @@ def inconclusive(results: list[ReachabilityResult]) -> list[ReachabilityResult]:
 
 _SOURCE_SUFFIXES = (".py", ".gd", ".md", ".json", ".toml")
 
+# Generated or local-only trees (all git-ignored). Nothing in them is a wire a
+# reader could follow, and `artifacts/` alone is ~12 GB with 140+ scene packets
+# over 10 MB: scanning it once per module made the real-pipeline test run for
+# hours (found 2026-10-06).
+_SKIPPED_DIRS = frozenset({
+    "artifacts", "asset_intake_reports", "graphify-out", "kvfold", ".freebuff",
+    "target", "__pycache__", ".git", ".pytest_cache", "node_modules",
+})
+
+
+def _source_files(root: Path):
+    """Source-suffixed files under `root`, never descending into `_SKIPPED_DIRS`."""
+    for directory, subdirectories, files in os.walk(root):
+        subdirectories[:] = [name for name in subdirectories if name not in _SKIPPED_DIRS]
+        for name in files:
+            path = Path(directory) / name
+            if path.suffix in _SOURCE_SUFFIXES:
+                yield path
+
 
 @dataclass
 class ModuleReachability:
@@ -339,17 +359,11 @@ def module_reachability(
 
     texts: dict[Path, str] = {}
     for root in roots:
-        for path in root.rglob("*"):
-            if (
-                path.is_file()
-                and path.suffix in _SOURCE_SUFFIXES
-                and "/target/" not in str(path)
-                and "__pycache__" not in str(path)
-            ):
-                try:
-                    texts[path] = path.read_text(encoding="utf-8", errors="ignore")
-                except OSError:
-                    continue
+        for path in _source_files(root):
+            try:
+                texts[path] = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
 
     results: list[ModuleReachability] = []
     for module in modules:

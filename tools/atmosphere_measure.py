@@ -27,6 +27,13 @@ geometry alone, before any converge1 frame was measured.
 The same measurement on both classes means distance is the only variable.
 Ratio = median(backdrop) / median(foreground). Contract: ratio <= 0.40.
 
+CONVERGE-4 N-3: the km-scale backdrop is mesh instances (`backdrop-NN`), but
+it is landform, and its skyline is exactly the "ridge against sky" this gate is
+about. So backdrop instances are not masked: their world-space vertices are
+splatted (max height per 40 m cell) into a second height grid, and rays march
+against the higher of it and the terrain. A packet without a backdrop measures
+exactly as before.
+
 Usage: atmosphere_measure.py RUN_DIR [--view wide] [--json OUT]
 """
 import argparse
@@ -121,6 +128,83 @@ class Terrain:
         return height, inside
 
 
+BACKDROP_PREFIX = "backdrop-"
+BACKDROP_CELL_M = 40.0
+
+
+def quat_rotate(q, v):
+    x, y, z, w = q
+    u = np.array([x, y, z])
+    t = 2.0 * np.cross(u, v)
+    return v + w * t + np.cross(u, t)
+
+
+class BackdropField:
+    """World-frame max-height grid splatted from the backdrop instances' vertices."""
+
+    def __init__(self, packet):
+        meshes = {m["mesh_id"]: m for m in packet["meshes"]}
+        points = []
+        for inst in packet["instances"]:
+            if not inst["instance_id"].startswith(BACKDROP_PREFIX):
+                continue
+            pts = np.array(meshes[inst["mesh_id"]]["positions_m"], dtype=np.float64)
+            tr = inst["transform"]
+            pts = pts * np.array(tr["scale_xyz"])
+            pts = np.array([quat_rotate(tr["rotation_xyzw"], p) for p in pts]) if tr["rotation_xyzw"] != [0.0, 0.0, 0.0, 1.0] else pts
+            points.append(pts + np.array(tr["translation_xyz_m"]))
+        self.empty = not points
+        if self.empty:
+            return
+        pts = np.concatenate(points)
+        self.x0, self.z0 = pts[:, 0].min(), pts[:, 2].min()
+        nx = int((pts[:, 0].max() - self.x0) / BACKDROP_CELL_M) + 2
+        nz = int((pts[:, 2].max() - self.z0) / BACKDROP_CELL_M) + 2
+        grid = np.full((nz, nx), -np.inf)
+        ix = ((pts[:, 0] - self.x0) / BACKDROP_CELL_M).round().astype(int)
+        iz = ((pts[:, 2] - self.z0) / BACKDROP_CELL_M).round().astype(int)
+        np.maximum.at(grid, (iz, ix), pts[:, 1])
+        # Fill the few cells a rotated lattice leaves empty from their neighbours.
+        for _ in range(3):
+            empty = ~np.isfinite(grid)
+            if not empty.any():
+                break
+            padded = np.pad(grid, 1, constant_values=-np.inf)
+            neighbours = np.stack([padded[1 + dz:1 + dz + nz, 1 + dx:1 + dx + nx]
+                                   for dz in (-1, 0, 1) for dx in (-1, 0, 1)])
+            grid = np.where(empty, neighbours.max(axis=0), grid)
+        self.grid = grid
+
+    def height(self, wx, wz):
+        nz, nx = self.grid.shape
+        gx = (wx - self.x0) / BACKDROP_CELL_M
+        gz = (wz - self.z0) / BACKDROP_CELL_M
+        inside = (gx >= 0) & (gx <= nx - 1) & (gz >= 0) & (gz <= nz - 1)
+        gx = np.clip(gx, 0, nx - 1 - 1e-6)
+        gz = np.clip(gz, 0, nz - 1 - 1e-6)
+        ix, iz = np.floor(gx).astype(int), np.floor(gz).astype(int)
+        fx, fz = gx - ix, gz - iz
+        h = (self.grid[iz, ix] * (1 - fx) + self.grid[iz, ix + 1] * fx) * (1 - fz) + \
+            (self.grid[iz + 1, ix] * (1 - fx) + self.grid[iz + 1, ix + 1] * fx) * fz
+        inside &= np.isfinite(h)
+        return np.where(inside, h, -np.inf), inside
+
+
+class Ground:
+    """The terrain, raised to the backdrop wherever the backdrop is higher."""
+
+    def __init__(self, terrain, backdrop):
+        self.terrain, self.backdrop = terrain, backdrop
+
+    def height(self, wx, wz):
+        h, inside = self.terrain.height(wx, wz)
+        if self.backdrop.empty:
+            return h, inside
+        b, b_inside = self.backdrop.height(wx, wz)
+        h = np.where(inside, h, -np.inf)
+        return np.maximum(h, b), inside | b_inside
+
+
 def march(origin, rays, terrain, far_m):
     """Distance to the first terrain hit per ray, inf for sky."""
     shape = rays.shape[:2]
@@ -151,31 +235,85 @@ def march(origin, rays, terrain, far_m):
     return hit.reshape(shape)
 
 
+def _hull(points):
+    """Convex hull of 2-D points (monotone chain), counter-clockwise."""
+    # Pixel-rounded: the hull only needs pixel precision, and rounding first
+    # cuts a 10k-vertex tree to a few hundred points.
+    pts = np.unique(np.round(points), axis=0)
+    if len(pts) < 3:
+        return pts
+    pts = pts[np.lexsort((pts[:, 1], pts[:, 0]))]
+
+    def half(seq):
+        out = []
+        for p in seq:
+            while len(out) >= 2 and (
+                (out[-1][0] - out[-2][0]) * (p[1] - out[-2][1]) - (out[-1][1] - out[-2][1]) * (p[0] - out[-2][0])
+            ) <= 0:
+                out.pop()
+            out.append(p)
+        return out
+
+    lower, upper = half(pts), half(pts[::-1])
+    return np.array(lower[:-1] + upper[:-1])
+
+
 def mesh_mask(packet, camera, basis, shape, margin_px=3):
+    """Pixels covered by instance meshes, as each instance's projected convex hull.
+
+    CONVERGE-4: the projected bounding sphere this used to draw covered 77-100%
+    of the converge3/converge4 frames (a tree's sphere is mostly sky around its
+    crown), leaving no foreground edges to measure. The hull of the projected
+    vertices is still conservative (it covers every pixel the mesh can) but
+    follows the silhouette. An instance with vertices behind the camera falls
+    back to its sphere.
+    """
+    from PIL import Image, ImageDraw
+
     forward, right, up, tan_x, tan_y = basis
     h, w = shape
     origin = np.array(camera["position_xyz_m"], dtype=np.float64)
-    radii = {}
-    for mesh in packet["meshes"]:
-        pts = np.array(mesh["positions_m"], dtype=np.float64)
-        radii[mesh["mesh_id"]] = float(np.max(np.linalg.norm(pts, axis=1))) if len(pts) else 0.0
-    mask = np.zeros(shape, dtype=bool)
-    yy, xx = np.mgrid[0:h, 0:w]
+    meshes = {m["mesh_id"]: np.array(m["positions_m"], dtype=np.float64) for m in packet["meshes"]}
+    canvas = Image.new("L", (w, h), 0)
+    draw = ImageDraw.Draw(canvas)
     for inst in packet["instances"]:
-        tr = inst["transform"]
-        radius = radii.get(inst["mesh_id"], 0.0) * max(abs(s) for s in tr["scale_xyz"])
-        rel = np.array(tr["translation_xyz_m"], dtype=np.float64) - origin
-        depth = rel @ forward
-        if depth + radius <= 0.1:
+        if inst["instance_id"].startswith(BACKDROP_PREFIX):
+            continue  # landform: measured as depth (BackdropField), not masked
+        pts = meshes.get(inst["mesh_id"])
+        if pts is None or not len(pts):
             continue
-        depth = max(depth, 0.1)
-        sx = (rel @ right) / (depth * tan_x)
-        sy = (rel @ up) / (depth * tan_y)
-        cx = (sx + 1.0) * 0.5 * w
-        cy = (1.0 - sy) * 0.5 * h
-        pr = radius / (depth * tan_y) * 0.5 * h + margin_px
-        mask |= (xx - cx) ** 2 + (yy - cy) ** 2 <= pr * pr
-    return mask
+        tr = inst["transform"]
+        world = pts * np.array(tr["scale_xyz"])
+        q = tr["rotation_xyzw"]
+        if q != [0.0, 0.0, 0.0, 1.0]:
+            u = np.array(q[:3])
+            t = 2.0 * np.cross(u, world)
+            world = world + q[3] * t + np.cross(u, t)
+        rel = world + np.array(tr["translation_xyz_m"]) - origin
+        depth = rel @ forward
+        if depth.max() <= 0.1:
+            continue
+        if depth.min() <= 0.1:
+            # Straddles the camera plane: project its bounding sphere instead.
+            centre = rel.mean(axis=0)
+            radius = float(np.max(np.linalg.norm(rel - centre, axis=1)))
+            d = max(centre @ forward, 0.1)
+            cx = ((centre @ right) / (d * tan_x) + 1.0) * 0.5 * w
+            cy = (1.0 - (centre @ up) / (d * tan_y)) * 0.5 * h
+            pr = radius / (d * tan_y) * 0.5 * h + margin_px
+            draw.ellipse([cx - pr, cy - pr, cx + pr, cy + pr], fill=255)
+            continue
+        sx = ((rel @ right) / (depth * tan_x) + 1.0) * 0.5 * w
+        sy = (1.0 - (rel @ up) / (depth * tan_y)) * 0.5 * h
+        if sx.max() < -margin_px or sx.min() > w + margin_px or sy.max() < -margin_px or sy.min() > h + margin_px:
+            continue
+        hull = _hull(np.stack([sx, sy], axis=1))
+        polygon = [tuple(p) for p in hull]
+        if len(polygon) >= 3:
+            draw.polygon(polygon, fill=255, outline=255, width=2 * margin_px)
+        else:
+            draw.line(polygon, fill=255, width=2 * margin_px)
+    return np.asarray(canvas) > 0
 
 
 def edges(depth, lum, mask):
@@ -215,8 +353,8 @@ def measure(run_dir, view):
     if rgb.shape[:2] != (camera["height_px"], camera["width_px"]):
         raise SystemExit(f"capture {rgb.shape[:2]} does not match camera")
     rays, basis = camera_rays(camera)
-    depth = march(np.array(camera["position_xyz_m"], dtype=np.float64), rays, Terrain(packet["terrain"]),
-                  camera["far_plane_m"])
+    depth = march(np.array(camera["position_xyz_m"], dtype=np.float64), rays,
+                  Ground(Terrain(packet["terrain"]), BackdropField(packet)), camera["far_plane_m"])
     mask = mesh_mask(packet, camera, basis, depth.shape)
     found = edges(depth, linear_luminance(rgb), mask)
     backdrop = [c for near, far, c in found if near >= FAR_MIN_M and math.isinf(far)]

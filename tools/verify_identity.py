@@ -9,7 +9,8 @@ render is a failure; there is no tolerance.
 
 References (see the memory note on reference renders):
   parity  ab-null-tfix, ab-full-tfix, ab-converge0-tfix, ab-converge1-tfix (12)
-          ab-converge2-n5 (3, needs the built kit)
+          ab-converge2-n5 (3, needs the built kit1)
+          ab-converge3-final (3, needs the built kit2)
   calib   run3 (88), run3-grazing (16), n6-foliage (9)
 
 Usage:
@@ -35,6 +36,7 @@ PARITY = [
     ("artifacts/parity/ab-converge0-tfix", "converge0"),
     ("artifacts/parity/ab-converge1-tfix", "converge1"),
     ("artifacts/parity/ab-converge2-n5", "converge2"),
+    ("artifacts/parity/ab-converge3-final", "converge3"),
 ]
 CALIBRATION = [
     # (reference dir, glb, rigs, views)
@@ -44,7 +46,7 @@ CALIBRATION = [
 ]
 # Variables that select arms or content; authorization reads them from the
 # environment, so they are cleared before every render and set explicitly.
-SELECTORS = ("WGE_PARITY_RENDER_POLICY", "WGE_TERRAIN_LAYER_SET", "WGE_PARITY_CONTENT", "WGE_KIT_SET")
+SELECTORS = ("WGE_PARITY_RENDER_POLICY", "WGE_TERRAIN_LAYER_SET", "WGE_PARITY_CONTENT", "WGE_KIT_SET", "WGE_BACKDROP_SET")
 
 
 def clean_env(**extra):
@@ -99,10 +101,12 @@ def main():
             name = os.path.basename(reference)
             out = os.path.join(args.out, name)
             extra = {"WGE_PARITY_RENDER_POLICY": policy} if policy else {}
-            if policy in ("converge0", "converge1", "converge2"):
+            if policy in ("converge0", "converge1", "converge2", "converge3"):
                 extra["WGE_TERRAIN_LAYER_SET"] = "tools/terrain_layers/converge0.json"
             if policy == "converge2":
                 extra["WGE_KIT_SET"] = "tools/kit/kit1.lock.json"
+            if policy == "converge3":
+                extra["WGE_KIT_SET"] = "tools/kit/kit2.lock.json"
             command = [args.bin, "render-campaign2-layout", LAYOUT, JULIA, "terrain_lab", "graphics_lab", WORKER, out]
             code = run(command, clean_env(**extra), os.path.join(REPO, out + ".log"))
             reference_digests = parity_digests(os.path.join(REPO, reference))
