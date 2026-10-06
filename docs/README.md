@@ -1,6 +1,6 @@
-# WGE docs
+# Luxel Engine docs
 
-Start with [roadmap.md](roadmap.md). Docs are filed by roadmap layer; closed
+Start with [roadmap.md](roadmap.md). The engine's name and the internal `wge` prefix: [adr/0001-luxel-engine-name.md](adr/0001-luxel-engine-name.md). Docs are filed by roadmap layer; closed
 handoffs and reports live in `archive/`, bundled by month and topic, each with
 a `SUMMARY.md`.
 
@@ -13,7 +13,8 @@ a `SUMMARY.md`.
 | [gameplay/](gameplay/) | gameplay kit, capability resolution, live loop and runtime | `world_core/crates/{gameplay_contract, reference_runtime}`, `pipeline/` navigation, collision and acceptance modules |
 | [content-sdk/](content-sdk/) | semantic facade, construction plans, semantic kernel | `world_core/crates/{semantic_kernel, wge_control_plane}`, `pipeline/wge_*.py`, `pipeline/worldbuilder_dsl.py`; language spec in `DSL docs/` (hash-frozen, stays put) |
 | [add-ons/](add-ons/) | Grindstone, Reforge | (none yet) |
-| [integrations/](integrations/) | tools WGE drives from outside | Gaea: `pipeline/gaea_*.py`, `Code Projects/Gaea/`; Blender: `pipeline/blender_*.py`, `tools/blender_*.py`; ComfyUI: `pipeline/comfy_generate_texture.py`; engines: `engine_adapters/`, `pipeline/zone_to_{unity,unreal}.py`, `pipeline/*.gd` |
+| [integrations/](integrations/) | tools Luxel drives from outside | Gaea: `pipeline/gaea_*.py`, `Code Projects/Gaea/`; Blender: `pipeline/blender_*.py`, `tools/blender_*.py`; ComfyUI: `pipeline/comfy_generate_texture.py`; engines: `engine_adapters/`, `pipeline/zone_to_{unity,unreal}.py`, `pipeline/*.gd` |
+| [adr/](adr/) | decision records | |
 | [archive/](archive/) | superseded and closed docs | |
 
 Code still lives where it was. It moves into per-layer homes when that layer

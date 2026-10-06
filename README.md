@@ -1,4 +1,4 @@
-# WGE — WorldGen Engine
+# Luxel Engine
 
 **Concept art in. A playable, faithful 3D map out.**
 
@@ -8,7 +8,7 @@
 > campaign order. Older migration/status sections below are retained as historical context and are
 > not current instructions.
 
-WGE is a game engine. You give it concept art and annotations describing a place; it produces a
+Luxel is a game engine. You give it concept art and annotations describing a place; it produces a
 certified, deterministic world — terrain, hydrology, traversal, roads, settlements, materials,
 placements — and renders and runs that world through its native runtime.
 
@@ -18,11 +18,11 @@ Conventional editor-first engines are **human-native**. Their primary interface 
 a person with a mouse, their primary verification is a human looking at the viewport, and their
 authoring surface assumes an operator who can see.
 
-**WGE is the same category of thing built for a different operator.** Its interface is a typed
+**Luxel is the same category of thing built for a different operator.** Its interface is a typed
 authoring language, its verification is a gate that measures the world, and its intended author is a
 model. Every design difference follows from that one substitution:
 
-| | Human-native engine | WGE |
+| | Human-native engine | Luxel |
 |---|---|---|
 | Authoring surface | GUI, inspector, viewport | Typed language, parsed never executed |
 | Verification | A person looks at it | Gates measure it and can fail the build |
@@ -32,15 +32,15 @@ model. Every design difference follows from that one substitution:
 
 What makes something an engine is that it owns the authoritative representation of the world and
 the rules for constructing it — terrain, hydrology, traversal, collision, navigation, placement,
-materials, provenance. WGE owns all of that, including its native graphics path.
+materials, provenance. Luxel owns all of that, including its native graphics path.
 
 External delivery adapters may remain as compatibility material, but they are not part of the
-current WGE authority or certification path. If a change to WGE requires an external editor/runtime,
+current Luxel authority or certification path. If a change to Luxel requires an external editor/runtime,
 that change is in the wrong layer.
 
 **Inspection instruments are not semantic authority.** The existing Bevy viewer and other bounded
-reference tools may help WGE inspect its own output, but they are not interchangeable runtime
-backends and no external engine is required to ship a WGE game. Audit captures must remain bound to
+reference tools may help Luxel inspect its own output, but they are not interchangeable runtime
+backends and no external engine is required to ship a Luxel game. Audit captures must remain bound to
 the exact packet, renderer path, camera, and authority receipt that produced them.
 
 The distinction matters because the valuable artifact is the *world*, not the render of it. The
@@ -53,7 +53,7 @@ Take a piece of concept art — a painted overview, a sketched battle map — an
 that exact place in 3D. Not "something in the same genre." *That* place: its ridgelines, its water,
 its sightlines, its chokepoints, its keeps where the painting put them.
 
-Two things make that hard, and WGE is organised around both:
+Two things make that hard, and Luxel is organised around both:
 
 1. **Faithfulness is measurable, not vibes.** Every stage emits evidence and every claim is gated.
    A world that says it has three roads must have three roads that a player can actually walk.
@@ -62,7 +62,7 @@ Two things make that hard, and WGE is organised around both:
 
 ## Model capability is an efficiency axis
 
-The success criterion for WGE is **not** a parameter-count threshold. WGE minimizes the model
+The success criterion for Luxel is **not** a parameter-count threshold. Luxel minimizes the model
 capability required for professional game-development work without sacrificing output quality.
 Small-model runs remain valuable stress tests for authoring ergonomics, recovery, and tool cost;
 they are an efficiency axis, not the definition of product success.
@@ -82,7 +82,7 @@ complete vocabulary in the prompt but no starting file, a small model invented a
 exist, every single time. **Recognition beats recall.** Documentation does not prevent hallucination;
 a valid artifact to edit does.
 
-So the design rule throughout: a change that makes WGE more expressive but materially harder to
+So the design rule throughout: a change that makes Luxel more expressive but materially harder to
 drive, verify, or repair is a **regression**, not a feature. Model capability and cost are measured
 alongside final mechanical and visual quality.
 
@@ -230,7 +230,7 @@ godot_adapter`.
 
 ## Historical layout snapshot (not current instructions)
 
-The engine and the game are separate git repositories as of 2026-08-02. WGE lives at the **workspace
+The engine and the game are separate git repositories as of 2026-08-02. Luxel lives at the **workspace
 root** (`Code Projects/WGE/`), not under `Game Projects/`. It is an engine that games consume, not a
 game.
 
@@ -328,12 +328,12 @@ convergence path uses the same typed intake/world artifacts through
 `wge-control-plane` and deliberately leaves production rigging, skinning,
 retargeting, and arbitrary mesh-to-character generation deferred. The
 supplied bad GLB remains a permanent negative control. This checkpoint is
-judged by WGE's own semantic, mechanical, traversal, visual, repair,
+judged by Luxel's own semantic, mechanical, traversal, visual, repair,
 determinism, provenance, and archive-revalidation gates.
 
 ## As substrate for a world model (Project Aisling)
 
-> Design intent, not measured. Aisling is not trained yet. Recorded here because it shapes what WGE
+> Design intent, not measured. Aisling is not trained yet. Recorded here because it shapes what Luxel
 > should expose.
 
 The reason a world compiler matters to a generative world model is that **it moves everything
@@ -342,7 +342,7 @@ solvable out of the weights.**
 A model asked to emit a world directly must learn geometry, drainage, collision, navigability, and
 material coherence — all of which are *already solved problems* with exact algorithms. It will learn
 them approximately, at enormous parameter cost, and still produce rivers that flow uphill. Against
-WGE, the model emits ~50 lines of intent and the compiler does the rest exactly. The model's job
+Luxel, the model emits ~50 lines of intent and the compiler does the rest exactly. The model's job
 shrinks from "represent a world" to "have taste about a world."
 
 Four concrete uses:
@@ -350,13 +350,13 @@ Four concrete uses:
 1. **The output space collapses.** ~50 lines of DSL instead of a 66,049-vertex mesh. This is what
    makes a model viable as a world author: it emits a compact, typed intent surface instead of
    having to serialize a coherent mesh directly. Same thesis as the skill floor, one level up.
-2. **A programmatic verifier.** WGE's gates are exact, not learned — traversal certification,
+2. **A programmatic verifier.** Luxel's gates are exact, not learned — traversal certification,
    hydrology reversal rejection, provenance binding, style scoring. That makes them usable as an RL
    reward signal that **cannot be hacked the way a neural critic can**, because there is no critic
    to fool. The world either has three walkable roads or it does not.
 3. **A labelled data factory.** Every compiled world carries ground truth: heightfields, semantic
    annotations, traversal graphs, hydrology, and four canonical views from known camera poses.
-   3D-consistent labelled data is exactly what generative world models are starved of, and WGE emits
+   3D-consistent labelled data is exactly what generative world models are starved of, and Luxel emits
    it as a byproduct of doing its normal job.
 4. **Faithfulness stays checkable.** "Does this match the concept art" remains a measured quantity
    rather than a human judgement call, which is what makes iteration tractable.
@@ -367,9 +367,9 @@ vocabulary without raising the skill floor is the standing tension.
 
 ## Relationship to Codeweald
 
-Codeweald is the first consumer, not the owner. It is a fantasy RPG/arena target that exercises WGE
+Codeweald is the first consumer, not the owner. It is a fantasy RPG/arena target that exercises Luxel
 against a real art brief, and the two ping-pong: engine capability unlocks map fidelity, and map
 defects drive engine work.
 
-Codeweald's game DSL and WGE's world DSL are intended to converge on the same shape — one authoring
+Codeweald's game DSL and Luxel's world DSL are intended to converge on the same shape — one authoring
 kernel, two vocabularies — so that a model fluent in one is already fluent in the other.

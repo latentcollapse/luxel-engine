@@ -1,4 +1,4 @@
-# WGE Roadmap
+# Luxel Engine Roadmap
 
 2026-10-06 · Matt · the layered maturation path. Each layer stands on the one above it.
 
@@ -9,11 +9,11 @@ DEFORMATION    conventional LBS first; TetCage where measured advantageous
 GAMEPLAY       attributes → abilities → effects → tags → cooldowns → targeting
                → damage → resources → status → progression
 CONTENT SDK    semantic authoring contracts
-ADD-ONS        specialised creative surfaces over WGE truth (Missions, Armory, Studio, ...)
+ADD-ONS        specialised creative surfaces over Luxel truth (Missions, Armory, Studio, ...)
 ```
 
 Under every layer sits the **platform**: Rust authority, the native graphics
-contract, Julia/Lava on the GPU, receipts and identity. Tools WGE drives from
+contract, Julia/Lava on the GPU, receipts and identity. Tools Luxel drives from
 outside (Gaea, Blender, ComfyUI, the Unity/Unreal/Godot adapters) are
 **integrations**, not layers.
 
@@ -22,13 +22,13 @@ Principles carried through every layer:
 - Prove one layer before leaning on the next. The world must be somewhere
   worth being before characters are worth building; characters must work
   conventionally before TetCage is asked to improve them.
-- Add-ons are views and authoring surfaces over WGE truth; they never own it.
+- Add-ons are views and authoring surfaces over Luxel truth; they never own it.
 - Every new axis is absent by default and byte-identical when absent
   (`tools/verify_identity.py`).
 
 ## World — ACTIVE
 
-Goal: WGE can depict a world worth building things inside. The bar is
+Goal: Luxel can depict a world worth building things inside. The bar is
 Witcher-3-class completeness, and the stress test after CONVERGE-4 is a giant
 redwood/sequoia forest settlement (the "Sidhe" references: Knothole Glade,
 Grizzly Hills, the Pacific Northwest).
