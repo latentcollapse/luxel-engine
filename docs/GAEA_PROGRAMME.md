@@ -118,6 +118,11 @@ cost an hour each:
 - **A graph only builds headlessly if a node carries a `SaveDefinition`.** Only
   3 of the 59 bundled examples do. The rest exit 0 having written nothing, which
   looks exactly like a failure and is not.
+- **...and only if its `BuildDefinition` has a `Type`** (found 2026-10-05).
+  29 of the 59 examples have none; Swarm exits 0 in ~4 s and writes nothing,
+  the same signature. `gaea_terrain.add_save_definition` now fills in
+  `"Type": "Standard"`, and `gaea_build.preflight` refuses either gap before
+  launching Swarm.
 - **Two more invocation traps, found during the audit (§3.3): pass the graph as
   a full `Z:` path, and give it a name with no spaces.** A bare relative filename
   exits **0 in six seconds** having written nothing; a name containing spaces
@@ -929,8 +934,17 @@ anything Gaea-shaped.
 4. **Author a WGE graph** in the Gaea GUI: basin macro-shape, symmetric
    composite before erosion, exposed variables, marked height export.
    Interactive; Matt's job.
+   - **Steps 3 and 3a DONE 2026-10-05.** Builds run repeatedly from an agent
+     session (`script` pty, stdout to `/dev/null`, success judged by files):
+     `Snowy Ridge` five times at 21–25 s, `Detailed Snow Peak` at 30.5 s. The
+     digest answer: PNG *files* never match (Gaea stamps creation times), a
+     bare `Mountain` is pixel-identical, `Erosion2` is not (max 113/65535,
+     `--safemode` no help). **Eroded heightfields are source artifacts.** See
+     `docs/design/2026-10-05_landscape-parity-plan.md` P3.
 5. **The driver** — `--vars` / `--seed` / `--resolution`, digest pinning of
-   graph, vars, seed and Gaea version.
+   graph, vars, seed and Gaea version. **DONE 2026-10-05:**
+   `pipeline/gaea_build.py`, plus the `wgeGaea` MCP server
+   (`pipeline/gaea_mcp_server.py`). Pins pixel digests, not file digests.
 6. **Symmetry measurement, then enforcement if needed** (§5.1).
 7. **Lane routing against real terrain** (§5.2), with the edit budget (§5.6) in
    place *before* the first edit, not after the first failure.

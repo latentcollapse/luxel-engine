@@ -35,6 +35,55 @@ from typing import Any, Iterator
 HEIGHT_FORMAT = "PNG16"
 
 
+def _strip_trailing_commas(text: str) -> str:
+    """Drop commas that directly precede `}` or `]`, outside string literals.
+
+    Gaea writes through Newtonsoft, which accepts trailing commas; Python's
+    `json` does not. One of the 59 bundled examples (`Glacier - Complex Setup`)
+    has one, so a strict loader cannot open every graph Gaea can.
+    """
+    out: list[str] = []
+    in_string = False
+    escaped = False
+    pending_comma: list[str] = []  # a comma plus any whitespace after it
+    for char in text:
+        if in_string:
+            out.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if pending_comma:
+            if char.isspace():
+                pending_comma.append(char)
+                continue
+            if char in "}]":
+                out.extend(pending_comma[1:])  # keep the whitespace, drop the comma
+            else:
+                out.extend(pending_comma)
+            pending_comma = []
+        if char == ",":
+            pending_comma = [char]
+            continue
+        if char == '"':
+            in_string = True
+        out.append(char)
+    out.extend(pending_comma)
+    return "".join(out)
+
+
+def load_graph(path: Path) -> dict:
+    """Read a `.terrain` graph, accepting the non-strict JSON Gaea itself accepts."""
+    text = Path(path).read_text(encoding="utf-8-sig")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return json.loads(_strip_trailing_commas(text))
+
+
 def walk(node: Any) -> Iterator[dict]:
     """Every dict in the object graph, depth first."""
     if isinstance(node, dict):
@@ -82,10 +131,48 @@ def next_reference_id(graph: dict) -> int:
     return highest + 1
 
 
+def build_definitions(graph: dict) -> list[dict]:
+    """Every `BuildDefinition` block in the graph (one per asset in practice)."""
+    return [
+        candidate["BuildDefinition"]
+        for candidate in walk(graph)
+        if isinstance(candidate.get("BuildDefinition"), dict)
+    ]
+
+
+def ensure_build_type(graph: dict) -> int:
+    """Give every `BuildDefinition` a `Type`, defaulting to `Standard`.
+
+    Measured 2026-10-05: Swarm exits 0 in about 4 s and writes nothing for a
+    graph whose `BuildDefinition` has no `Type`, exactly as it does for a graph
+    with no `SaveDefinition`. 29 of the 59 bundled examples have no `Type`
+    (the GUI supplies it when a user opens the build dialog). Adding
+    `"Type": "Standard"` to `Structure - Custom Mountain Range` made it build.
+    Returns how many definitions were filled in.
+    """
+    filled = 0
+    for definition in build_definitions(graph):
+        if "Type" not in definition:
+            # Keep `$id` first, as Newtonsoft writes it; it is a reference
+            # anchor and its position is cosmetic, but a diff stays readable.
+            items = list(definition.items())
+            definition.clear()
+            definition.update(items[:1])
+            definition["Type"] = "Standard"
+            definition.update(items[1:])
+            filled += 1
+    return filled
+
+
 def add_save_definition(
     graph: dict, node_id: int, filename: str, fmt: str = HEIGHT_FORMAT
 ) -> dict:
-    """Mark `node_id` for export. Replaces any existing definition on it."""
+    """Mark `node_id` for export. Replaces any existing definition on it.
+
+    Also fills in a missing build `Type` (`ensure_build_type`), because a graph
+    marked for export without one still builds nothing.
+    """
+    ensure_build_type(graph)
     for candidate in nodes(graph):
         if candidate.get("Id") != node_id:
             continue
@@ -375,7 +462,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, help="where to write the edited graph")
     arguments = parser.parse_args()
 
-    graph = json.loads(arguments.terrain.read_text(encoding="utf-8"))
+    graph = load_graph(arguments.terrain)
 
     if arguments.insert_basin is not None:
         combine = insert_basin(graph, arguments.insert_basin, arguments.basin_ratio)
