@@ -2,6 +2,8 @@
 
 **Concept art in. A playable, faithful 3D map out.**
 
+License: [Apache License 2.0](LICENSE).
+
 > **Fresh-agent orientation:** read [docs/platform/active-architecture.md](docs/platform/active-architecture.md) and
 > [docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md](docs/archive/2026-09_roadmaps-and-audits/demo-ready-mega-sprint.md) first.
 > They define the current native Rust/Julia/Lava path, authority boundaries, provider fence, and
